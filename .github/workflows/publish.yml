@@ -1,0 +1,48 @@
+name: Publish Pi extension
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Package directory/name, or all"
+        required: true
+        default: all
+        type: string
+
+concurrency:
+  group: publish-pi-extensions
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      CI: "1"
+      PI_PLUGIN_HOST_E2E_REQUIRE_PTY: "1"
+      PI_PLUGIN_HOST_E2E_REQUIRE_LIBFAKETIME: "1"
+    steps:
+      - name: Require main
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Packages may only be published from main (got $GITHUB_REF)." >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@v2
+      - name: Install native test capabilities
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git util-linux libfaketime
+      - run: npm ci
+      - run: npm run check
+      - name: Publish unpublished versions with OIDC provenance
+        run: npm run publish:package -- "${{ inputs.package }}"

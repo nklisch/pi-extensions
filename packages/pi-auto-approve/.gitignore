@@ -1,0 +1,10 @@
+node_modules/
+dist/
+# /native/ — linux prebuild committed for git installs until the release pipeline ships platform packages
+coverage/
+.rumdl_cache/
+.pi/
+.peeragent/
+*.log
+.DS_Store
+test/node_modules

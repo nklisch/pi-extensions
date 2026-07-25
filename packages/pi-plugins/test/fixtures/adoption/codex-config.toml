@@ -1,0 +1,17 @@
+model = "gpt-5"
+[projects."/work/project"]
+trust_level = "trusted"
+[marketplaces."github-main"]
+source_type = "git"
+source = "https://example.com/catalog.git"
+ref = "v1"
+last_updated = 2026-07-16T00:00:00Z
+last_revision = "deadbeef"
+[marketplaces."local-catalog"]
+source_type = "local"
+source = "/home/user/catalog"
+sparse_paths = []
+[marketplaces."sparse-catalog"]
+source_type = "git"
+source = "https://example.com/sparse.git"
+sparse_paths = ["plugins/demo"]

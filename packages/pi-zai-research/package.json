@@ -1,0 +1,52 @@
+{
+  "name": "@nklisch/pi-zai-research",
+  "version": "0.4.0",
+  "description": "Z.ai-powered web search, URL reading, and GitHub repo deep-read for Pi — wraps Z.ai's web-search-prime, web-reader, and zread MCP servers.",
+  "author": {
+    "name": "nklisch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nklisch/pi-extensions.git",
+    "directory": "packages/pi-zai-research"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "agent-skills",
+    "zai",
+    "z.ai",
+    "glm",
+    "mcp",
+    "web-search",
+    "research"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@mozilla/readability": "^0.6.0",
+    "linkedom": "^0.18.12",
+    "turndown": "^7.2.4",
+    "unpdf": "^1.6.2"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "private": false,
+  "bugs": {
+    "url": "https://github.com/nklisch/pi-extensions/issues"
+  },
+  "homepage": "https://github.com/nklisch/pi-extensions/tree/main/packages/pi-zai-research#readme",
+  "scripts": {
+    "test": "bun test extensions/*.test.ts"
+  }
+}

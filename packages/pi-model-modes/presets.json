@@ -1,0 +1,93 @@
+{
+  "create": {
+    "base": "pi",
+    "agency": "autonomous",
+    "quality": "architect",
+    "scope": "unrestricted",
+    "modifiers": []
+  },
+  "extend": {
+    "base": "pi",
+    "agency": "autonomous",
+    "quality": "pragmatic",
+    "scope": "adjacent",
+    "modifiers": []
+  },
+  "safe": {
+    "base": "pi",
+    "agency": "collaborative",
+    "quality": "minimal",
+    "scope": "narrow",
+    "modifiers": []
+  },
+  "refactor": {
+    "base": "pi",
+    "agency": "autonomous",
+    "quality": "pragmatic",
+    "scope": "unrestricted",
+    "modifiers": []
+  },
+  "explore": {
+    "base": "pi",
+    "agency": "collaborative",
+    "quality": "architect",
+    "scope": "narrow",
+    "modifiers": ["readonly"]
+  },
+  "debug": {
+    "base": "chill",
+    "agency": "collaborative",
+    "quality": "pragmatic",
+    "scope": "narrow",
+    "modifiers": ["debug"]
+  },
+  "methodical": {
+    "base": "chill",
+    "agency": "surgical",
+    "quality": "architect",
+    "scope": "narrow",
+    "modifiers": ["methodical"]
+  },
+  "director": {
+    "base": "chill",
+    "agency": "collaborative",
+    "quality": "architect",
+    "scope": "unrestricted",
+    "modifiers": ["director"]
+  },
+  "partner": {
+    "base": "chill",
+    "agency": "partner",
+    "quality": "pragmatic",
+    "scope": "adjacent",
+    "modifiers": ["speak-plain", "tdd"]
+  },
+  "muse": {
+    "base": "chill",
+    "agency": "autonomous",
+    "quality": "architect",
+    "scope": "unrestricted",
+    "modifiers": ["muse"]
+  },
+  "flow": {
+    "base": "flow",
+    "agency": "autonomous",
+    "quality": "architect",
+    "scope": "adjacent",
+    "modifiers": ["flow"]
+  },
+  "tinker": {
+    "base": "flow",
+    "agency": "autonomous",
+    "quality": "pragmatic",
+    "scope": "unrestricted",
+    "modifiers": ["flow", "playful"]
+  },
+  "spark": {
+    "base": "chill",
+    "agency": "autonomous",
+    "quality": "architect",
+    "scope": "unrestricted",
+    "modifiers": ["muse", "playful"]
+  }
+}

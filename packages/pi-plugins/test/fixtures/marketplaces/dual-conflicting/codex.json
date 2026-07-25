@@ -1,0 +1,16 @@
+{
+  "name": "shared-catalog",
+  "plugins": [
+    {
+      "name": "shared",
+      "source": "./plugins/two",
+      "version": "1",
+      "policy": { "installation": "AVAILABLE" }
+    },
+    {
+      "name": "codex-only",
+      "source": "./plugins/codex-only",
+      "policy": { "installation": "AVAILABLE" }
+    }
+  ]
+}

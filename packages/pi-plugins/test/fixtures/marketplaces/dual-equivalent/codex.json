@@ -1,0 +1,19 @@
+{
+  "name": "shared-catalog",
+  "interface": { "displayName": "Codex" },
+  "plugins": [
+    {
+      "name": "shared",
+      "source": { "source": "local", "path": "./plugins/shared" },
+      "version": "1.2.3",
+      "description": "Shared plugin",
+      "policy": { "installation": "AVAILABLE" },
+      "dependencies": ["runtime-helper"]
+    },
+    {
+      "name": "codex-only",
+      "source": "./plugins/codex-only",
+      "policy": { "installation": "NOT_AVAILABLE" }
+    }
+  ]
+}

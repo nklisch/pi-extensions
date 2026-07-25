@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "startup",
+      "hooks": [{ "type": "exec", "command": "echo", "args": ["ready"], "timeoutMs": 1000 }]
+    }]
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "name": "@nklisch/pi-subagents",
+  "version": "18.0.4-nklisch.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/public.d.ts",
+      "default": "./src/service/service.ts"
+    },
+    "./settings": {
+      "types": "./dist/settings.d.ts",
+      "default": "./src/layered-settings.ts"
+    }
+  },
+  "files": [
+    "src",
+    "dist",
+    "docs/*.md",
+    "docs/architecture",
+    "docs/decisions",
+    "CHANGELOG.md"
+  ],
+  "imports": {
+    "#src/*": "./src/*",
+    "#test/*": "./test/*"
+  },
+  "description": "A maintained MIT fork of pi-subagents with ordered lifecycle interception for Pi extensions.",
+  "author": {
+    "name": "Chris Lasher"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nklisch/pi-extensions.git",
+    "directory": "packages/pi-subagents"
+  },
+  "homepage": "https://github.com/nklisch/pi-extensions/tree/main/packages/pi-subagents#readme",
+  "bugs": {
+    "url": "https://github.com/nklisch/pi-extensions/issues"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "subagent",
+    "agent",
+    "autonomous"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.75.0",
+    "@earendil-works/pi-coding-agent": ">=0.75.0",
+    "@earendil-works/pi-tui": ">=0.75.0"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.49"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "rollup -c rollup.dts.config.mjs",
+    "verify:public-types": "bash scripts/verify-public-types.sh",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.80.8",
+    "@earendil-works/pi-coding-agent": "0.80.8",
+    "@earendil-works/pi-tui": "0.80.8",
+    "@types/node": "^24.0.0",
+    "rollup": "^4.0.0",
+    "rollup-plugin-dts": "^6.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.0.0"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ],
+    "video": "https://github.com/gotgenes/pi-subagents/raw/main/media/demo.mp4",
+    "image": "https://github.com/gotgenes/pi-subagents/raw/main/media/screenshot.png"
+  },
+  "private": false
+}

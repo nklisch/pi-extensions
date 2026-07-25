@@ -1,0 +1,14 @@
+{
+  "name": "secret-required",
+  "description": "Secret custody unavailable fixture",
+  "version": "1.0.0",
+  "skills": ["./skills/secret-required"],
+  "userConfig": {
+    "TOKEN": {
+      "type": "string",
+      "title": "Secret token",
+      "required": true,
+      "sensitive": true
+    }
+  }
+}

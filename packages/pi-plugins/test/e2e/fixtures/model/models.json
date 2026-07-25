@@ -1,0 +1,32 @@
+{
+  "providers": {
+    "production-e2e": {
+      "baseUrl": "http://127.0.0.1:46181/v1",
+      "api": "openai-completions",
+      "apiKey": "production-e2e",
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsUsageInStreaming": false,
+        "supportsStrictMode": false
+      },
+      "models": [
+        {
+          "id": "production-model",
+          "name": "Production E2E deterministic model",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 32000,
+          "maxTokens": 4096,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    }
+  }
+}

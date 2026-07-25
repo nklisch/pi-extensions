@@ -1,0 +1,59 @@
+{
+  "name": "@nklisch/pi-model-modes",
+  "version": "0.3.1",
+  "description": "A pi extension that adapts the system prompt per model/mode.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  },
+  "files": [
+    "extensions/",
+    "src/",
+    "prompts/",
+    "presets.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "vitest --run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.80.8",
+    "@earendil-works/pi-tui": "0.80.8",
+    "@types/node": "^22.19.0",
+    "typescript": "^6.0.0",
+    "vitest": "^4.0.0"
+  },
+  "private": false,
+  "author": {
+    "name": "Nathan Klisch"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nklisch/pi-extensions.git",
+    "directory": "packages/pi-model-modes"
+  },
+  "bugs": {
+    "url": "https://github.com/nklisch/pi-extensions/issues"
+  },
+  "homepage": "https://github.com/nklisch/pi-extensions/tree/main/packages/pi-model-modes#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

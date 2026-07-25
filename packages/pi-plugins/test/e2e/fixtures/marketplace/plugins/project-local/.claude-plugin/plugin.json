@@ -1,0 +1,6 @@
+{
+  "name": "project-local",
+  "description": "Project scope E2E fixture",
+  "version": "1.0.0",
+  "skills": ["./skills/project-local"]
+}

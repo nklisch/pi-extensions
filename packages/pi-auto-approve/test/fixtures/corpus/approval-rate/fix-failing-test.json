@@ -1,0 +1,60 @@
+[
+  {
+    "command": "pnpm test -- --runInBand",
+    "expected": "fast_path",
+    "reason": "re-run the focused project tests"
+  },
+  {
+    "command": "pnpm exec vitest run test/parse.test.ts",
+    "expected": "fast_path",
+    "reason": "run a focused Vitest verification command"
+  },
+  {
+    "command": "npm run test",
+    "expected": "fast_path",
+    "reason": "use the repository's portable test script"
+  },
+  {
+    "command": "cargo test",
+    "expected": "fast_path",
+    "reason": "run Rust project tests when debugging a native failure"
+  },
+  {
+    "command": "python -m pytest",
+    "expected": "fast_path",
+    "reason": "run Python module tests in a polyglot project"
+  },
+  {
+    "command": "git diff --check && pnpm test",
+    "expected": "fast_path",
+    "reason": "combine a diff check with the focused test run"
+  },
+  {
+    "tool": "grep",
+    "command": "{\"path\":\"src\",\"pattern\":\"failingTest\"}",
+    "expected": "fast_path",
+    "reason": "typed Pi search stays inside the project"
+  },
+  {
+    "tool": "jobs",
+    "command": "{\"action\":\"list\"}",
+    "expected": "fast_path",
+    "reason": "typed job status inspection is bounded"
+  },
+  {
+    "command": "npm audit",
+    "expected": "review",
+    "reason": "package audit behavior is not part of the verification allowlist"
+  },
+  {
+    "command": "echo $GH_TOKEN",
+    "expected": "review",
+    "reason": "token environment expansion must never be auto-approved"
+  },
+  {
+    "tool": "ls",
+    "command": "{\"path\":\"~/.pi/agent/cache/context.json\"}",
+    "expected": "fast_path",
+    "reason": "Pi cache context is readable unless classified as credential material"
+  }
+]

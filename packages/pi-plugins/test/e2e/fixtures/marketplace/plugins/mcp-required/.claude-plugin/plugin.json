@@ -1,0 +1,11 @@
+{
+  "name": "mcp-required",
+  "description": "MCP capability fixture",
+  "version": "1.0.0",
+  "mcpServers": {
+    "fixture": {
+      "command": "node",
+      "args": ["server.mjs"]
+    }
+  }
+}

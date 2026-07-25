@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "marketplaces": [
+    { "marketplace": "team", "source": { "kind": "github", "repository": "example/plugins" } }
+  ],
+  "plugins": [
+    {
+      "plugin": "demo@team",
+      "enabled": true,
+      "constraint": {
+        "kind": "source",
+        "source": { "kind": "marketplace-path", "path": "./plugins/demo" }
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "github-main": {
+    "source": { "source": "github", "repo": "owner/catalog", "ref": "main" },
+    "installLocation": "/home/user/.claude/plugins/marketplaces/github-main",
+    "lastUpdated": "2026-07-16T00:00:00Z"
+  },
+  "git-catalog": {
+    "source": { "source": "git", "url": "https://example.com/catalog.git", "ref": "v1" },
+    "autoUpdate": true
+  },
+  "local-catalog": {
+    "source": { "source": "directory", "path": "/home/user/catalog" },
+    "installLocation": "/home/user/.claude/plugins/marketplaces/local-catalog"
+  },
+  "unsupported-lfs": {
+    "source": { "source": "github", "repo": "owner/other", "skipLfs": true }
+  }
+}

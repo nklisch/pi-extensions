@@ -1,0 +1,207 @@
+[
+  {
+    "id": "permissive-safe-home-edit-allow",
+    "posture": "permissive",
+    "toolName": "edit",
+    "input": {
+      "path": "~/dev/foo.ts",
+      "oldText": "before",
+      "newText": "after"
+    },
+    "expected": "allow",
+    "expectedScope": "safe-home",
+    "expectedTrustBoundary": "none",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.home.safe",
+      "ruleId": "pi.home.safe:allow-safe-home-mutation"
+    }
+  },
+  {
+    "id": "permissive-safe-home-write-allow",
+    "posture": "permissive",
+    "toolName": "write",
+    "input": { "path": "~/dev/foo.ts", "content": "body" },
+    "expected": "allow",
+    "expectedScope": "safe-home",
+    "expectedTrustBoundary": "none",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.home.safe",
+      "ruleId": "pi.home.safe:allow-safe-home-mutation"
+    }
+  },
+  {
+    "id": "permissive-safe-home-read-allow",
+    "posture": "permissive",
+    "toolName": "read",
+    "input": { "path": "~/dev/foo.ts" },
+    "expected": "allow",
+    "expectedScope": "safe-home",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.home.safe",
+      "ruleId": "pi.home.safe:allow-safe-home-read-tools"
+    }
+  },
+  {
+    "id": "strict-safe-home-edit-review",
+    "posture": "strict",
+    "toolName": "edit",
+    "input": {
+      "path": "~/dev/foo.ts",
+      "oldText": "before",
+      "newText": "after"
+    },
+    "expected": "review",
+    "expectedScope": "safe-home",
+    "expectedTrustBoundary": "none",
+    "expectedProvenance": { "source": "default" }
+  },
+  {
+    "id": "strict-safe-home-write-review",
+    "posture": "strict",
+    "toolName": "write",
+    "input": { "path": "~/dev/foo.ts", "content": "body" },
+    "expected": "review",
+    "expectedScope": "safe-home",
+    "expectedTrustBoundary": "none",
+    "expectedProvenance": { "source": "default" }
+  },
+  {
+    "id": "strict-safe-home-read-review",
+    "posture": "strict",
+    "toolName": "read",
+    "input": { "path": "~/dev/foo.ts" },
+    "expected": "review",
+    "expectedScope": "safe-home",
+    "expectedProvenance": { "source": "default" }
+  },
+  {
+    "id": "default-safe-home-edit-review",
+    "posture": "default",
+    "toolName": "edit",
+    "input": {
+      "path": "~/dev/foo.ts",
+      "oldText": "before",
+      "newText": "after"
+    },
+    "expected": "review",
+    "expectedScope": "safe-home",
+    "expectedTrustBoundary": "none",
+    "expectedProvenance": { "source": "default" }
+  },
+  {
+    "id": "default-safe-home-write-review",
+    "posture": "default",
+    "toolName": "write",
+    "input": { "path": "~/dev/foo.ts", "content": "body" },
+    "expected": "review",
+    "expectedScope": "safe-home",
+    "expectedTrustBoundary": "none",
+    "expectedProvenance": { "source": "default" }
+  },
+  {
+    "id": "default-safe-home-read-review",
+    "posture": "default",
+    "toolName": "read",
+    "input": { "path": "~/dev/foo.ts" },
+    "expected": "review",
+    "expectedScope": "safe-home",
+    "expectedProvenance": { "source": "default" }
+  },
+  {
+    "id": "permissive-sensitive-home-write-review",
+    "posture": "permissive",
+    "toolName": "write",
+    "input": { "path": "~/.ssh/config", "content": "host config" },
+    "expected": "review",
+    "expectedScope": "sensitive-home",
+    "expectedTrustBoundary": "sensitive-home",
+    "expectedReason": "sensitive-home",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.home.safe",
+      "ruleId": "pi.home.safe:review-trust-boundary-home-mutation"
+    }
+  },
+  {
+    "id": "permissive-sensitive-home-edit-review",
+    "posture": "permissive",
+    "toolName": "edit",
+    "input": {
+      "path": "~/.ssh/config",
+      "oldText": "before",
+      "newText": "after"
+    },
+    "expected": "review",
+    "expectedScope": "sensitive-home",
+    "expectedTrustBoundary": "sensitive-home",
+    "expectedReason": "sensitive-home",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.home.safe",
+      "ruleId": "pi.home.safe:review-trust-boundary-home-mutation"
+    }
+  },
+  {
+    "id": "permissive-sensitive-home-read-review",
+    "posture": "permissive",
+    "toolName": "read",
+    "input": { "path": "~/.ssh/config" },
+    "expected": "review",
+    "expectedScope": "sensitive-home",
+    "expectedProvenance": { "source": "default" }
+  },
+  {
+    "id": "permissive-documents-write-review",
+    "posture": "permissive",
+    "toolName": "write",
+    "input": { "path": "~/Documents/x.md", "content": "body" },
+    "expected": "review",
+    "expectedScope": "home",
+    "expectedTrustBoundary": "none",
+    "expectedProvenance": { "source": "default" }
+  },
+  {
+    "id": "permissive-documents-read-review",
+    "posture": "permissive",
+    "toolName": "read",
+    "input": { "path": "~/Documents/x.md" },
+    "expected": "review",
+    "expectedScope": "home",
+    "expectedProvenance": { "source": "default" }
+  },
+  {
+    "id": "permissive-malformed-edit-review",
+    "posture": "permissive",
+    "toolName": "edit",
+    "input": { "path": "~/dev/foo.ts" },
+    "expected": "review",
+    "expectedScope": "safe-home",
+    "expectedProvenance": { "source": "default" }
+  },
+  {
+    "id": "permissive-malformed-write-review",
+    "posture": "permissive",
+    "toolName": "write",
+    "input": { "path": "~/dev/foo.ts" },
+    "expected": "review",
+    "expectedScope": "safe-home",
+    "expectedProvenance": { "source": "default" }
+  },
+  {
+    "id": "permissive-dynamic-write-review",
+    "posture": "permissive",
+    "toolName": "write",
+    "input": { "path": "$TARGET_FILE", "content": "body" },
+    "expected": "review",
+    "expectedScope": "unknown",
+    "expectedTrustBoundary": "unknown",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.home.safe",
+      "ruleId": "pi.home.safe:review-trust-boundary-home-mutation"
+    }
+  }
+]

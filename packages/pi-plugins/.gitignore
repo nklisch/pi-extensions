@@ -1,0 +1,4 @@
+.pi/goal-monitor/
+node_modules/
+dist/
+.e2e-artifacts/

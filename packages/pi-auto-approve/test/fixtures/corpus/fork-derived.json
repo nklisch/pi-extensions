@@ -1,0 +1,147 @@
+[
+  {
+    "command": "cat /etc/hosts",
+    "expected": "review",
+    "reason": "external directory read outside project root"
+  },
+  {
+    "command": "diff /etc/hosts /var/log/syslog",
+    "expected": "review",
+    "reason": "multiple external directory read paths outside project root"
+  },
+  {
+    "command": "cat /projects/my-app/src/index.ts",
+    "expected": "fast_path",
+    "reason": "absolute read remains inside project root"
+  },
+  {
+    "command": "cat ../../other-project/secrets.env",
+    "expected": "hard_block",
+    "reason": "external env-like secret file exposure"
+  },
+  {
+    "command": "echo hello > /tmp/out.txt",
+    "expected": "review",
+    "reason": "external directory stdout write outside project root"
+  },
+  {
+    "command": "sed 's/foo/bar/' input.txt > /tmp/output.txt",
+    "expected": "review",
+    "reason": "external directory redirect target outside project root"
+  },
+  {
+    "command": "echo hello | tee /tmp/output.txt",
+    "expected": "review",
+    "reason": "pipeline writes to external directory path"
+  },
+  {
+    "command": "cd /tmp && cat ../etc/hosts",
+    "expected": "review",
+    "reason": "external cd changes base before outside-project read"
+  },
+  {
+    "command": "cd /projects/my-app/src && cat ../README.md",
+    "expected": "fast_path",
+    "reason": "cd stays inside project and relative read remains project-local"
+  },
+  {
+    "command": "grep -n \"pattern\" .pi/../../../.pi/skills/pkg/SKILL.md",
+    "expected": "review",
+    "reason": "non-canonical traversal path needs structural review"
+  },
+  {
+    "command": "cat .env",
+    "expected": "hard_block",
+    "reason": "direct environment secret file exposure"
+  },
+  {
+    "command": "cp .env README.md",
+    "expected": "hard_block",
+    "reason": "secret environment file copied into ordinary project file"
+  },
+  {
+    "command": "echo test > .env",
+    "expected": "review",
+    "reason": "environment file mutation requires review"
+  },
+  {
+    "command": "cat ~/.ssh/config",
+    "expected": "review",
+    "reason": "SSH configuration path under home directory"
+  },
+  {
+    "command": "cat $HOME/.ssh/config",
+    "expected": "review",
+    "reason": "home-expanded SSH configuration path"
+  },
+  {
+    "command": "cat /home/user/.ssh/id_rsa",
+    "expected": "hard_block",
+    "reason": "private SSH key file exposure"
+  },
+  {
+    "command": "cat src/foo.ts .env",
+    "expected": "hard_block",
+    "reason": "most-restrictive-wins secret file inside otherwise-safe read"
+  },
+  {
+    "command": "cat README.md /home/user/.ssh/id_rsa",
+    "expected": "hard_block",
+    "reason": "most-restrictive-wins private key inside otherwise-safe read"
+  },
+  {
+    "command": "cd /p && git push",
+    "expected": "review",
+    "reason": "most-restrictive-wins review segment inside cd chain"
+  },
+  {
+    "command": "git status && rm -rf -- /",
+    "expected": "hard_block",
+    "reason": "most-restrictive-wins catastrophic delete inside safe-looking chain"
+  },
+  {
+    "command": "echo 'x && y'",
+    "expected": "fast_path",
+    "reason": "quoted shell operator is data not command structure"
+  },
+  {
+    "command": "grep \"foo\\|bar\\|baz\" src/file.ts",
+    "expected": "fast_path",
+    "reason": "quoted regex pipe alternation is data not pipeline structure"
+  },
+  {
+    "command": "node -e \"\nimport('x').then(() => {\n  console.log('/etc/hosts');\n});\n\"",
+    "expected": "review",
+    "reason": "multi-line quoted script execution needs review despite path literal data"
+  },
+  {
+    "command": "cat << 'EOF'\n/etc/hosts\nEOF",
+    "expected": "review",
+    "reason": "heredoc shell form requires structural review"
+  },
+  {
+    "command": "echo $(cat /etc/hosts)",
+    "expected": "review",
+    "reason": "command substitution hides external read behavior"
+  },
+  {
+    "command": "diff <(cat /etc/shadow)",
+    "expected": "hard_block",
+    "reason": "process substitution exposes shadow credential file"
+  },
+  {
+    "command": "cat /tmp/ext-link/link/file.ts",
+    "expected": "review",
+    "reason": "symlinked external path needs typed and resolved path review"
+  },
+  {
+    "command": "cat /tmp/ext-real/file.ts",
+    "expected": "review",
+    "reason": "symlink-resolved external target path needs review"
+  },
+  {
+    "command": "cat /tmp/ext-link/link/file.ts && cat /projects/my-app/src/index.ts",
+    "expected": "review",
+    "reason": "symlinked external path inside otherwise project-local chain"
+  }
+]

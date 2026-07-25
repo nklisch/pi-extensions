@@ -1,0 +1,7 @@
+{
+  "name": "demo",
+  "version": "1.0.0",
+  "description": "A deterministic fixture",
+  "skills": "./skills",
+  "hooks": "./hooks/hooks.json"
+}

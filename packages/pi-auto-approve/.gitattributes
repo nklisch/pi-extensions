@@ -1,0 +1,2 @@
+# ts-rs output is generated; review the Rust contract source instead.
+src/contracts/*.ts linguist-generated=true

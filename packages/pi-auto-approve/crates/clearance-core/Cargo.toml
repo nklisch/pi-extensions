@@ -1,0 +1,16 @@
+[package]
+name = "clearance-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Pin the crates.io grammar revision chosen for the native parser migration.
+# The parser itself lands in S2; keeping the pin here makes the engine's health
+# contract and future parser work agree on one grammar revision.
+tree-sitter = "0.25"
+tree-sitter-bash = "=0.25.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+ts-rs = "12.0.1"

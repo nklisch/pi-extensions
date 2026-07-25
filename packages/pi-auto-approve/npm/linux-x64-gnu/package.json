@@ -1,0 +1,19 @@
+{
+  "name": "pi-auto-approve-linux-x64-gnu",
+  "version": "0.1.0",
+  "description": "Pi Clearance native engine for Linux x64 glibc",
+  "license": "MIT",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "main": "clearance-core.linux-x64-gnu.node",
+  "files": [
+    "clearance-core.linux-x64-gnu.node"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "core-local",
+  "description": "Packed core E2E fixture",
+  "version": "1.0.0",
+  "skills": ["./skills/core-local"],
+  "hooks": "./hooks/hooks.json",
+  "userConfig": {
+    "GREETING": {
+      "type": "string",
+      "title": "Greeting marker",
+      "required": true,
+      "sensitive": false,
+      "pattern": "^[a-z0-9-]+$"
+    }
+  }
+}

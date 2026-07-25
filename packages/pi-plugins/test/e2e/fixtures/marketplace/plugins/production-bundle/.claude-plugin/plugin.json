@@ -1,0 +1,36 @@
+{
+  "name": "production-bundle",
+  "description": "Complete production runtime fixture",
+  "version": "1.0.0",
+  "skills": ["./skills/production-bundle"],
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": {
+    "identity": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"],
+      "env": {
+        "BUNDLE_REVISION": "v1",
+        "BUNDLE_ROOT": "${CLAUDE_PLUGIN_ROOT}",
+        "BUNDLE_DATA": "${CLAUDE_PLUGIN_DATA}",
+        "BUNDLE_CHANNEL": "${user_config.CHANNEL}"
+      }
+    },
+    "failing": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/missing-server.mjs"],
+      "env": {
+        "BUNDLE_REVISION": "v1",
+        "BUNDLE_CHANNEL": "${user_config.CHANNEL}"
+      }
+    }
+  },
+  "userConfig": {
+    "CHANNEL": {
+      "type": "string",
+      "title": "Production channel",
+      "required": true,
+      "sensitive": false,
+      "pattern": "^[a-z0-9-]+$"
+    }
+  }
+}

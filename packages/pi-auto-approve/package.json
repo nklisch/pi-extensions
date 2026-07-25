@@ -1,0 +1,95 @@
+{
+  "name": "@nklisch/pi-auto-approve",
+  "version": "0.1.0",
+  "description": "Configurable auto-reviewer Pi extension for parsed, structural command policy",
+  "type": "module",
+  "license": "MIT",
+  "author": "Nathan Klisch",
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "policy",
+    "security",
+    "bash",
+    "tree-sitter"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "napi": {
+    "binaryName": "clearance-core",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "aarch64-apple-darwin"
+    ]
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./pack-registration": "./src/packs/package-contract.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ],
+    "skills": [
+      "./src/skill/clearance-tune/SKILL.md",
+      "./src/skill/clearance-pack-authoring/SKILL.md"
+    ]
+  },
+  "files": [
+    "src",
+    "native",
+    "README.md",
+    "docs",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "contracts:generate": "tsx scripts/contracts.ts generate",
+    "contracts:check": "tsx scripts/contracts.ts check",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "build:native": "napi build --release --manifest-path crates/clearance-node/Cargo.toml --output-dir native --platform --no-js",
+    "build:native:target": "napi build --release --manifest-path crates/clearance-node/Cargo.toml --output-dir native --platform --no-js --target",
+    "bench:s0": "tsx scripts/bench/s0-baseline.ts",
+    "bench:s8": "tsx scripts/bench/s8-final.ts",
+    "cargo:test": "cargo test --workspace",
+    "cargo:clippy": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+    "cargo:fmt": "cargo fmt --all -- --check"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.49",
+    "jiti": "^2.7.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.80.8",
+    "@earendil-works/pi-coding-agent": "0.80.8",
+    "@earendil-works/pi-tui": "0.80.8",
+    "@napi-rs/cli": "^3.7.4",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0",
+    "@biomejs/biome": "^2.5.1"
+  },
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nklisch/pi-extensions.git",
+    "directory": "packages/pi-auto-approve"
+  },
+  "bugs": {
+    "url": "https://github.com/nklisch/pi-extensions/issues"
+  },
+  "homepage": "https://github.com/nklisch/pi-extensions/tree/main/packages/pi-auto-approve#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

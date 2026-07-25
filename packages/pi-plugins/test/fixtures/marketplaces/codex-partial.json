@@ -1,0 +1,11 @@
+{
+  "name": "codex-partial",
+  "plugins": [
+    { "name": "good", "source": { "source": "local", "path": "./good" }, "policy": { "installation": "AVAILABLE" } },
+    { "name": "missing-policy", "source": "./missing" },
+    { "name": "unknown-policy", "source": "./unknown", "policy": { "installation": "MAYBE" } },
+    { "name": "claude-strict", "source": "./strict", "strict": true, "policy": { "installation": "AVAILABLE" } },
+    { "name": "bad-runtime", "source": "./runtime", "policy": { "installation": "AVAILABLE" }, "hooks": null },
+    { "name": "good-sibling", "source": "./sibling", "policy": { "installation": "NOT_AVAILABLE" } }
+  ]
+}

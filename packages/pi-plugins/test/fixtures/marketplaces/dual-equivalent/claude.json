@@ -1,0 +1,15 @@
+{
+  "name": "shared-catalog",
+  "owner": { "name": "claude" },
+  "plugins": [
+    {
+      "name": "shared",
+      "source": "./plugins/shared",
+      "version": "1.2.3",
+      "description": "Shared plugin",
+      "policy": { "installation": "AVAILABLE" },
+      "skills": ["./skills"]
+    },
+    { "name": "claude-only", "source": "./plugins/claude-only" }
+  ]
+}

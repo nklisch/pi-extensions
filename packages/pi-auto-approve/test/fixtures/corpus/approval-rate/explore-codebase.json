@@ -1,0 +1,90 @@
+[
+  {
+    "command": "git status --short",
+    "expected": "fast_path",
+    "reason": "inspect the worktree before choosing a change"
+  },
+  {
+    "command": "git log --oneline -8",
+    "expected": "fast_path",
+    "reason": "inspect recent project history"
+  },
+  {
+    "command": "git diff --stat",
+    "expected": "fast_path",
+    "reason": "summarize local changes without writing"
+  },
+  {
+    "command": "rg -n 'TODO|FIXME' src test",
+    "expected": "fast_path",
+    "reason": "search source and tests for nearby work"
+  },
+  {
+    "command": "find src -type f -maxdepth 2",
+    "expected": "fast_path",
+    "reason": "enumerate source files during repository orientation"
+  },
+  {
+    "command": "sed -n '1,120p' src/index.ts",
+    "expected": "fast_path",
+    "reason": "read the extension entry point"
+  },
+  {
+    "command": "cat package.json",
+    "expected": "fast_path",
+    "reason": "inspect project scripts and package metadata"
+  },
+  {
+    "tool": "read",
+    "command": "{\"path\":\"src/index.ts\"}",
+    "expected": "fast_path",
+    "reason": "typed Pi read of an in-project source file"
+  },
+  {
+    "tool": "multi_grep",
+    "command": "{\"pattern\":\"clearance\",\"paths\":[\"src\",\"test\"]}",
+    "expected": "fast_path",
+    "reason": "typed workspace search is bounded and read-only"
+  },
+  {
+    "tool": "read",
+    "command": "{\"path\":\"~/.pi/agent/skills/clearance/SKILL.md\"}",
+    "expected": "fast_path",
+    "reason": "typed read of Pi global support material stays inside agent-support"
+  },
+  {
+    "tool": "ffgrep",
+    "command": "{\"path\":\"~/.pi/agent/plugin-host/stores\"}",
+    "expected": "fast_path",
+    "reason": "typed search of plugin-host support stores stays inside agent-support"
+  },
+  {
+    "tool": "ls",
+    "command": "{\"path\":\"~/.pi/agent/docs\"}",
+    "expected": "fast_path",
+    "reason": "typed listing of global Pi docs stays inside agent-support"
+  },
+  {
+    "tool": "read",
+    "command": "{\"path\":\"~/.pi/agent/auth.json\"}",
+    "expected": "review",
+    "reason": "Pi auth material remains sensitive-home even under agent support"
+  },
+  {
+    "tool": "read",
+    "command": "{\"path\":\"~/dev/notes.md\"}",
+    "expected": "fast_path",
+    "reason": "ordinary non-secret home notes are baseline-readable"
+  },
+  {
+    "tool": "read",
+    "command": "{\"path\":\"~/.pi/agent/sessions/x\"}",
+    "expected": "fast_path",
+    "reason": "Pi session context is readable unless classified as credential material"
+  },
+  {
+    "command": "cat $(cat ~/.secret)",
+    "expected": "review",
+    "reason": "command substitution can expose a secret-bearing path"
+  }
+]

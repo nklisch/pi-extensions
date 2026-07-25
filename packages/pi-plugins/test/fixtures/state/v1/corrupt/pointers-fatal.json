@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "scope": { "kind": "user" },
+  "generation": 4,
+  "documents": [
+    {
+      "kind": "hostConfig",
+      "generation": 3,
+      "blob": "state-blob-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "absolutePath": "/var/lib/pi-plugin-host/state.json"
+}

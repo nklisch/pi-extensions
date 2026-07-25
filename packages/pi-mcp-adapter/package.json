@@ -1,0 +1,155 @@
+{
+  "name": "@nklisch/pi-mcp-adapter",
+  "version": "2.11.0-nklisch.3",
+  "description": "Maintained pi-mcp-adapter fork with a programmatic source lifecycle",
+  "type": "module",
+  "license": "MIT",
+  "author": "Nico Bailon",
+  "contributors": [
+    "Nathan Klisch"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./programmatic": {
+      "types": "./dist/programmatic.d.ts",
+      "import": "./dist/programmatic.js"
+    }
+  },
+  "bin": {
+    "pi-mcp-adapter": "cli.js"
+  },
+  "scripts": {
+    "clean:programmatic": "node -e \"import('node:fs/promises').then(fs => fs.rm('dist', { recursive: true, force: true }))\"",
+    "build:programmatic": "npm run clean:programmatic && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck && vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:package": "node --import tsx __tests__/packed-package.ts",
+    "test:host-conformance": "node qualification/run-plugin-host-conformance.mjs",
+    "test:oauth-provider": "node --import tsx --test mcp-oauth-provider.test.ts",
+    "prepack": "npm run build:programmatic",
+    "build": "npm run build:programmatic"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nklisch/pi-extensions.git",
+    "directory": "packages/pi-mcp-adapter"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "coding-agent",
+    "extension",
+    "claude",
+    "llm",
+    "pi-extension"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "video": "https://github.com/nicobailon/pi-mcp-adapter/raw/refs/heads/main/pi-mcp.mp4"
+  },
+  "files": [
+    "cli.js",
+    "agent-dir.ts",
+    "index.ts",
+    "programmatic.ts",
+    "programmatic-types.ts",
+    "programmatic-runtime.ts",
+    "programmatic-extension.ts",
+    "error-signal.ts",
+    "state.ts",
+    "utils.ts",
+    "abort.ts",
+    "tool-metadata.ts",
+    "init.ts",
+    "ui-session.ts",
+    "proxy-modes.ts",
+    "direct-tools.ts",
+    "commands.ts",
+    "onboarding-state.ts",
+    "mcp-setup-panel.ts",
+    "types.ts",
+    "ui-stream-types.ts",
+    "config.ts",
+    "server-manager.ts",
+    "sampling-handler.ts",
+    "elicitation-handler.ts",
+    "tool-registrar.ts",
+    "tool-result-renderer.ts",
+    "mcp-output-guard.ts",
+    "resource-tools.ts",
+    "lifecycle.ts",
+    "metadata-cache.ts",
+    "host-html-template.ts",
+    "ui-resource-handler.ts",
+    "consent-manager.ts",
+    "ui-server.ts",
+    "glimpse-ui.ts",
+    "npx-resolver.ts",
+    "oauth-handler.ts",
+    "mcp-auth.ts",
+    "mcp-oauth-provider.ts",
+    "mcp-callback-server.ts",
+    "mcp-auth-flow.ts",
+    "mcp-panel.ts",
+    "panel-keys.ts",
+    "logger.ts",
+    "errors.ts",
+    "app-bridge.bundle.js",
+    "dist",
+    "banner.png",
+    "README.md",
+    "MAINTAINING.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.74.0",
+    "@earendil-works/pi-tui": "^0.74.0",
+    "@modelcontextprotocol/ext-apps": "^1.2.2",
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "open": "^10.2.0",
+    "recheck": "^4.5.0",
+    "typebox": "^1.1.24",
+    "zod": "^3.25.0 || ^4.0.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.79.1 <1",
+    "zod": "^3.25.0 || ^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.8",
+    "@types/bun": "^1.0.0",
+    "@types/node": "^20.0.0",
+    "@types/open": "^6.2.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0"
+  },
+  "private": false,
+  "bugs": {
+    "url": "https://github.com/nklisch/pi-extensions/issues"
+  },
+  "homepage": "https://github.com/nklisch/pi-extensions/tree/main/packages/pi-mcp-adapter#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

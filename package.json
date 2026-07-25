@@ -1,0 +1,31 @@
+{
+  "name": "@nklisch/pi-extensions",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monorepo for Pi extensions published under the @nklisch namespace.",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "check": "node scripts/validate-packages.mjs && npm run build --workspace @nklisch/pi-subagents --workspace @nklisch/pi-mcp-adapter && npm run typecheck --workspaces --if-present && npm test && npm run build --workspaces --if-present && node scripts/check-packs.mjs",
+    "create:extension": "node scripts/create-extension.mjs",
+    "publish:package": "node scripts/validate-packages.mjs && node scripts/publish-package.mjs",
+    "test": "npm run test --workspaces --if-present",
+    "validate": "node scripts/validate-packages.mjs"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.80.8",
+    "@earendil-works/pi-coding-agent": "0.80.8",
+    "@earendil-works/pi-tui": "0.80.8",
+    "@types/node": "^24.0.0",
+    "typebox": "*",
+    "typescript": ">=7.0.0 <8",
+    "vitest": "^4.0.0",
+    "undici-types": "*"
+  }
+}

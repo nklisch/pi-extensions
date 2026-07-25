@@ -1,0 +1,13 @@
+{
+  "theme": "dark",
+  "enabledPlugins": { "ignored@ignored": true },
+  "extraKnownMarketplaces": {
+    "github-main": {
+      "source": { "source": "github", "repo": "owner/catalog", "ref": "main" }
+    },
+    "unsupported-inline": {
+      "source": { "source": "github", "repo": "owner/other" },
+      "settings": { "token": "secret" }
+    }
+  }
+}

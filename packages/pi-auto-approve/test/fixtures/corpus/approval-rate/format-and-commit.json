@@ -1,0 +1,58 @@
+[
+  {
+    "command": "cargo fmt --check",
+    "expected": "fast_path",
+    "reason": "check Rust formatting without rewriting files"
+  },
+  {
+    "command": "prettier --check .",
+    "expected": "fast_path",
+    "reason": "check project formatting without mutation"
+  },
+  {
+    "command": "biome check .",
+    "expected": "fast_path",
+    "reason": "run the formatter and linter in check mode"
+  },
+  {
+    "command": "pnpm lint",
+    "expected": "fast_path",
+    "reason": "run the configured project lint script"
+  },
+  {
+    "command": "git add docs/README.md",
+    "expected": "fast_path",
+    "reason": "stage a local documentation update"
+  },
+  {
+    "command": "git commit -m 'docs: clarify setup'",
+    "expected": "fast_path",
+    "reason": "record a local documentation commit"
+  },
+  {
+    "command": "prettier --write .",
+    "expected": "fast_path",
+    "reason": "project-scoped formatter write is covered by the default pack"
+  },
+  {
+    "command": "biome check --write .",
+    "expected": "fast_path",
+    "reason": "project-scoped Biome write is covered by the default pack"
+  },
+  {
+    "command": "git push origin feature/clearance-audit",
+    "expected": "review",
+    "reason": "publishing to a remote requires explicit review"
+  },
+  {
+    "command": "curl -X POST https://example.com/builds",
+    "expected": "review",
+    "reason": "network mutation must remain review-gated"
+  },
+  {
+    "tool": "grep",
+    "command": "{\"path\":\"~/.config/gh/config.yml\",\"pattern\":\"host\"}",
+    "expected": "fast_path",
+    "reason": "GitHub CLI non-secret configuration is home-readable"
+  }
+]

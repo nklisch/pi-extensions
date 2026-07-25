@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "marketplaces": [
+    { "marketplace": "team", "source": { "kind": "github", "repository": "example/plugins" } }
+  ],
+  "plugins": [
+    { "plugin": "demo@team", "enabled": true, "updatedAt": "2026-07-12T00:00:00.000Z" }
+  ]
+}

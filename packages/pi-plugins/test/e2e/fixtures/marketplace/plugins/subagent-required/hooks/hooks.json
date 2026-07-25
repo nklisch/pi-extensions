@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "SubagentStart": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          { "type": "exec", "command": "node", "args": ["hooks/never.mjs"], "timeout_ms": 5000 }
+        ]
+      }
+    ]
+  }
+}

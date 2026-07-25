@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "scope": { "kind": "user" },
+  "generation": 0,
+  "documents": [
+    {
+      "kind": "hostConfig",
+      "generation": 0,
+      "blob": "state-blob-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "kind": "installedUser",
+      "generation": 0,
+      "blob": "state-blob-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "kind": "trust",
+      "generation": 0,
+      "blob": "state-blob-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  ]
+}

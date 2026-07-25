@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "marketplaces": [
+    { "marketplace": "team", "source": { "kind": "github", "repository": "example/plugins" } }
+  ],
+  "plugins": [
+    {
+      "plugin": "demo@team",
+      "enabled": true,
+      "secret": "CANARY_SECRET_VALUE",
+      "constraint": { "kind": "source", "source": { "kind": "marketplace-path", "path": "./plugins/demo" } }
+    }
+  ],
+  "projectKey": "project-v1:sha256:9999999999999999999999999999999999999999999999999999999999999999",
+  "generatedProjection": "CANARY_PROJECTION",
+  "timestamp": "2026-07-12T00:00:00.000Z"
+}

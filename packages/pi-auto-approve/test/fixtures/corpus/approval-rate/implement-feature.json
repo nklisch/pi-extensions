@@ -1,0 +1,60 @@
+[
+  {
+    "command": "git add src/feature.ts test/feature.test.ts",
+    "expected": "fast_path",
+    "reason": "stage the project-local implementation and tests"
+  },
+  {
+    "command": "git commit -m 'feat: add feature'",
+    "expected": "fast_path",
+    "reason": "create a local commit after implementation"
+  },
+  {
+    "command": "git switch -c feature/clearance-audit",
+    "expected": "fast_path",
+    "reason": "create and select a local working branch"
+  },
+  {
+    "command": "pnpm test",
+    "expected": "fast_path",
+    "reason": "run the project test suite after implementation"
+  },
+  {
+    "command": "pnpm exec biome check .",
+    "expected": "fast_path",
+    "reason": "verify formatting and lint rules without mutation"
+  },
+  {
+    "tool": "edit",
+    "command": "{\"path\":\"src/feature.ts\",\"oldText\":\"return oldValue;\",\"newText\":\"return newValue;\"}",
+    "expected": "fast_path",
+    "reason": "typed Pi edit is bounded to a project file"
+  },
+  {
+    "tool": "write",
+    "command": "{\"path\":\"src/generated.ts\",\"content\":\"export const generated = true;\\n\"}",
+    "expected": "fast_path",
+    "reason": "typed Pi write targets a project-local generated file"
+  },
+  {
+    "command": "pnpm install",
+    "expected": "fast_path",
+    "reason": "install project dependencies in the ordinary local workflow"
+  },
+  {
+    "command": "touch src/generated.ts",
+    "expected": "fast_path",
+    "reason": "project-scoped shell file creation stays within the writable root"
+  },
+  {
+    "command": "cp src/feature.ts src/feature.backup.ts",
+    "expected": "review",
+    "reason": "copy source and destination semantics are not structurally bounded"
+  },
+  {
+    "tool": "ffgrep",
+    "command": "{\"path\":\"~/.pi/agent/audit/decisions.jsonl\"}",
+    "expected": "fast_path",
+    "reason": "Pi audit history is non-secret home context"
+  }
+]

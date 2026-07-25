@@ -1,0 +1,39 @@
+{
+  "name": "@nklisch/pi-claude-conveniences",
+  "version": "0.1.0",
+  "description": "Small drop-in conveniences for muscle-memory parity with Claude Code, Codex, and common shells — /exit, .agents/AGENTS.md context loading, and more.",
+  "author": {
+    "name": "nklisch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nklisch/pi-extensions.git",
+    "directory": "packages/pi-claude-conveniences"
+  },
+  "bugs": {
+    "url": "https://github.com/nklisch/pi-extensions/issues"
+  },
+  "homepage": "https://github.com/nklisch/pi-extensions/tree/main/packages/pi-claude-conveniences#readme",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "claude-code",
+    "codex",
+    "conveniences",
+    "ux"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "private": false,
+  "scripts": {
+    "test": "bun test extensions/*.test.ts"
+  }
+}

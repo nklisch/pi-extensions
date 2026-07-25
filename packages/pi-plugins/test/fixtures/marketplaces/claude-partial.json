@@ -1,0 +1,9 @@
+{
+  "name": "partial",
+  "plugins": [
+    { "name": "good", "source": "./good" },
+    { "name": "bad-path", "source": "../outside" },
+    { "name": "bad-runtime", "source": "./runtime", "hooks": null },
+    { "name": "good-sibling", "source": "./sibling" }
+  ]
+}

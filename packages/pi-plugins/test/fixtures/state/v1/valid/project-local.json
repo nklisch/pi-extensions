@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 4,
+  "generation": 0,
+  "projectKey": "project-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "identity": {
+    "kind": "path-only",
+    "canonicalRoot": "file:///workspace/project/",
+    "limitation": "identity-changes-with-canonical-root"
+  },
+  "declarationDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "scope": {},
+  "marketplaces": [],
+  "plugins": [],
+  "marketplaceUpdates": []
+}

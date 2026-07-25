@@ -1,0 +1,552 @@
+[
+  {
+    "command": "peeragent --async --cwd /home/nathan/dev/pi-model-modes --prompt-file /tmp/task.txt",
+    "expected": "fast_path",
+    "reason": "normal peeragent launch by command name is explicitly approved policy"
+  },
+  {
+    "command": "/home/nathan/.pi/agent/git/github.com/nklisch/peeragent/plugin/bin/peeragent --async --full-access --cwd /home/nathan/dev/pi-model-modes --prompt-file /tmp/task.txt 2>&1",
+    "expected": "fast_path",
+    "reason": "normal peeragent launch by known plugin path is explicitly approved policy"
+  },
+  {
+    "command": "/tmp/peeragent --status job",
+    "expected": "review",
+    "reason": "arbitrary path named peeragent is not the approved tool"
+  },
+  {
+    "command": "./peeragent.bak --status job",
+    "expected": "review",
+    "reason": "lookalike peeragent basename is not the approved tool"
+  },
+  {
+    "command": "/home/nathan/.pi/agent/git/github.com/nklisch/peeragent/plugin/bin/peeragent --status job | sh",
+    "expected": "review",
+    "reason": "approved peeragent output must not be piped into a shell"
+  },
+  {
+    "command": "/home/nathan/.pi/agent/git/github.com/nklisch/peeragent/plugin/bin/peeragent --status job; rm -rf /tmp/x",
+    "expected": "review",
+    "reason": "approved peeragent command must not hide a chained destructive command"
+  },
+  {
+    "command": "/home/nathan/.pi/agent/git/github.com/nklisch/peeragent/plugin/bin/peeragent --prompt-file <(cat ~/.ssh/id_rsa)",
+    "expected": "review",
+    "reason": "process substitution hides secret-reading shell behavior"
+  },
+  {
+    "command": "/home/nathan/.pi/agent/git/github.com/nklisch/skills/plugins/agent-coordination/scripts/agent-comms claim --repo nklisch/silas --context feature-x",
+    "expected": "fast_path",
+    "reason": "normal agent-comms coordination command is explicitly approved policy"
+  },
+  {
+    "command": "/tmp/agent-comms active-claims",
+    "expected": "review",
+    "reason": "arbitrary path named agent-comms is not the approved tool"
+  },
+  {
+    "command": "/home/nathan/.pi/agent/git/github.com/nklisch/skills/plugins/agent-coordination/scripts/agent-comms active-claims --repo nklisch/silas | bash",
+    "expected": "review",
+    "reason": "approved agent-comms output must not be piped into a shell"
+  },
+  {
+    "command": "/home/nathan/.pi/agent/git/github.com/nklisch/skills/plugins/agent-coordination/scripts/agent-comms active-claims --repo nklisch/silas < ~/.ssh/id_rsa",
+    "expected": "review",
+    "reason": "approved agent-comms command must not hide secret input redirection"
+  },
+  {
+    "command": "git -C /home/nathan/dev/pi-config status --short",
+    "expected": "fast_path",
+    "reason": "git -C read-only status is safe"
+  },
+  {
+    "command": "git -C /home/nathan/dev/pi-config reset --hard HEAD",
+    "expected": "review",
+    "reason": "git -C must not hide destructive git operations"
+  },
+  {
+    "command": "git -C /home/nathan/dev/pi-config clean -ffdx",
+    "expected": "review",
+    "reason": "git clean with force/directory/ignored deletion is destructive"
+  },
+  {
+    "command": "git push origin +HEAD:main",
+    "expected": "review",
+    "reason": "plus refspec force-push must be reviewed"
+  },
+  {
+    "command": "sed -n '1,40p' pi/extensions/auto-reviewer.ts",
+    "expected": "fast_path",
+    "reason": "strict sed range print is read-only"
+  },
+  {
+    "command": "sed -n '1,20p;w /tmp/leak' file.txt",
+    "expected": "review",
+    "reason": "sed write command is not strict range print"
+  },
+  {
+    "command": "sed -n '1,20p' -e 'w /tmp/leak' file.txt",
+    "expected": "review",
+    "reason": "extra sed program after strict range print is not approved"
+  },
+  {
+    "command": "gh pr view 123 --json title,state,url",
+    "expected": "fast_path",
+    "reason": "read-only GitHub PR inspection"
+  },
+  {
+    "command": "gh api repos/nklisch/silas/issues -X POST -f title=x",
+    "expected": "review",
+    "reason": "mutating GitHub API method"
+  },
+  {
+    "command": "gh api repos/nklisch/silas/issues --method=POST -f title=x",
+    "expected": "review",
+    "reason": "mutating GitHub API method with equals syntax"
+  },
+  {
+    "command": "gh api repos/nklisch/silas/issues --method 'DELETE'",
+    "expected": "review",
+    "reason": "mutating GitHub API method with quoted argument"
+  },
+  {
+    "command": "gh api repos/nklisch/silas/issues -f title=x",
+    "expected": "review",
+    "reason": "gh api fields can switch the request to a mutating method"
+  },
+  {
+    "command": "journalctl --user -u local-pr-reviewer.service --since '10 minutes ago' --no-pager | tail -120",
+    "expected": "fast_path",
+    "reason": "read-only system log inspection piped to bounded output"
+  },
+  {
+    "command": "journalctl --vacuum-time=1s",
+    "expected": "review",
+    "reason": "journal cleanup mutates logs"
+  },
+  {
+    "command": "cd /home/nathan/dev/pi-config && git status --short",
+    "expected": "fast_path",
+    "reason": "cd wrapper followed by a safe command is one approved workflow command"
+  },
+  {
+    "command": "cat script.sh | sh",
+    "expected": "review",
+    "reason": "pipeline stage inspection must reject pipe-to-shell"
+  },
+  {
+    "command": "find . -delete",
+    "expected": "review",
+    "reason": "find delete action is destructive"
+  },
+  {
+    "command": "find . -exec sh -c 'touch /tmp/find-owned' sh {} +",
+    "expected": "review",
+    "reason": "find exec action runs hidden shell behavior"
+  },
+  {
+    "command": "cat < ~/.ssh/id_rsa",
+    "expected": "review",
+    "reason": "obvious secret path should not fast-path"
+  },
+  {
+    "command": "cat <(cat ~/.ssh/id_rsa)",
+    "expected": "review",
+    "reason": "process substitution hides secret-reading shell behavior"
+  },
+  {
+    "command": "echo $GH_TOKEN",
+    "expected": "review",
+    "reason": "secret-looking environment variable expansion should not fast-path"
+  },
+  {
+    "command": "printf '%s\\n' \"$AWS_SECRET_ACCESS_KEY\"",
+    "expected": "review",
+    "reason": "secret-looking environment variable expansion should not fast-path"
+  },
+  {
+    "command": "git status --short $(rm -rf build)",
+    "expected": "review",
+    "reason": "command substitution executes hidden shell code"
+  },
+  {
+    "command": "rm -rf -- /",
+    "expected": "hard_block",
+    "reason": "root recursive delete with option terminator is system-catastrophic"
+  },
+  {
+    "command": "dd of=/dev/sda if=/dev/zero bs=1M",
+    "expected": "hard_block",
+    "reason": "disk-device overwrite is catastrophic"
+  },
+  {
+    "command": "mkfs -t ext4 /dev/sda",
+    "expected": "hard_block",
+    "reason": "mkfs frontend is disk-destructive"
+  },
+  {
+    "command": ".work/bin/work-view --parent feature-contract-test-quality-public-api-audit",
+    "expected": "fast_path",
+    "reason": "approved local agile-workflow query helper"
+  },
+  {
+    "command": "/home/nathan/dev/silas/.work/bin/work-view --stage done --paths",
+    "expected": "fast_path",
+    "reason": "approved work-view helper under home dev workspace"
+  },
+  {
+    "command": "/tmp/project/.work/bin/work-view --ready",
+    "expected": "review",
+    "reason": "arbitrary absolute work-view path outside home workspace is not approved"
+  },
+  {
+    "command": ".work/bin/work-view --ready | sh",
+    "expected": "review",
+    "reason": "approved work-view output must not be piped into a shell"
+  },
+  {
+    "command": ".work/bin/work-view --ready --paths && printf '\\n--blocked--\\n' && .work/bin/work-view --blocked --paths",
+    "expected": "fast_path",
+    "reason": "safe && chain of approved work-view queries and printf"
+  },
+  {
+    "command": "git show --stat --oneline --name-only HEAD && git show --check HEAD",
+    "expected": "fast_path",
+    "reason": "safe && chain of approved git read/check commands"
+  },
+  {
+    "command": "pwd && git log --oneline -10 HEAD",
+    "expected": "fast_path",
+    "reason": "safe && chain of approved state inspection commands"
+  },
+  {
+    "command": "cargo fmt --check && cargo test -p silas --test input_action_authoring_guard",
+    "expected": "fast_path",
+    "reason": "safe && chain of approved dev workflow commands"
+  },
+  {
+    "command": "npm install && echo done",
+    "expected": "fast_path",
+    "reason": "safe && chain of approved package install and echo"
+  },
+  {
+    "command": "git status && sh script.sh",
+    "expected": "review",
+    "reason": "safe && chain rejects unapproved shell execution segment"
+  },
+  {
+    "command": "git status && cat ~/.ssh/id_rsa",
+    "expected": "review",
+    "reason": "safe && chain rejects obvious secret path"
+  },
+  {
+    "command": "git status && rm -rf build",
+    "expected": "review",
+    "reason": "safe && chain still respects destructive behavior analysis"
+  },
+  {
+    "command": ".work/bin/work-view.bak --ready",
+    "expected": "review",
+    "reason": "work-view basename lookalike is not approved"
+  },
+  {
+    "command": "./.work/bin/work-view.evil --ready",
+    "expected": "review",
+    "reason": "work-view suffix lookalike is not approved"
+  },
+  {
+    "command": ".work/bin/work-view/../evil --ready",
+    "expected": "review",
+    "reason": "path traversal after approved work-view prefix is not approved"
+  },
+  {
+    "command": ".work/bin/../bin/work-view --ready",
+    "expected": "review",
+    "reason": "non-canonical work-view path is not approved"
+  },
+  {
+    "command": ".work//bin/work-view --ready",
+    "expected": "review",
+    "reason": "non-canonical work-view path is not approved"
+  },
+  {
+    "command": ".work/bin/./work-view --ready",
+    "expected": "review",
+    "reason": "non-canonical work-view path is not approved"
+  },
+  {
+    "command": "/home/nathan/dev/../.work/bin/work-view --ready",
+    "expected": "review",
+    "reason": "home workspace path traversal is not approved"
+  },
+  {
+    "command": "/home/nathan/dev/pi-config/.work/bin/work-view/../../bin/evil --ready",
+    "expected": "review",
+    "reason": "path traversal after approved home work-view is not approved"
+  },
+  {
+    "command": ".work/bin/work-view --ready | sed -n '1,20p'",
+    "expected": "fast_path",
+    "reason": "approved work-view output piped to strict sed print"
+  },
+  {
+    "command": ".work/bin/work-view --ready && find . '-delete'",
+    "expected": "review",
+    "reason": "quoted find -delete is still destructive after shell parsing"
+  },
+  {
+    "command": ".work/bin/work-view --ready && find . '-exec' sh -c 'touch /tmp/find-owned' sh {} +",
+    "expected": "review",
+    "reason": "quoted find -exec still executes a command"
+  },
+  {
+    "command": ".work/bin/work-view --ready && sed -n '1p' '-e' 'w /tmp/leak' file.txt",
+    "expected": "review",
+    "reason": "quoted sed -e adds an extra write program"
+  },
+  {
+    "command": ".work/bin/work-view --ready && sort '-o' /tmp/sorted secrets.txt",
+    "expected": "review",
+    "reason": "quoted sort -o still writes an output file"
+  },
+  {
+    "command": ".work/bin/work-view --ready && journalctl '--vacuum-time=1s'",
+    "expected": "review",
+    "reason": "quoted journalctl vacuum option still mutates logs"
+  },
+  {
+    "command": ".work/bin/work-view --ready && git branch '-D' main",
+    "expected": "review",
+    "reason": "quoted git branch -D still deletes a branch"
+  },
+  {
+    "command": ".work/bin/work-view --ready < ~/.aws/credentials",
+    "expected": "review",
+    "reason": "obvious cloud credential path should not fast-path"
+  },
+  {
+    "command": ".work/bin/work-view --ready < $HOME/.pi/agent/auth.json",
+    "expected": "review",
+    "reason": "pi auth state should not fast-path"
+  },
+  {
+    "command": ".work/bin/work-view --token ${GH_TOKEN} --ready",
+    "expected": "review",
+    "reason": "braced secret environment expansion should not fast-path"
+  },
+  {
+    "command": ".work/bin/work-view --ready && echo ${AWS_SECRET_ACCESS_KEY}",
+    "expected": "review",
+    "reason": "safe && chain rejects braced secret environment expansion"
+  },
+  {
+    "command": ".work/bin/work-view --ready && gh api repos/nklisch/silas/issues --method \"P\"\"OST\"",
+    "expected": "review",
+    "reason": "shell quote concatenation still spells a mutating gh api method"
+  },
+  {
+    "command": "gh api repos/nklisch/silas/issues -X $'DELETE' && .work/bin/work-view --ready",
+    "expected": "review",
+    "reason": "ANSI-C quoted gh api method still spells DELETE"
+  },
+  {
+    "command": ".work/bin/work-view --ready && gh api repos/nklisch/silas/issues --method=$'PATCH'",
+    "expected": "review",
+    "reason": "ANSI-C quoted gh api method still spells PATCH"
+  },
+  {
+    "command": ".work/bin/work-view --ready; .work/bin/work-view --blocked",
+    "expected": "fast_path",
+    "reason": "semicolon block of independently approved work-view queries is approved"
+  },
+  {
+    "command": ".work/bin/work-view --ready\n.work/bin/work-view --blocked",
+    "expected": "fast_path",
+    "reason": "newline block of independently approved work-view queries is approved"
+  },
+  {
+    "command": ".work/bin/work-view --ready && rm -rf -- /",
+    "expected": "hard_block",
+    "reason": "root recursive delete remains hard-blocked inside && chain"
+  },
+  {
+    "command": "git status --short; git log --oneline -3",
+    "expected": "fast_path",
+    "reason": "semicolon block is approved when every top-level command is independently approved"
+  },
+  {
+    "command": "git log --oneline -6\n\ngit status --short | sed -n '1,120p'\n\necho 'Ready items:'\n.work/bin/work-view --ready | sed -n '1,80p'",
+    "expected": "fast_path",
+    "reason": "bare newline block with blank lines is approved when every non-empty command is independently approved"
+  },
+  {
+    "command": "cd /home/nathan/dev/pi-model-modes; npm run typecheck 2>&1 | tail -10",
+    "expected": "fast_path",
+    "reason": "cd followed by a routine check command is approved as a safe command block"
+  },
+  {
+    "command": ".work/bin/work-view --ready; printf '%s\\n' done; git status --short",
+    "expected": "fast_path",
+    "reason": "multiple semicolon-separated inspection commands are approved when each command is safe"
+  },
+  {
+    "command": "printf '%s\\n' 'a;b && c || d'\ngit status --short",
+    "expected": "fast_path",
+    "reason": "operators inside quotes are data, not shell structure"
+  },
+  {
+    "command": "grep needle missing.txt || true",
+    "expected": "fast_path",
+    "reason": "safe read command with true fallback only suppresses a non-zero miss"
+  },
+  {
+    "command": "rg needle missing-dir || :",
+    "expected": "fast_path",
+    "reason": "safe read command with colon fallback only suppresses a non-zero miss"
+  },
+  {
+    "command": "git status --short | grep '^ M' || true",
+    "expected": "fast_path",
+    "reason": "safe inspection pipeline with true fallback only suppresses no-match exit"
+  },
+  {
+    "command": "git status --short && .work/bin/work-view --ready || true",
+    "expected": "fast_path",
+    "reason": "safe && chain with true fallback only suppresses non-zero exit"
+  },
+  {
+    "command": "gh pr checks 91 --watch=false || true",
+    "expected": "fast_path",
+    "reason": "read-only GitHub check inspection with true fallback is approved"
+  },
+  {
+    "command": "git status --short; cat ~/.ssh/id_rsa",
+    "expected": "review",
+    "reason": "semicolon block must not hide secret file reads"
+  },
+  {
+    "command": "git status --short; rm -rf build",
+    "expected": "review",
+    "reason": "semicolon block must not hide recursive deletion"
+  },
+  {
+    "command": "git status --short; rm -rf -- /",
+    "expected": "hard_block",
+    "reason": "root recursive deletion remains hard-blocked inside a semicolon block"
+  },
+  {
+    "command": ".work/bin/work-view --ready\ncat script.sh | sh",
+    "expected": "review",
+    "reason": "newline block must not hide pipe-to-shell"
+  },
+  {
+    "command": "git status --short; gh api repos/nklisch/silas/issues --method \"P\"\"OST\"",
+    "expected": "review",
+    "reason": "semicolon block must not hide shell-quoted mutating gh api method"
+  },
+  {
+    "command": "git status --short; find . '-delete'",
+    "expected": "review",
+    "reason": "semicolon block must not hide quoted destructive find action"
+  },
+  {
+    "command": "# inspect status\ngit status --short",
+    "expected": "review",
+    "reason": "comment-led multi-line snippets remain review-gated in this ratchet"
+  },
+  {
+    "command": "git status --short\ncat <<'EOF'\nhello\nEOF",
+    "expected": "review",
+    "reason": "heredocs remain review-gated in command blocks"
+  },
+  {
+    "command": "grep needle missing.txt || sh -c 'touch /tmp/or-owned'",
+    "expected": "review",
+    "reason": "fallback after || must not execute shell code"
+  },
+  {
+    "command": "grep needle missing.txt || echo missing",
+    "expected": "review",
+    "reason": "this ratchet intentionally approves only true/colon fallbacks"
+  },
+  {
+    "command": "grep needle missing.txt || true && rm -rf build",
+    "expected": "review",
+    "reason": "fallback position must not hide a later destructive && segment"
+  },
+  {
+    "command": "grep needle missing.txt || true || rm -rf build",
+    "expected": "review",
+    "reason": "multiple || fallbacks are not approved"
+  },
+  {
+    "command": "grep needle missing.txt || true; rm -rf build",
+    "expected": "review",
+    "reason": "safe fallback in one block does not permit an unsafe later block"
+  },
+  {
+    "command": "grep needle missing.txt || ${TRUE}",
+    "expected": "review",
+    "reason": "fallback must be the literal shell no-op, not an expansion"
+  },
+  {
+    "command": "true",
+    "expected": "review",
+    "reason": "true is approved only as a narrow || fallback, not as a standalone command"
+  },
+  {
+    "command": ":",
+    "expected": "review",
+    "reason": "colon is approved only as a narrow || fallback, not as a standalone command"
+  },
+  {
+    "command": "git status --short; true",
+    "expected": "review",
+    "reason": "true is not an approved standalone command block"
+  },
+  {
+    "command": "git status --short; :",
+    "expected": "review",
+    "reason": "colon is not an approved standalone command block"
+  },
+  {
+    "command": "git status --short &",
+    "expected": "review",
+    "reason": "backgrounding remains review-gated"
+  },
+  {
+    "command": "git status --short; cat f |& head",
+    "expected": "review",
+    "reason": "stderr pipe syntax remains review-gated"
+  },
+  {
+    "command": "git status --short; (git log --oneline -3)",
+    "expected": "review",
+    "reason": "subshell groups remain review-gated"
+  },
+  {
+    "command": "git status --short; { git log --oneline -3; }",
+    "expected": "review",
+    "reason": "brace groups remain review-gated"
+  },
+  {
+    "command": "grep needle missing.txt ||",
+    "expected": "review",
+    "reason": "empty || fallback is not approved"
+  },
+  {
+    "command": "git status --short||true",
+    "expected": "fast_path",
+    "reason": "no-space || true fallback is shell-equivalent to the approved narrow fallback"
+  },
+  {
+    "command": "grep needle missing.txt||:",
+    "expected": "fast_path",
+    "reason": "no-space || colon fallback is shell-equivalent to the approved narrow fallback"
+  },
+  {
+    "command": "git diff > /tmp/x.patch; git status --short",
+    "expected": "review",
+    "reason": "stdout redirects remain review-gated inside command blocks"
+  }
+]

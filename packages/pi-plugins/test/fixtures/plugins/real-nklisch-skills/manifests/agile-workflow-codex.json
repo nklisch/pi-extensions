@@ -1,0 +1,28 @@
+{
+  "name": "agile-workflow",
+  "version": "0.16.1",
+  "description": "Markdown-based work-tracking substrate for AI-driven projects. Items as files in .work/, late-binding releases, gates that produce items, goal-backed autopilot queue runner.",
+  "author": {
+    "name": "nklisch"
+  },
+  "repository": "https://github.com/nklisch/skills",
+  "license": "MIT",
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Agile Workflow",
+    "shortDescription": "Substrate tracking with goal-backed autopilot",
+    "longDescription": "Skills for substrate-driven work tracking. Items as files in .work/, late-binding releases, gates that produce items (security, tests, cruft, docs, patterns), and a goal-backed autopilot queue runner.",
+    "developerName": "nklisch",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Bash"
+    ],
+    "defaultPrompt": [
+      "Use agile-workflow to inspect the substrate queue and recommend the next ready item."
+    ],
+    "websiteURL": "https://github.com/nklisch/skills"
+  }
+}

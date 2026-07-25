@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "scope": { "kind": "project", "projectKey": "project-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222" },
+  "generation": 0,
+  "documents": [
+    {
+      "kind": "projectLocal",
+      "generation": 0,
+      "blob": "state-blob-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+}

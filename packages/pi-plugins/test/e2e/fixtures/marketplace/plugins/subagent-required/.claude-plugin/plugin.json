@@ -1,0 +1,6 @@
+{
+  "name": "subagent-required",
+  "description": "Subagent interception fixture",
+  "version": "1.0.0",
+  "hooks": "./hooks/hooks.json"
+}

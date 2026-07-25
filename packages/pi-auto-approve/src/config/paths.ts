@@ -1,0 +1,62 @@
+import { createHash } from "node:crypto";
+import { homedir } from "node:os";
+import path from "node:path";
+
+export interface ConfigPaths {
+  readonly userConfigRoot: string;
+  readonly globalConfigFile: string;
+  readonly projectDir: string;
+  readonly projectOverlayFile: string;
+  readonly repoPolicyFile: string;
+  readonly projectKey: string;
+}
+
+export function resolveUserConfigRoot(): string {
+  const home = homedir();
+
+  switch (process.platform) {
+    case "win32":
+      return path.join(
+        process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"),
+        "pi",
+        "pi-auto-approve",
+      );
+    case "darwin":
+      return path.join(
+        home,
+        "Library",
+        "Application Support",
+        "pi",
+        "pi-auto-approve",
+      );
+    default:
+      return path.join(
+        process.env.XDG_CONFIG_HOME ?? path.join(home, ".config"),
+        "pi",
+        "pi-auto-approve",
+      );
+  }
+}
+
+export function projectKeyFor(cwd: string): string {
+  const absolute = path.resolve(cwd);
+  const hash = createHash("sha256").update(absolute).digest("hex").slice(0, 8);
+  const sanitized = path.basename(absolute).replace(/[^a-zA-Z0-9_-]/g, "_");
+
+  return `${sanitized}-${hash}`;
+}
+
+export function resolveConfigPaths(cwd: string): ConfigPaths {
+  const userConfigRoot = resolveUserConfigRoot();
+  const projectKey = projectKeyFor(cwd);
+  const projectDir = path.join(userConfigRoot, "projects", projectKey);
+
+  return {
+    userConfigRoot,
+    globalConfigFile: path.join(userConfigRoot, "global.json"),
+    projectDir,
+    projectOverlayFile: path.join(projectDir, "overlay.json"),
+    repoPolicyFile: path.join(cwd, ".pi-auto-approve", "policy.json"),
+    projectKey,
+  };
+}

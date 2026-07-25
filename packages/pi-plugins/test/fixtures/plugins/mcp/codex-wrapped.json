@@ -1,0 +1,10 @@
+{
+  "mcp_servers": {
+    "search": {
+      "command": "node",
+      "args": ["server.js"],
+      "env": {"TOKEN": "${TOKEN}"},
+      "capabilities": ["search"]
+    }
+  }
+}

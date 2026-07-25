@@ -1,0 +1,198 @@
+[
+  {
+    "id": "strict-routine-edit-allow",
+    "posture": "strict",
+    "toolName": "edit",
+    "input": {
+      "path": "src/runtime/example.ts",
+      "oldText": "before",
+      "newText": "after"
+    },
+    "expected": "allow",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.file.mutate",
+      "ruleId": "pi.file.mutate:allow-project-scoped-mutation"
+    }
+  },
+  {
+    "id": "strict-routine-write-allow",
+    "posture": "strict",
+    "toolName": "write",
+    "input": { "path": "test/fixtures/generated.txt", "content": "hello" },
+    "expected": "allow",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.file.mutate",
+      "ruleId": "pi.file.mutate:allow-project-scoped-mutation"
+    }
+  },
+  {
+    "id": "default-routine-edit-allow",
+    "posture": "default",
+    "toolName": "edit",
+    "input": { "path": "docs/NOTE.md", "oldText": "old", "newText": "new" },
+    "expected": "allow",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.file.mutate",
+      "ruleId": "pi.file.mutate:allow-project-scoped-mutation"
+    }
+  },
+  {
+    "id": "default-routine-write-allow",
+    "posture": "default",
+    "toolName": "write",
+    "input": { "path": ".work/active/stories/example.md", "content": "story" },
+    "expected": "allow",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.file.mutate",
+      "ruleId": "pi.file.mutate:allow-project-scoped-mutation"
+    }
+  },
+  {
+    "id": "permissive-routine-edit-allow",
+    "posture": "permissive",
+    "toolName": "edit",
+    "input": {
+      "path": "test/runtime/example.test.ts",
+      "oldText": "red",
+      "newText": "green"
+    },
+    "expected": "allow",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.file.mutate",
+      "ruleId": "pi.file.mutate:allow-project-scoped-mutation"
+    }
+  },
+  {
+    "id": "permissive-routine-write-allow",
+    "posture": "permissive",
+    "toolName": "write",
+    "input": {
+      "path": "src/generated.ts",
+      "content": "export const value = 1;"
+    },
+    "expected": "allow",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.file.mutate",
+      "ruleId": "pi.file.mutate:allow-project-scoped-mutation"
+    }
+  },
+  {
+    "id": "trust-agents-review",
+    "posture": "strict",
+    "toolName": "edit",
+    "input": { "path": "AGENTS.md", "oldText": "old", "newText": "new" },
+    "expected": "review",
+    "expectedTrustBoundary": "project-overlay",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.file.mutate",
+      "ruleId": "pi.file.mutate:review-trust-boundary-target"
+    }
+  },
+  {
+    "id": "trust-package-write-review",
+    "posture": "default",
+    "toolName": "write",
+    "input": { "path": "package.json", "content": "{}" },
+    "expected": "review",
+    "expectedTrustBoundary": "package-script",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.file.mutate",
+      "ruleId": "pi.file.mutate:review-trust-boundary-target"
+    }
+  },
+  {
+    "id": "trust-pi-pack-review",
+    "posture": "permissive",
+    "toolName": "edit",
+    "input": {
+      "path": ".pi/packs/local.json",
+      "oldText": "{}",
+      "newText": "{\"x\":true}"
+    },
+    "expected": "review",
+    "expectedTrustBoundary": "policy-pack",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.file.mutate",
+      "ruleId": "pi.file.mutate:review-trust-boundary-target"
+    }
+  },
+  {
+    "id": "outside-path-review",
+    "posture": "strict",
+    "toolName": "edit",
+    "input": { "path": "/srv/outside.txt", "oldText": "old", "newText": "new" },
+    "expected": "review",
+    "expectedReason": "no matching rule"
+  },
+  {
+    "id": "system-path-review",
+    "posture": "default",
+    "toolName": "write",
+    "input": { "path": "/etc/pi/config.json", "content": "x" },
+    "expected": "review",
+    "expectedReason": "no matching rule"
+  },
+  {
+    "id": "denied-path-review",
+    "posture": "permissive",
+    "toolName": "edit",
+    "input": { "path": "secrets/key.txt", "oldText": "old", "newText": "new" },
+    "projectScope": { "deniedDirectories": ["/repo/secrets"] },
+    "expected": "review",
+    "expectedReason": "no matching rule"
+  },
+  {
+    "id": "unknown-tilde-user-review",
+    "posture": "strict",
+    "toolName": "write",
+    "input": { "path": "~other/file.txt", "content": "x" },
+    "expected": "review",
+    "expectedReason": "parse diagnostics present"
+  },
+  {
+    "id": "dynamic-variable-path-review",
+    "posture": "default",
+    "toolName": "write",
+    "input": { "path": "$TARGET_FILE", "content": "x" },
+    "expected": "review",
+    "expectedReason": "parse diagnostics present"
+  },
+  {
+    "id": "dynamic-glob-path-review",
+    "posture": "permissive",
+    "toolName": "edit",
+    "input": { "path": "src/*.ts", "oldText": "old", "newText": "new" },
+    "expected": "review",
+    "expectedReason": "pi.home.safe:review-trust-boundary-home-mutation",
+    "expectedProvenance": {
+      "source": "shipped",
+      "packId": "pi.home.safe",
+      "ruleId": "pi.home.safe:review-trust-boundary-home-mutation"
+    }
+  },
+  {
+    "id": "malformed-edit-review",
+    "posture": "strict",
+    "toolName": "edit",
+    "input": { "path": "src/a.ts" },
+    "expected": "review",
+    "expectedReason": "parse diagnostics present"
+  },
+  {
+    "id": "malformed-write-review",
+    "posture": "default",
+    "toolName": "write",
+    "input": { "path": "src/a.ts" },
+    "expected": "review",
+    "expectedReason": "parse diagnostics present"
+  }
+]

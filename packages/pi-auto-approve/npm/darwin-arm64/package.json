@@ -1,0 +1,16 @@
+{
+  "name": "pi-auto-approve-darwin-arm64",
+  "version": "0.1.0",
+  "description": "Pi Clearance native engine for macOS arm64",
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "clearance-core.darwin-arm64.node",
+  "files": [
+    "clearance-core.darwin-arm64.node"
+  ]
+}

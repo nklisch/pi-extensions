@@ -1,0 +1,10 @@
+{
+  "docs": {
+    "url": "https://example.invalid/mcp",
+    "headers": {"Authorization": "Bearer ${TOKEN}"}
+  },
+  "local": {
+    "command": "python3",
+    "args": ["server.py"]
+  }
+}
