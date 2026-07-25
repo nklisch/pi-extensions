@@ -76,7 +76,10 @@
     "rollup": "^4.0.0",
     "rollup-plugin-dts": "^6.0.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.0.0"
+    "vitest": "^4.0.0",
+    "@jridgewell/remapping": "^2.3.5",
+    "magic-string": "^0.30.21",
+    "convert-source-map": "^2.0.0"
   },
   "pi": {
     "extensions": [
