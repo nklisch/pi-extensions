@@ -1,18 +1,20 @@
 # Maintained fork policy
 
-This repository is a narrow MIT-licensed fork of
+This package is a narrow MIT-licensed fork of
 [`nicobailon/pi-mcp-adapter`](https://github.com/nicobailon/pi-mcp-adapter).
 It exists only to carry the generic programmatic configuration-source lifecycle
 until equivalent released upstream bytes pass the same qualification.
+Its home is the `nklisch/pi-extensions` monorepo (`packages/pi-mcp-adapter`);
+pre-monorepo history lives in the `nklisch/pi-mcp-adapter` fork repository.
 
 ## Provenance
 
 - Upstream base package: `pi-mcp-adapter@2.11.0`
 - Upstream base commit: `82724dccc13a49310530898f922bafff12b7f3fe`
 - Upstream tag: `v2.11.0`
-- Planned fork repository: `nklisch/pi-mcp-adapter`
-- Planned npm package: `@nklisch/pi-mcp-adapter`
-- Local candidate version: `2.11.0-nklisch.0`
+- npm package: `@nklisch/pi-mcp-adapter`, published through `2.11.0-nklisch.3`
+- Security reports: private GitHub security-advisory channel on the fork's
+  home repository
 - License: MIT; the upstream `LICENSE`, copyright, authorship, Git history,
   README, changelog, CLI, extension entry, and runtime files are retained.
 
@@ -42,9 +44,7 @@ boundary belong upstream first.
 
 Nathan Klisch owns npm publication, GitHub repository administration, security
 triage, upstream rebases, and emergency unpublishing/deprecation decisions.
-Security reports should be handled through the fork repository's private GitHub
-security-advisory channel once the repository exists. Before that channel exists,
-this package must not be published.
+Security reports go through the private GitHub security-advisory channel.
 
 For an upstream security release or high-impact protocol fix:
 
@@ -64,15 +64,15 @@ publication. Critical upstream security notices are evaluated immediately.
 
 ## Qualification commands
 
-Run on Node 24 from a clean checkout:
+Run on Node 24 from a clean monorepo checkout:
 
 ```bash
-npm ci
-npm install --prefix examples/interactive-visualizer --package-lock=false --ignore-scripts
-npm run build --prefix examples/interactive-visualizer
-npm test
-npm run test:package
-npm pack --dry-run
+npm install
+npm install --prefix packages/pi-mcp-adapter/examples/interactive-visualizer --package-lock=false --ignore-scripts
+npm run build --prefix packages/pi-mcp-adapter/examples/interactive-visualizer
+npm test --workspace @nklisch/pi-mcp-adapter
+npm run test:package --workspace @nklisch/pi-mcp-adapter
+npm pack --dry-run --workspace @nklisch/pi-mcp-adapter
 ```
 
 The visualizer build is an existing upstream-suite prerequisite: its generated
@@ -99,34 +99,27 @@ Required evidence:
 
 ## Publication checklist
 
-Publication and push are operator actions. Never infer these receipts from a
-local build.
+Publication is an operator action through the monorepo's trusted-publishing
+workflow. Never infer these receipts from a local build.
 
-1. Create `nklisch/pi-mcp-adapter` as a GitHub fork preserving this full history.
-2. Configure branch protection and the private security-reporting channel.
-3. Add the GitHub fork as `origin`; retain `nicobailon/pi-mcp-adapter` as
-   `upstream`.
-4. Verify npm authentication and ownership for the `@nklisch` scope.
-5. Choose a final immutable version; replace the local candidate version only in
-   a release commit.
-6. Rerun all qualification against the exact release commit and packed tarball.
-7. Push the release commit and annotated tag.
-8. Publish with public access and no provenance claims beyond receipts actually
-   produced by npm/GitHub.
-9. Record all of the following together:
+1. Choose a final immutable version in a release commit (`npm version ...
+   --workspace @nklisch/pi-mcp-adapter --no-git-tag-version`).
+2. Rerun all qualification against the exact release commit (`npm run check`).
+3. Dispatch the **Publish Pi extension** workflow for `pi-mcp-adapter`.
+4. Record all of the following together:
    - npm version and `sha512` integrity;
    - npm tarball URL and registry publication time;
    - npm `gitHead`;
-   - fork repository commit and annotated tag object;
+   - monorepo commit;
    - upstream base commit and release tag;
    - included `LICENSE` digest;
    - Node and Pi versions used for qualification; and
    - test command receipts.
-10. Reinstall by exact npm version in a fresh directory and rerun package exports
-    plus downstream conformance against the registry bytes.
+5. Reinstall by exact npm version in a fresh directory and rerun package exports
+   plus downstream conformance against the registry bytes.
 
-Only step 10 can unblock a production consumer. A local tarball, commit, tag,
-GitHub fork, or successful dry run is not a published package.
+Only step 5 can unblock a production consumer. A local tarball, commit, tag, or
+successful dry run is not a published package.
 
 ## Emergency rollback
 

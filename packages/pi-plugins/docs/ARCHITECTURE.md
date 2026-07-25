@@ -76,9 +76,10 @@ ambiguous identity prevent activation.
 
 ## Package shape
 
-Source is TypeScript 7.0. The private `@nklisch/pi-plugins@0.0.0` candidate
-builds ESM JavaScript for Node.js 24 and publishes compiled entry points rather
-than relying on Pi's runtime TypeScript loader. Its Pi resource list loads a
+Source is TypeScript 7.0. The public `@nklisch/pi-plugins` package (0.1.x,
+published from the pi-extensions monorepo) builds ESM JavaScript for Node.js 24
+and publishes compiled entry points rather than relying on Pi's runtime
+TypeScript loader. Its Pi resource list loads a
 candidate-owned receipt wrapper for the bundled subagent extension before the
 host extension, so one top-level Pi installation composes both runtimes. Zod 4
 schemas are the runtime contract source of truth; public TypeScript types are

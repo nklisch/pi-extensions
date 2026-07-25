@@ -21,10 +21,10 @@ Individual components are not independently managed.
 - Module system: ESM
 - Runtime: Node.js 24 or newer
 - Host: Pi coding agent
-- Distribution: private `@nklisch/pi-plugins` Pi package (candidate version
-  `0.0.0`) containing the plugin-host extension and its runtime dependencies;
-  one top-level Pi installation loads the receipt-gated bundled subagent
-  extension before the host extension
+- Distribution: public `@nklisch/pi-plugins` Pi package (0.1.x, published
+  from the pi-extensions monorepo) containing the plugin-host extension and
+  its runtime dependencies; one top-level Pi installation loads the
+  receipt-gated bundled subagent extension before the host extension
 - Validation: runtime schemas at every external configuration boundary
 - Tests: Vitest with isolated filesystem, Git, process, and Pi-host adapters
 

@@ -49,7 +49,7 @@ Node-API addon, not a package-install build:
 
 Pi loads `src/index.ts` as the extension composition root. `src/native/loader.ts`
 resolves the local development artifact or the matching napi-rs optional package
-(`pi-auto-approve-linux-x64-gnu` or `pi-auto-approve-darwin-arm64`). A missing
+(`pi-clearance-linux-x64-gnu` or `pi-clearance-darwin-arm64`). A missing
 artifact refuses to arm the extension; no install script or Cargo fallback exists.
 `pnpm build:native` is contributor-only. Release preparation builds both targets,
 stages them with `pnpm native:prepare`, and publishes the platform packages before

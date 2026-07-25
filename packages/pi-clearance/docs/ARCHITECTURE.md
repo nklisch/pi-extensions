@@ -28,7 +28,7 @@ TypeScript owns Pi lifecycle, config I/O, package discovery, settings, audit, an
 - `src/replay/` — TypeScript corpus acquisition and proposal/presentation adapters; replay computation is delegated to native kernels.
 
 At publish time, napi-rs stages `clearance-core.<platform>.node` into the
-`pi-auto-approve-linux-x64-gnu` and `pi-auto-approve-darwin-arm64` optional
+`pi-clearance-linux-x64-gnu` and `pi-clearance-darwin-arm64` optional
 packages. The loader first supports the repository-local artifact for builds and
 then resolves the matching optional package. It never builds Rust during install.
 
