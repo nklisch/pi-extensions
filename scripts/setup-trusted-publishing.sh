@@ -34,8 +34,16 @@ PACKAGES=(
 )
 
 # Print the trust ids currently registered for a package, one per line.
+# Warns loudly when the list call itself fails (usually a fresh-2FA wall),
+# since silently assuming "no trusts" masks stale ones that block creation.
 trust_ids() {
-  npm trust list "$1" --json 2>/dev/null | node -e '
+  local output status
+  output=$(npm trust list "$1" --json 2>&1) && status=0 || status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "    WARNING: trust list failed for $1 (auth?) — if create 409s, revoke manually" >&2
+    return
+  fi
+  printf '%s' "$output" | node -e '
     let raw = "";
     process.stdin.on("data", (c) => (raw += c)).on("end", () => {
       try {

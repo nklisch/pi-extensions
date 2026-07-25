@@ -5,8 +5,11 @@ import { fileURLToPath } from "node:url";
 import { loadPackages } from "./package-catalog.mjs";
 
 const selector = process.argv[2];
+const local = process.argv.includes("--local");
 if (!selector) {
-  console.error("Usage: npm run publish:package -- <all|directory|@nklisch/package>");
+  console.error("Usage: npm run publish:package -- <all|directory|@nklisch/package> [--local]");
+  console.error("  --local: interactive publish from this machine (2FA prompt, no CI provenance).");
+  console.error("           Needed once per never-published package before trust can be configured.");
   process.exit(2);
 }
 
@@ -41,7 +44,11 @@ for (const pkg of selected) {
   const tarball = join(pkg.directory, report[0].filename);
 
   console.log(`Publishing ${spec} from ${pkg.directoryName}...`);
-  const publish = spawnSync("npm", ["publish", tarball, "--access", "public", "--provenance"], {
+  // Provenance statements are only generated in CI (OIDC); local first-time
+  // publishes authenticate interactively and ship without them.
+  const publishArgs = ["publish", tarball, "--access", "public"];
+  if (!local) publishArgs.push("--provenance");
+  const publish = spawnSync("npm", publishArgs, {
     cwd: pkg.directory,
     stdio: "inherit",
   });
