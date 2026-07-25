@@ -3,13 +3,19 @@
 # every package in this monorepo against nklisch/pi-extensions +
 # .github/workflows/publish.yml.
 #
+# Idempotent: for each package it revokes every existing trust relationship
+# (stale ones point at the standalone repos from before the monorepo) and
+# creates the single correct one. Safe to re-run.
+#
 # Prerequisites:
-#   npm login   (account must own the @nklisch scope; 2FA prompted as needed)
+#   npm login   (account must own the @nklisch scope)
+#
+# Note: npm requires fresh 2FA for every account-management operation
+# (list/create/revoke). Expect a browser or OTP prompt per package per step.
 #
 # New, never-published package names may be rejected by the registry. If a
-# package fails with a not-found-style error, publish it once manually
-# (npm run publish:package -- <name> with NPM_TOKEN or an interactive
-# publish), then re-run this script — thereafter only the workflow publishes.
+# package fails with a not-found-style error, publish it once manually, then
+# re-run this script — thereafter only the workflow publishes.
 set -u
 
 REPO="nklisch/pi-extensions"
@@ -27,14 +33,44 @@ PACKAGES=(
   "@nklisch/pi-zai-research"
 )
 
+# Print the trust ids currently registered for a package, one per line.
+trust_ids() {
+  npm trust list "$1" --json 2>/dev/null | node -e '
+    let raw = "";
+    process.stdin.on("data", (c) => (raw += c)).on("end", () => {
+      try {
+        const start = raw.search(/[[{]/);
+        const parsed = JSON.parse(raw.slice(start));
+        const list = Array.isArray(parsed) ? parsed : (parsed.trusts ?? parsed.relationships ?? [parsed]);
+        for (const entry of list) {
+          const id = entry?.id ?? entry?.trustId ?? entry?.trust_id;
+          if (id) console.log(id);
+        }
+      } catch { /* no trusts or unparsable output */ }
+    });
+  '
+}
+
 failures=()
 for pkg in "${PACKAGES[@]}"; do
-  echo "==> npm trust github ${pkg} --file ${WORKFLOW_FILE} --repo ${REPO}"
+  echo "==> ${pkg}"
+
+  ids=$(trust_ids "${pkg}")
+  if [ -n "${ids}" ]; then
+    while IFS= read -r id; do
+      echo "    revoking stale trust ${id}"
+      npm trust revoke "${pkg}" --id="${id}" --yes || failures+=("${pkg} (revoke ${id})")
+    done <<< "${ids}"
+  else
+    echo "    no existing trusts"
+  fi
+
+  echo "    creating trust -> ${REPO} / ${WORKFLOW_FILE}"
   if npm trust github "${pkg}" --file "${WORKFLOW_FILE}" --repo "${REPO}" --allow-publish --yes; then
     echo "    ok"
   else
     echo "    FAILED"
-    failures+=("${pkg}")
+    failures+=("${pkg} (create)")
   fi
 done
 
@@ -47,6 +83,6 @@ done
 
 if ((${#failures[@]} > 0)); then
   echo
-  echo "Failed packages: ${failures[*]}" >&2
+  echo "Failures: ${failures[*]}" >&2
   exit 1
 fi
