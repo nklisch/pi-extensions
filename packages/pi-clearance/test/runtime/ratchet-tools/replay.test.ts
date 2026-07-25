@@ -487,7 +487,7 @@ function resolvedPolicyWithSourceSnapshots() {
           globalConfigFile: "/config/global.json",
           projectDir: "/config/projects/project-1",
           projectOverlayFile: "/config/project.json",
-          repoPolicyFile: `${TEST_CWD}/.pi-auto-approve/policy.json`,
+          repoPolicyFile: `${TEST_CWD}/.pi-clearance/policy.json`,
           projectKey: "project-1",
         },
         global: normalizedGlobal({ version: 1 }),

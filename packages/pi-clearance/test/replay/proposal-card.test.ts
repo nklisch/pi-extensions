@@ -269,9 +269,9 @@ function dataPackPolicyProposal(
     applicationMode: "writable-after-approval",
     target: {
       kind: "user-project-overlay",
-      path: "/home/nathan/.config/pi/pi-auto-approve/projects/pi-auto-approve.json",
-      projectKey: "pi-auto-approve",
-      projectRoot: "/home/nathan/dev/pi-auto-approve",
+      path: "/home/nathan/.config/pi/pi-clearance/projects/pi-clearance.json",
+      projectKey: "pi-clearance",
+      projectRoot: "/home/nathan/dev/pi-clearance",
     },
     change: {
       kind: "policy-pack",
@@ -288,7 +288,7 @@ function dataPackPolicyProposal(
         },
       ],
       fileWrite: {
-        path: "/home/nathan/.config/pi/pi-auto-approve/projects/pi-auto-approve.json",
+        path: "/home/nathan/.config/pi/pi-clearance/projects/pi-clearance.json",
         format: "json",
         mode: "patch",
         atomic: true,
@@ -348,9 +348,9 @@ function reviewerConfigProposal(
     applicationMode: "writable-after-approval",
     target: {
       kind: "user-project-overlay",
-      path: "/home/nathan/.config/pi/pi-auto-approve/projects/pi-auto-approve.json",
-      projectKey: "pi-auto-approve",
-      projectRoot: "/home/nathan/dev/pi-auto-approve",
+      path: "/home/nathan/.config/pi/pi-clearance/projects/pi-clearance.json",
+      projectKey: "pi-clearance",
+      projectRoot: "/home/nathan/dev/pi-clearance",
     },
     change: {
       kind: "reviewer-config",
@@ -388,9 +388,9 @@ function projectScopeProposal(
     applicationMode: "writable-after-approval",
     target: {
       kind: "user-project-overlay",
-      path: "/home/nathan/.config/pi/pi-auto-approve/projects/pi-auto-approve.json",
-      projectKey: "pi-auto-approve",
-      projectRoot: "/home/nathan/dev/pi-auto-approve",
+      path: "/home/nathan/.config/pi/pi-clearance/projects/pi-clearance.json",
+      projectKey: "pi-clearance",
+      projectRoot: "/home/nathan/dev/pi-clearance",
     },
     change: {
       kind: "project-scope-config",
@@ -433,7 +433,7 @@ function packagePackEnablementProposal(
     applicationMode: "writable-after-approval",
     target: {
       kind: "package-pack-config",
-      path: "~/.config/pi-auto-approve/config.json",
+      path: "~/.config/pi-clearance/config.json",
       packId: "test-safety",
       packageName: "pi-test-safety",
       packageVersion: "1.0.0",
@@ -454,7 +454,7 @@ function packagePackEnablementProposal(
           subject: "package",
           packId: "test-safety",
         },
-        targetPath: "~/.config/pi-auto-approve/config.json",
+        targetPath: "~/.config/pi-clearance/config.json",
         patch: [
           {
             op: "replace",

@@ -686,8 +686,8 @@ describe("createPackageRegistrationStore deterministic snapshots", () => {
     const first = store.collect("startup");
     const second = store.collect("reload");
 
-    expect(first.requestId).toBe("pi-auto-approve:packs:request:1");
-    expect(second.requestId).toBe("pi-auto-approve:packs:request:2");
+    expect(first.requestId).toBe("pi-clearance:packs:request:1");
+    expect(second.requestId).toBe("pi-clearance:packs:request:2");
     expect(first.requestId).not.toBe(second.requestId);
   });
 

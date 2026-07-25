@@ -24,7 +24,7 @@ function fakeContext(entries?: readonly unknown[]): ExtensionContext {
         };
 
   return {
-    cwd: "/tmp/pi-auto-approve-test-project",
+    cwd: "/tmp/pi-clearance-test-project",
     ...(sessionManager === undefined ? {} : { sessionManager }),
   } as unknown as ExtensionContext;
 }
@@ -50,11 +50,11 @@ function sessionToolCall(id: string, command: string): unknown {
 function resolvedPolicy(): ResolvedPolicy {
   return {
     config: {
-      cwd: "/tmp/pi-auto-approve-test-project",
+      cwd: "/tmp/pi-clearance-test-project",
       homeDirectory: "/home/user",
       projectScope: {
-        roots: ["/tmp/pi-auto-approve-test-project"],
-        writableDirectories: ["/tmp/pi-auto-approve-test-project"],
+        roots: ["/tmp/pi-clearance-test-project"],
+        writableDirectories: ["/tmp/pi-clearance-test-project"],
         tempDirectories: ["/tmp"],
         deniedDirectories: [],
         safeHomeDirectories: [],

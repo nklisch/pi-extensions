@@ -617,7 +617,7 @@ function proposalWithReplayDelta(
     applicationMode: "writable-after-approval",
     target: {
       kind: "user-global-config",
-      path: "~/.config/pi-auto-approve/config.json",
+      path: "~/.config/pi-clearance/config.json",
     },
     change: {
       kind: "policy-pack",

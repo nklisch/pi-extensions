@@ -29,7 +29,7 @@ let configHome: string;
 
 beforeEach(async () => {
   setPlatform("linux");
-  tempRoot = await mkdtemp(path.join(tmpdir(), "pi-auto-approve-extension-"));
+  tempRoot = await mkdtemp(path.join(tmpdir(), "pi-clearance-extension-"));
   cwd = path.join(tempRoot, "repo");
   configHome = path.join(tempRoot, "xdg-config");
   process.env = { ...ORIGINAL_ENV, XDG_CONFIG_HOME: configHome };
@@ -41,7 +41,7 @@ afterEach(() => {
   process.env = { ...ORIGINAL_ENV };
 });
 
-describe("pi-auto-approve extension entry point", () => {
+describe("pi-clearance extension entry point", () => {
   it("registers session_start, before_agent_start, and tool_call handlers", async () => {
     const api = fakeExtensionApi();
 
@@ -240,7 +240,7 @@ describe("pi-auto-approve extension entry point", () => {
   });
 });
 
-describe("pi-auto-approve package registration collection wiring", () => {
+describe("pi-clearance package registration collection wiring", () => {
   it("collects package registrations on session_start before policy resolution", async () => {
     const api = fakeExtensionApi({ events: true });
     await Promise.resolve(piAutoApprove(api));

@@ -37,7 +37,7 @@ const audit: AuditLogger = {
 
 beforeEach(async () => {
   tempRoot = await mkdtemp(
-    path.join(tmpdir(), "pi-auto-approve-policy-cache-"),
+    path.join(tmpdir(), "pi-clearance-policy-cache-"),
   );
   configHome = path.join(tempRoot, "xdg-config");
   process.env = { ...ORIGINAL_ENV, XDG_CONFIG_HOME: configHome };

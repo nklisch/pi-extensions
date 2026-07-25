@@ -47,7 +47,7 @@ function config(): ResolvedConfig {
         globalConfigFile: "/tmp/config/global.json",
         projectDir: "/tmp/config/project",
         projectOverlayFile: "/tmp/config/project/overlay.json",
-        repoPolicyFile: "/tmp/project/.pi-auto-approve/policy.json",
+        repoPolicyFile: "/tmp/project/.pi-clearance/policy.json",
         projectKey: "project-key",
       },
       global: {

@@ -101,7 +101,7 @@ async function bash(command: string) {
 
 const configError: ConfigError = {
   phase: "schema",
-  path: "/repo/.pi-auto-approve.json",
+  path: "/repo/.pi-clearance.json",
   message: "invalid config",
 };
 
@@ -153,7 +153,7 @@ describe("composeEffectivePolicy", () => {
       rules: [],
     });
     expect(result.errors).toEqual([
-      "[schema][/repo/.pi-auto-approve.json] invalid config",
+      "[schema][/repo/.pi-clearance.json] invalid config",
     ]);
     expect(eventNames(sink.entries)).toEqual([
       "project-trusted",

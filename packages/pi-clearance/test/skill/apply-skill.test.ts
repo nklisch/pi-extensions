@@ -47,11 +47,11 @@ interface TestProject {
 
 async function makeProject(name: string): Promise<TestProject> {
   const root = await mkdtemp(
-    path.join(tmpdir(), `pi-auto-approve-skill-${name}-`),
+    path.join(tmpdir(), `pi-clearance-skill-${name}-`),
   );
   const cwd = path.join(root, "repo");
   const configHome = path.join(root, "config-home");
-  const userConfigRoot = path.join(configHome, "pi", "pi-auto-approve");
+  const userConfigRoot = path.join(configHome, "pi", "pi-clearance");
   const runDir = path.join(
     userConfigRoot,
     "ratchet",
@@ -299,7 +299,7 @@ describe("ratchet apply skill integration", () => {
 
     // The legacy helper CLI is not the required workflow or approval path.
     expect(skill).not.toContain("show <proposal-id>");
-    expect(skill).not.toContain("pi-auto-approve-ratchet apply");
+    expect(skill).not.toContain("pi-clearance-ratchet apply");
 
     // The helper survives only as a non-published debug fallback.
     expect(skill).toContain("runRatchetCli()");

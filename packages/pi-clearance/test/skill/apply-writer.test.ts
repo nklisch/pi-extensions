@@ -53,12 +53,12 @@ const TRUSTED_PROJECT = {
 } as const;
 
 const PATHS: ConfigPaths = {
-  userConfigRoot: "/user-config/pi-auto-approve",
-  globalConfigFile: "/user-config/pi-auto-approve/global.json",
-  projectDir: "/user-config/pi-auto-approve/projects/repo-12345678",
+  userConfigRoot: "/user-config/pi-clearance",
+  globalConfigFile: "/user-config/pi-clearance/global.json",
+  projectDir: "/user-config/pi-clearance/projects/repo-12345678",
   projectOverlayFile:
-    "/user-config/pi-auto-approve/projects/repo-12345678/overlay.json",
-  repoPolicyFile: "/repo/.pi-auto-approve/policy.json",
+    "/user-config/pi-clearance/projects/repo-12345678/overlay.json",
+  repoPolicyFile: "/repo/.pi-clearance/policy.json",
   projectKey: "repo-12345678",
 };
 

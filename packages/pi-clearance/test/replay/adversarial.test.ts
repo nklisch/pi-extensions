@@ -56,7 +56,7 @@ function allowProposal(
     applicationMode: "writable-after-approval",
     target: {
       kind: "user-global-config",
-      path: "/home/nathan/.config/pi/pi-auto-approve/global.json",
+      path: "/home/nathan/.config/pi/pi-clearance/global.json",
     },
     change: {
       kind: "policy-pack",
@@ -135,8 +135,8 @@ function dataPackProposal(options: {
     applicationMode: "writable-after-approval",
     target: {
       kind: "user-project-overlay",
-      path: "/home/nathan/.config/pi/pi-auto-approve/projects/pi-auto-approve.json",
-      projectKey: "pi-auto-approve",
+      path: "/home/nathan/.config/pi/pi-clearance/projects/pi-clearance.json",
+      projectKey: "pi-clearance",
       projectRoot: FIXTURE_CWD,
     },
     change: {
@@ -229,7 +229,7 @@ function packagePackEnablementProposal(): StructuredRatchetProposal {
     summary: "Enable a package-contributed touch pack.",
     target: {
       kind: "package-pack-config",
-      path: "/home/nathan/.config/pi/pi-auto-approve/global.json",
+      path: "/home/nathan/.config/pi/pi-clearance/global.json",
       packId: "pkg.touch",
     },
     change: {
@@ -245,7 +245,7 @@ function packagePackEnablementProposal(): StructuredRatchetProposal {
           subject: "package",
           packId: "pkg.touch",
         },
-        targetPath: "/home/nathan/.config/pi/pi-auto-approve/global.json",
+        targetPath: "/home/nathan/.config/pi/pi-clearance/global.json",
         patch: [],
         before: {
           scope: "global",
@@ -315,7 +315,7 @@ function reviewerConfigProposal(): StructuredRatchetProposal {
     reason: "Repeated reviewer ambiguity needs prompt guidance.",
     target: {
       kind: "user-global-config",
-      path: "/home/nathan/.config/pi/pi-auto-approve/global.json",
+      path: "/home/nathan/.config/pi/pi-clearance/global.json",
     },
     change: {
       kind: "reviewer-config",

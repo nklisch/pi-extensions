@@ -36,7 +36,7 @@ let cwd: string;
 let configHome: string;
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(path.join(tmpdir(), "pi-auto-approve-parity-"));
+  tempRoot = await mkdtemp(path.join(tmpdir(), "pi-clearance-parity-"));
   cwd = path.join(tempRoot, "repo");
   configHome = path.join(tempRoot, "xdg-config");
   process.env = { ...ORIGINAL_ENV, XDG_CONFIG_HOME: configHome };

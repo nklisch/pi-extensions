@@ -20,7 +20,7 @@ import {
 const tempRoots: string[] = [];
 
 function tempRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "pi-auto-approve-audit-sink-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-clearance-audit-sink-"));
   tempRoots.push(root);
   return root;
 }

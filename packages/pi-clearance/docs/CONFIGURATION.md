@@ -7,7 +7,7 @@ Pi Clearance uses strict JSON schemas. Missing config is safe and normalizes to 
 - `global.json` — user-owned global mode, packs, reviewer advanced settings, and display preferences.
 - `projects/<project-key>/overlay.json` — user-owned project packs, scope, and trusted prompt appends.
 - Existing `projects/<project-key>/trusted.json` files are inert migration leftovers; Pi Clearance never reads or writes them.
-- `.pi-auto-approve/policy.json` — optional repository policy; tighten-only unless Pi reports the project as trusted.
+- `.pi-clearance/policy.json` — optional repository policy; tighten-only unless Pi reports the project as trusted.
 
 ## Global config
 

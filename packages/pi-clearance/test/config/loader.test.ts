@@ -25,7 +25,7 @@ async function fixture(rawGlobal?: unknown) {
   const cwd = path.join(root, "project");
   await mkdir(cwd, { recursive: true });
   if (rawGlobal !== undefined) {
-    const configDir = path.join(root, "pi", "pi-auto-approve");
+    const configDir = path.join(root, "pi", "pi-clearance");
     await mkdir(configDir, { recursive: true });
     await writeFile(
       path.join(configDir, "global.json"),
@@ -57,7 +57,7 @@ describe("config loader tri-state mode", () => {
 
   it("rejects the removed repository requireTrust key", async () => {
     const cwd = await fixture();
-    const repoDir = path.join(cwd, ".pi-auto-approve");
+    const repoDir = path.join(cwd, ".pi-clearance");
     await mkdir(repoDir, { recursive: true });
     await writeFile(
       path.join(repoDir, "policy.json"),

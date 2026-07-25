@@ -30,7 +30,7 @@ pub fn analyze_tool(tool_name: &str, input: Value) -> ToolShape {
             raw_input: input,
             diagnostics: vec![diagnostic(
                 "tool:unsupported",
-                &format!("Tool \"{tool_name}\" is not yet analyzed by pi-auto-approve"),
+                &format!("Tool \"{tool_name}\" is not yet analyzed by pi-clearance"),
                 DiagnosticSeverity::Warning,
             )],
         });

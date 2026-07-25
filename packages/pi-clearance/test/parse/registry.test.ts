@@ -52,7 +52,7 @@ describe("ToolAnalyzerRegistry", () => {
         expect.objectContaining({
           code: "tool:unsupported",
           severity: "warning",
-          message: 'Tool "legacy_edit" is not yet analyzed by pi-auto-approve',
+          message: 'Tool "legacy_edit" is not yet analyzed by pi-clearance',
         }),
       ],
     });

@@ -34,14 +34,14 @@ export const AUTO_REVIEWER_PACK_REGISTRATION_API_VERSION = 1 as const;
  * registrations from installed package contributors.
  */
 export const AUTO_REVIEWER_PACKS_REQUEST_EVENT =
-  "pi-auto-approve:packs:request" as const;
+  "pi-clearance:packs:request" as const;
 
 /**
  * Event a package contributor emits in response to a request (or unsolicited)
  * carrying an {@link AutoReviewerPackRegistration} payload.
  */
 export const AUTO_REVIEWER_PACKS_REGISTER_EVENT =
-  "pi-auto-approve:packs:register" as const;
+  "pi-clearance:packs:register" as const;
 
 /** How a contributing package was installed. Display provenance only. */
 export type PackageInstallKind =

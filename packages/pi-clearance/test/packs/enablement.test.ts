@@ -23,8 +23,8 @@ import {
 } from "../fixtures/resolved-config.ts";
 
 const PATHS: Pick<ConfigPaths, "globalConfigFile" | "projectOverlayFile"> = {
-  globalConfigFile: "/config/pi-auto-approve/global.json",
-  projectOverlayFile: "/config/pi-auto-approve/projects/repo/overlay.json",
+  globalConfigFile: "/config/pi-clearance/global.json",
+  projectOverlayFile: "/config/pi-clearance/projects/repo/overlay.json",
 };
 
 const PACKAGE_SOURCE: PackSourceInfo & { readonly kind: "package" } = {

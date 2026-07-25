@@ -36,7 +36,7 @@ import type {
 } from "../../src/replay/ratchet.ts";
 
 const CREATED_AT = "2026-06-26T00:00:00.000Z";
-const PROJECT_ROOT = "/home/nathan/dev/pi-auto-approve";
+const PROJECT_ROOT = "/home/nathan/dev/pi-clearance";
 const CORE_MATCHER_PATH = `${PROJECT_ROOT}/.work/design-inputs/core-matcher.json`;
 const SHIPPED_PACK_PATH = `${PROJECT_ROOT}/.work/design-inputs/shipped-pack-rule.json`;
 

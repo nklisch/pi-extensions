@@ -19,7 +19,7 @@ export function resolveUserConfigRoot(): string {
       return path.join(
         process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"),
         "pi",
-        "pi-auto-approve",
+        "pi-clearance",
       );
     case "darwin":
       return path.join(
@@ -27,13 +27,13 @@ export function resolveUserConfigRoot(): string {
         "Library",
         "Application Support",
         "pi",
-        "pi-auto-approve",
+        "pi-clearance",
       );
     default:
       return path.join(
         process.env.XDG_CONFIG_HOME ?? path.join(home, ".config"),
         "pi",
-        "pi-auto-approve",
+        "pi-clearance",
       );
   }
 }
@@ -56,7 +56,7 @@ export function resolveConfigPaths(cwd: string): ConfigPaths {
     globalConfigFile: path.join(userConfigRoot, "global.json"),
     projectDir,
     projectOverlayFile: path.join(projectDir, "overlay.json"),
-    repoPolicyFile: path.join(cwd, ".pi-auto-approve", "policy.json"),
+    repoPolicyFile: path.join(cwd, ".pi-clearance", "policy.json"),
     projectKey,
   };
 }

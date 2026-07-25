@@ -204,13 +204,13 @@ describe("audit entry factories", () => {
         applicationMode: "writable-after-approval",
         decision: "accept",
         targetKind: "user-global-config",
-        targetPath: "/home/user/.config/pi/pi-auto-approve/global.json",
+        targetPath: "/home/user/.config/pi/pi-clearance/global.json",
         write: {
           attempted: true,
           ok: true,
           changed: true,
           planId: "ratchet-proposal:123",
-          backupPath: "/home/user/.config/pi/pi-auto-approve/global.json.bak",
+          backupPath: "/home/user/.config/pi/pi-clearance/global.json.bak",
         },
         postWriteReplay: {
           status: "passed",

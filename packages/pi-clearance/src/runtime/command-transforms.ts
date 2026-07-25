@@ -211,7 +211,7 @@ export function createCommandTransformStore(
 
     resetState();
     requestCounter += 1;
-    const requestId = `pi-auto-approve:transforms:request:${requestCounter}`;
+    const requestId = `pi-clearance:transforms:request:${requestCounter}`;
     currentRequestId = requestId;
 
     const request: AutoReviewerTransformsRequest = {

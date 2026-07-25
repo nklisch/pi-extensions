@@ -17,9 +17,9 @@ export function structuredProposal(
     applicationMode: "writable-after-approval",
     target: {
       kind: "user-project-overlay",
-      path: "/tmp/pi-auto-approve/project-overlay.json",
-      projectKey: "pi-auto-approve",
-      projectRoot: "/tmp/pi-auto-approve/repo",
+      path: "/tmp/pi-clearance/project-overlay.json",
+      projectKey: "pi-clearance",
+      projectRoot: "/tmp/pi-clearance/repo",
     },
     change: {
       kind: "policy-pack",

@@ -29,7 +29,7 @@ const reviewDecision = {
 } satisfies Decision;
 
 async function withTempDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), "pi-auto-approve-reader-"));
+  const dir = await mkdtemp(join(tmpdir(), "pi-clearance-reader-"));
   try {
     return await run(dir);
   } finally {

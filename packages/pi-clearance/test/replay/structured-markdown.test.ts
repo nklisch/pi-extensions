@@ -306,9 +306,9 @@ function structuredProposal(): StructuredRatchetProposal {
     applicationMode: "writable-after-approval",
     target: {
       kind: "user-project-overlay",
-      path: "/home/nathan/.config/pi/pi-auto-approve/projects/pi-auto-approve.json",
-      projectKey: "pi-auto-approve",
-      projectRoot: "/home/nathan/dev/pi-auto-approve",
+      path: "/home/nathan/.config/pi/pi-clearance/projects/pi-clearance.json",
+      projectKey: "pi-clearance",
+      projectRoot: "/home/nathan/dev/pi-clearance",
     },
     change: {
       kind: "policy-pack",
@@ -387,9 +387,9 @@ function proposalWithoutReplayOrAdversarial(): StructuredRatchetProposal {
     applicationMode: "writable-after-approval",
     target: {
       kind: "user-project-overlay",
-      path: "/home/nathan/.config/pi/pi-auto-approve/projects/pi-auto-approve.json",
-      projectKey: "pi-auto-approve",
-      projectRoot: "/home/nathan/dev/pi-auto-approve",
+      path: "/home/nathan/.config/pi/pi-clearance/projects/pi-clearance.json",
+      projectKey: "pi-clearance",
+      projectRoot: "/home/nathan/dev/pi-clearance",
     },
     change: {
       kind: "reviewer-config",
@@ -566,7 +566,7 @@ describe("structured markdown renderer", () => {
     const model = await buildIntegrationCorpusModel();
     const markdown = renderStructuredRatchetMarkdown({
       generatedAt: GENERATED_AT,
-      repoRoot: "/home/nathan/dev/pi-auto-approve",
+      repoRoot: "/home/nathan/dev/pi-clearance",
       sourcePath: "structured-corpus.json",
       corpus: model,
       replayDeltas: [replayDelta()],
@@ -585,7 +585,7 @@ describe("structured markdown renderer", () => {
       "### Proposal `prop-allow-pnpm-test`: Allow pnpm test",
       "## Warnings",
     ]);
-    expect(markdown).toContain("Repository: /home/nathan/dev/pi-auto-approve");
+    expect(markdown).toContain("Repository: /home/nathan/dev/pi-clearance");
     expect(markdown).toContain("- proposal batch: batch warning");
     expect(markdown).toContain(
       "- proposal prop-allow-pnpm-test: proposal warning",

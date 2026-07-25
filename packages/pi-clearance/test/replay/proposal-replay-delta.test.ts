@@ -183,7 +183,7 @@ function dataPackProposal(options: {
     applicationMode: "writable-after-approval",
     target: {
       kind: "user-global-config",
-      path: "~/.config/pi-auto-approve/config.json",
+      path: "~/.config/pi-clearance/config.json",
     },
     change: {
       kind: "policy-pack",
@@ -225,7 +225,7 @@ function projectScopeProposal(): StructuredRatchetProposal {
     target: {
       kind: "user-project-overlay",
       path: "./.pi/auto-reviewer.json",
-      projectKey: "pi-auto-approve",
+      projectKey: "pi-clearance",
       projectRoot: "/repo",
     },
     change: {
@@ -264,7 +264,7 @@ function reviewerConfigProposal(): StructuredRatchetProposal {
     target: {
       kind: "user-project-overlay",
       path: "./.pi/auto-reviewer.json",
-      projectKey: "pi-auto-approve",
+      projectKey: "pi-clearance",
       projectRoot: "/repo",
     },
     change: {
@@ -342,7 +342,7 @@ function packagePackEnablementProposal(): StructuredRatchetProposal {
     applicationMode: "writable-after-approval",
     target: {
       kind: "package-pack-config",
-      path: "~/.config/pi-auto-approve/config.json",
+      path: "~/.config/pi-clearance/config.json",
       packId: "test-safety",
     },
     change: {
@@ -358,7 +358,7 @@ function packagePackEnablementProposal(): StructuredRatchetProposal {
           subject: "package",
           packId: "test-safety",
         },
-        targetPath: "~/.config/pi-auto-approve/config.json",
+        targetPath: "~/.config/pi-clearance/config.json",
         patch: [
           {
             op: "replace",
@@ -889,7 +889,7 @@ describe("pack-enablement proposal compatibility", () => {
         subject: "package" as const,
         packId: "test-safety",
       },
-      targetPath: "~/.config/pi-auto-approve/config.json",
+      targetPath: "~/.config/pi-clearance/config.json",
       patch: [
         {
           op: "replace" as const,

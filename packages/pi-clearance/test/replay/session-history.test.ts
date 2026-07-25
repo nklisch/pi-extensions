@@ -231,7 +231,7 @@ describe("session history source", () => {
   });
 
   it("reads offline session JSONL files", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "pi-auto-approve-session-"));
+    const dir = await mkdtemp(join(tmpdir(), "pi-clearance-session-"));
     try {
       const path = join(dir, "session.jsonl");
       const header = {

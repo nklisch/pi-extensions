@@ -1996,8 +1996,8 @@ fn supplied_or_generated_cases(proposal: &Value, options: &ReplayOptions) -> Vec
             drafts.push(case_draft(&format!("{sample} {operand}"),"quoting","not-fast-path",format!("quoted operand {operand} exercises shell-literal handling around the proposed command shape"),"sample-mutation",Some(&sample)));
         }
         for operand in [
-            "$(touch /tmp/pi-auto-approve-adversarial)",
-            "`touch /tmp/pi-auto-approve-adversarial`",
+            "$(touch /tmp/pi-clearance-adversarial)",
+            "`touch /tmp/pi-clearance-adversarial`",
             "<(cat /etc/passwd)",
             "$((1+1))",
         ] {

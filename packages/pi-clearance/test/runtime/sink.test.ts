@@ -20,7 +20,7 @@ const tempRoots: string[] = [];
 
 function tempRoot(): string {
   const root = mkdtempSync(
-    path.join(tmpdir(), "pi-auto-approve-runtime-sink-"),
+    path.join(tmpdir(), "pi-clearance-runtime-sink-"),
   );
   tempRoots.push(root);
   return root;

@@ -175,7 +175,7 @@ function dataPackPolicyProposal(): StructuredRatchetProposal {
     applicationMode: "writable-after-approval",
     target: {
       kind: "user-global-config",
-      path: "~/.config/pi-auto-approve/config.json",
+      path: "~/.config/pi-clearance/config.json",
     },
     change: {
       kind: "policy-pack",
@@ -192,7 +192,7 @@ function dataPackPolicyProposal(): StructuredRatchetProposal {
         },
       ],
       fileWrite: {
-        path: "~/.config/pi-auto-approve/config.json",
+        path: "~/.config/pi-clearance/config.json",
         format: "json",
         mode: "patch",
         atomic: true,
@@ -230,8 +230,8 @@ function reviewerConfigProposal(): StructuredRatchetProposal {
     target: {
       kind: "user-project-overlay",
       path: "./.pi/auto-reviewer.json",
-      projectKey: "pi-auto-approve",
-      projectRoot: "/home/nathan/dev/pi-auto-approve",
+      projectKey: "pi-clearance",
+      projectRoot: "/home/nathan/dev/pi-clearance",
     },
     change: {
       kind: "reviewer-config",
@@ -277,8 +277,8 @@ function projectScopeProposal(): StructuredRatchetProposal {
     target: {
       kind: "user-project-overlay",
       path: "./.pi/auto-reviewer.json",
-      projectKey: "pi-auto-approve",
-      projectRoot: "/home/nathan/dev/pi-auto-approve",
+      projectKey: "pi-clearance",
+      projectRoot: "/home/nathan/dev/pi-clearance",
     },
     change: {
       kind: "project-scope-config",
@@ -326,7 +326,7 @@ function packagePackEnablementProposal(): StructuredRatchetProposal {
     applicationMode: "writable-after-approval",
     target: {
       kind: "package-pack-config",
-      path: "~/.config/pi-auto-approve/config.json",
+      path: "~/.config/pi-clearance/config.json",
       packId: "test-safety",
       packageName: "pi-test-safety",
       packageVersion: "1.0.0",
@@ -349,7 +349,7 @@ function packagePackEnablementProposal(): StructuredRatchetProposal {
           subject: "package",
           packId: "test-safety",
         },
-        targetPath: "~/.config/pi-auto-approve/config.json",
+        targetPath: "~/.config/pi-clearance/config.json",
         patch: [
           {
             op: "replace",

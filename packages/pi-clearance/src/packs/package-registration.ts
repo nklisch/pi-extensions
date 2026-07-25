@@ -210,7 +210,7 @@ export function createPackageRegistrationStore(
 
     resetState();
     requestCounter += 1;
-    const requestId = `pi-auto-approve:packs:request:${requestCounter}`;
+    const requestId = `pi-clearance:packs:request:${requestCounter}`;
     currentRequestId = requestId;
 
     const request: AutoReviewerPackRegistrationRequest = {

@@ -20,7 +20,7 @@ let configHome: string;
 beforeEach(async () => {
   setPlatform("linux");
   tempRoot = await mkdtemp(
-    path.join(tmpdir(), "pi-auto-approve-config-plans-"),
+    path.join(tmpdir(), "pi-clearance-config-plans-"),
   );
   cwd = path.join(tempRoot, "repo");
   configHome = path.join(tempRoot, "xdg-config");

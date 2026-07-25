@@ -36,7 +36,7 @@ let configHome: string;
 
 beforeEach(async () => {
   setPlatform("linux");
-  tempRoot = await mkdtemp(path.join(tmpdir(), "pi-auto-approve-writer-"));
+  tempRoot = await mkdtemp(path.join(tmpdir(), "pi-clearance-writer-"));
   cwd = path.join(tempRoot, "repo");
   configHome = path.join(tempRoot, "xdg-config");
   process.env = { ...ORIGINAL_ENV, XDG_CONFIG_HOME: configHome };

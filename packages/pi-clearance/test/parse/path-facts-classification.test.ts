@@ -368,14 +368,14 @@ describe("classifyBashPathFact scope precedence", () => {
 
   it("project beats safe-home for a project checkout under a safe-home directory", () => {
     const context = makeContext({
-      cwd: "/home/user/repos/pi-auto-approve",
+      cwd: "/home/user/repos/pi-clearance",
       projectScope: makeScope({
-        roots: ["/home/user/repos/pi-auto-approve"],
-        writableDirectories: ["/home/user/repos/pi-auto-approve"],
+        roots: ["/home/user/repos/pi-clearance"],
+        writableDirectories: ["/home/user/repos/pi-clearance"],
       }),
     });
 
-    const fact = classify("/home/user/repos/pi-auto-approve/src/x.ts", {
+    const fact = classify("/home/user/repos/pi-clearance/src/x.ts", {
       context,
     });
 

@@ -1027,12 +1027,12 @@ describe("createHandleToolCall", () => {
       handler(bashEvent(), context("analyzer-throw")),
     ).resolves.toEqual({
       block: true,
-      reason: "pi-auto-approve handler error: analyzer unavailable",
+      reason: "pi-clearance handler error: analyzer unavailable",
     });
 
     expect(audit.policyEntries[0]?.decision).toMatchObject({
       effect: "review",
-      reason: "pi-auto-approve handler error: analyzer unavailable",
+      reason: "pi-clearance handler error: analyzer unavailable",
     });
   });
 

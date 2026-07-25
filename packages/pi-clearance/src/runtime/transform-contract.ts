@@ -2,7 +2,7 @@
  * Command transform registration — v1 event contract.
  *
  * An installed Pi extension that wants to rewrite a `bash` command **after**
- * pi-auto-approve has approved it (so the auto-reviewer still judges the
+ * pi-clearance has approved it (so the auto-reviewer still judges the
  * command the agent typed) registers a transform here. This is the
  * load-order-independent coordination channel between the auto-reviewer and a
  * command rewriter such as RTK output compression.
@@ -17,7 +17,7 @@
  * the command before the reviewer saw it, so the reviewer would judge the
  * *rewritten* form rather than what the agent typed.
  *
- * This contract inverts that: **pi-auto-approve owns the only `tool_call`
+ * This contract inverts that: **pi-clearance owns the only `tool_call`
  * handler.** It captures the original command up front (the reviewer always
  * sees the original), and on the `allow` branch it runs every registered
  * transform against the original command, then writes the final result back
@@ -61,14 +61,14 @@ export const AUTO_REVIEWER_TRANSFORMS_API_VERSION = 1 as const;
  * registrations from contributor extensions.
  */
 export const AUTO_REVIEWER_TRANSFORMS_REQUEST_EVENT =
-  "pi-auto-approve:transforms:request" as const;
+  "pi-clearance:transforms:request" as const;
 
 /**
  * Event a contributor emits in response to a request (or unsolicited) carrying
  * an {@link AutoReviewerTransformRegistration} payload.
  */
 export const AUTO_REVIEWER_TRANSFORMS_REGISTER_EVENT =
-  "pi-auto-approve:transforms:register" as const;
+  "pi-clearance:transforms:register" as const;
 
 /** Request payload for {@link AUTO_REVIEWER_TRANSFORMS_REQUEST_EVENT}. */
 export interface AutoReviewerTransformsRequest {
@@ -88,7 +88,7 @@ export interface AutoReviewerTransformsRequest {
  *   for surfacing it, e.g. via a `/rtk`-style status command).
  *
  * The function must be resilient to an abort signal (via `ctx.signal`) and
- * must not throw synchronously; pi-auto-approve wraps calls in try/catch and
+ * must not throw synchronously; pi-clearance wraps calls in try/catch and
  * treats a throw as `{ error }`.
  */
 export type CommandTransformFn = (

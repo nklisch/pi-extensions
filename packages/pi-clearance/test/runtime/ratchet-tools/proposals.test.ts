@@ -425,7 +425,7 @@ function cacheWithBatch(batch: StructuredProposalBatch): {
 
 describe("clearance_generate_proposals", () => {
   it("returns a batch id, valid batch details, proposal summaries, and stores the batch", async () => {
-    vi.stubEnv("XDG_CONFIG_HOME", "/tmp/pi-auto-approve-proposals-test");
+    vi.stubEnv("XDG_CONFIG_HOME", "/tmp/pi-clearance-proposals-test");
     const cache = createRatchetBatchCache();
     const generated = [
       proposal("data-pack-policy"),

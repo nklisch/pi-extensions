@@ -25,7 +25,7 @@ let configHome: string;
 
 beforeEach(async () => {
   tempRoot = await mkdtemp(
-    path.join(tmpdir(), "pi-auto-approve-enable-command-"),
+    path.join(tmpdir(), "pi-clearance-enable-command-"),
   );
   cwd = path.join(tempRoot, "repo");
   configHome = path.join(tempRoot, "xdg-config");

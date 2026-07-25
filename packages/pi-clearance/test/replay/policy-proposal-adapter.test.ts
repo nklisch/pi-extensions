@@ -39,11 +39,11 @@ import type {
 
 const CREATED_AT = "2026-06-26T00:00:00.000Z";
 const GLOBAL_CONFIG_PATH =
-  "/home/nathan/.config/pi/pi-auto-approve/global.json";
+  "/home/nathan/.config/pi/pi-clearance/global.json";
 const PROJECT_OVERLAY_PATH =
-  "/home/nathan/.config/pi/pi-auto-approve/projects/pi-auto-approve-abc12345/overlay.json";
-const PROJECT_KEY = "pi-auto-approve-abc12345";
-const PROJECT_ROOT = "/home/nathan/dev/pi-auto-approve";
+  "/home/nathan/.config/pi/pi-clearance/projects/pi-clearance-abc12345/overlay.json";
+const PROJECT_KEY = "pi-clearance-abc12345";
+const PROJECT_ROOT = "/home/nathan/dev/pi-clearance";
 
 const ADAPTER_OPTIONS: PolicyProposalAdapterOptions = {
   createdAt: CREATED_AT,
@@ -769,7 +769,7 @@ describe("policy-proposal-adapter — proposeStructuredPolicyChanges", () => {
       report: report([
         row({ command: "git status --short", count: 2 }),
         row({
-          command: "git -C /home/nathan/dev/pi-auto-approve status",
+          command: "git -C /home/nathan/dev/pi-clearance status",
           count: 1,
         }),
       ]),

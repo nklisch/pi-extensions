@@ -90,7 +90,7 @@ function unsupportedDiagnostic(toolName: string): ShapeDiagnostic {
   return {
     code: "tool:unsupported",
     severity: "warning",
-    message: `Tool "${toolName}" is not yet analyzed by pi-auto-approve`,
+    message: `Tool "${toolName}" is not yet analyzed by pi-clearance`,
   };
 }
 

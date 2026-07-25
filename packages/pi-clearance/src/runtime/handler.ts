@@ -133,7 +133,7 @@ export function createHandleToolCall(
       });
     } catch (error: unknown) {
       const decision = reviewDecision(
-        `pi-auto-approve handler error: ${errorMessage(error)}`,
+        `pi-clearance handler error: ${errorMessage(error)}`,
       );
       await logPolicyDecision(deps.audit, inputSnapshot, event, ctx, decision);
       return block(decision.reason);

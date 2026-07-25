@@ -58,10 +58,10 @@ describe("package registration contract constants", () => {
   it("exports stable event names and API version", () => {
     expect(AUTO_REVIEWER_PACK_REGISTRATION_API_VERSION).toBe(1);
     expect(AUTO_REVIEWER_PACKS_REQUEST_EVENT).toBe(
-      "pi-auto-approve:packs:request",
+      "pi-clearance:packs:request",
     );
     expect(AUTO_REVIEWER_PACKS_REGISTER_EVENT).toBe(
-      "pi-auto-approve:packs:register",
+      "pi-clearance:packs:register",
     );
   });
 });

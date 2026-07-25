@@ -29,12 +29,12 @@ import type {
 } from "../../src/replay/reviewer-config-proposals.ts";
 
 const CREATED_AT = "2026-06-26T00:00:00.000Z";
-const PROJECT_ROOT = "/home/nathan/dev/pi-auto-approve";
+const PROJECT_ROOT = "/home/nathan/dev/pi-clearance";
 const PROJECT_OVERLAY_PATH =
-  "/home/nathan/.config/pi/pi-auto-approve/projects/pi-auto-approve-abc12345/overlay.json";
+  "/home/nathan/.config/pi/pi-clearance/projects/pi-clearance-abc12345/overlay.json";
 const GLOBAL_CONFIG_PATH =
-  "/home/nathan/.config/pi/pi-auto-approve/global.json";
-const PROJECT_KEY = "pi-auto-approve-abc12345";
+  "/home/nathan/.config/pi/pi-clearance/global.json";
+const PROJECT_KEY = "pi-clearance-abc12345";
 
 const ADAPTER_OPTIONS = {
   createdAt: CREATED_AT,

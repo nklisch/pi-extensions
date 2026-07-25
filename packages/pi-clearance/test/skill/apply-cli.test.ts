@@ -57,10 +57,10 @@ function corpus(command = "git custom-safe"): ReplayCorpus {
 }
 
 async function makeProject(name: string): Promise<TestProject> {
-  const root = await mkdtemp(path.join(tmpdir(), `pi-auto-approve-${name}-`));
+  const root = await mkdtemp(path.join(tmpdir(), `pi-clearance-${name}-`));
   const cwd = path.join(root, "repo");
   const configHome = path.join(root, "config-home");
-  const userConfigRoot = path.join(configHome, "pi", "pi-auto-approve");
+  const userConfigRoot = path.join(configHome, "pi", "pi-clearance");
   const runDir = path.join(
     userConfigRoot,
     "ratchet",
@@ -210,7 +210,7 @@ describe("Tune helper CLI", () => {
     expect(help.stdout).toMatch(/internal|development/i);
     expect(help.stdout).toContain("Usage: scripts/dev/pi-clearance-tune.cjs");
     expect(help.stdout).not.toContain(
-      "Usage: pi-auto-approve-ratchet <command>",
+      "Usage: pi-clearance-ratchet <command>",
     );
     expect(help.stdout).toContain("/clearance tune");
     expect(help.stdout).not.toContain("/auto-reviewer ratchet on");

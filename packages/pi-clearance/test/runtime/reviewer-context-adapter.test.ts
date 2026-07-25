@@ -25,7 +25,7 @@ const tempRoots: string[] = [];
 
 function tempRoot(): string {
   const root = mkdtempSync(
-    path.join(tmpdir(), "pi-auto-approve-reviewer-context-adapter-"),
+    path.join(tmpdir(), "pi-clearance-reviewer-context-adapter-"),
   );
   tempRoots.push(root);
   return root;

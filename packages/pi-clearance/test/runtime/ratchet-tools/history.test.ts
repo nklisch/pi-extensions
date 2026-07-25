@@ -228,11 +228,11 @@ function isolateUserConfig(
     reviewerDecisionAuditEntry(),
   ],
 ): void {
-  const root = mkdtempSync(join(tmpdir(), "pi-auto-approve-history-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-clearance-history-"));
   tempRoots.push(root);
   vi.stubEnv("XDG_CONFIG_HOME", root);
 
-  const configRoot = join(root, "pi", "pi-auto-approve");
+  const configRoot = join(root, "pi", "pi-clearance");
   mkdirSync(configRoot, { recursive: true });
   writeFileSync(
     join(configRoot, "audit.log"),

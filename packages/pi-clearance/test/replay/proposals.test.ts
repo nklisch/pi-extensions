@@ -38,7 +38,7 @@ const REPLAY_SRC_DIR = fileURLToPath(
 );
 const GIT_REV_PARSE_COMMAND = "git rev-parse --show-toplevel";
 const GIT_STATUS_WITH_C_COMMAND =
-  "git -C /home/nathan/dev/pi-auto-approve status --short";
+  "git -C /home/nathan/dev/pi-clearance status --short";
 const PNPM_VERIFY_COMMAND = "pnpm run custom-check";
 const NPM_VERIFY_COMMAND = "npm run ci";
 const MAKE_TEST_COMMAND = "make -f /tmp/evil";

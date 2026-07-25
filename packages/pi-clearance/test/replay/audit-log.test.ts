@@ -52,7 +52,7 @@ function policyLine(options: {
 }
 
 async function withTempDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), "pi-auto-approve-audit-"));
+  const dir = await mkdtemp(join(tmpdir(), "pi-clearance-audit-"));
   try {
     return await run(dir);
   } finally {

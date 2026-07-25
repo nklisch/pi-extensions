@@ -25,7 +25,7 @@ describe("packEnablementPlanToStructuredProposal", () => {
       action: "enable",
       scope: "global",
       packId: "pack:demo",
-      targetPath: "/home/user/.config/pi-auto-approve/config.json",
+      targetPath: "/home/user/.config/pi-clearance/config.json",
       requiredAcknowledgementCodes: ["metadata-danger-0"],
       warnings: [
         {
@@ -109,7 +109,7 @@ describe("packEnablementPlanToStructuredProposal", () => {
 
   it("applies round-tripped persisted proposals through the shared writer", async () => {
     const tempRoot = await mkdtemp(
-      path.join(tmpdir(), "pi-auto-approve-pack-proposal-"),
+      path.join(tmpdir(), "pi-clearance-pack-proposal-"),
     );
     const targetPath = path.join(tempRoot, "config.json");
     await writeJson(targetPath, { version: 1 });
@@ -156,7 +156,7 @@ describe("packEnablementPlanToStructuredProposal", () => {
           action: "enable",
           scope: "global",
           packId: "pack:demo",
-          targetPath: "/home/user/.config/pi-auto-approve/config.json",
+          targetPath: "/home/user/.config/pi-clearance/config.json",
           requiredAcknowledgementCodes: [],
           warnings: [],
         }),
@@ -198,7 +198,7 @@ describe("packEnablementPlanToStructuredProposal", () => {
         action: "disable",
         scope: "global",
         packId: "pack:demo",
-        targetPath: "/home/user/.config/pi-auto-approve/config.json",
+        targetPath: "/home/user/.config/pi-clearance/config.json",
         requiredAcknowledgementCodes: [],
         warnings: [],
       }),

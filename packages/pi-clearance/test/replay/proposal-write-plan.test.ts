@@ -30,13 +30,13 @@ import {
 } from "../fixtures/resolved-config.ts";
 
 const CREATED_AT = "2026-06-27T00:00:00.000Z";
-const CWD = "/home/nathan/dev/pi-auto-approve";
+const CWD = "/home/nathan/dev/pi-clearance";
 const GLOBAL_CONFIG_PATH =
-  "/home/nathan/.config/pi/pi-auto-approve/global.json";
+  "/home/nathan/.config/pi/pi-clearance/global.json";
 const PROJECT_OVERLAY_PATH =
-  "/home/nathan/.config/pi/pi-auto-approve/projects/pi-auto-approve-abc12345/overlay.json";
+  "/home/nathan/.config/pi/pi-clearance/projects/pi-clearance-abc12345/overlay.json";
 const PROJECT_ROOT = CWD;
-const PROJECT_KEY = "pi-auto-approve-abc12345";
+const PROJECT_KEY = "pi-clearance-abc12345";
 
 function check(
   status: ProposalValidationCheck["status"],
@@ -386,12 +386,12 @@ function resolvedConfig(
 
 function configPaths(): ConfigPaths {
   return {
-    userConfigRoot: "/home/nathan/.config/pi/pi-auto-approve",
+    userConfigRoot: "/home/nathan/.config/pi/pi-clearance",
     globalConfigFile: GLOBAL_CONFIG_PATH,
     projectDir:
-      "/home/nathan/.config/pi/pi-auto-approve/projects/pi-auto-approve-abc12345",
+      "/home/nathan/.config/pi/pi-clearance/projects/pi-clearance-abc12345",
     projectOverlayFile: PROJECT_OVERLAY_PATH,
-    repoPolicyFile: `${CWD}/.pi-auto-approve/policy.json`,
+    repoPolicyFile: `${CWD}/.pi-clearance/policy.json`,
     projectKey: PROJECT_KEY,
   };
 }
