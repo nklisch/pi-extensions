@@ -20,8 +20,8 @@ if (metadata.dependencies?.["@nklisch/pi-mcp-adapter"] !== "2.11.0-nklisch.3" ||
 if (JSON.stringify(metadata.bundledDependencies) !== JSON.stringify(["@nklisch/pi-subagents"])) {
   throw new Error("published subagent extension is not bundled");
 }
-if (metadata.devDependencies?.["@earendil-works/pi-coding-agent"] !== "0.80.8" || metadata.devDependencies?.["@earendil-works/pi-tui"] !== "0.80.8") {
-  throw new Error("Pi 0.80.8 development contracts are not exact");
+if (metadata.devDependencies?.["@earendil-works/pi-coding-agent"] !== "0.82.0" || metadata.devDependencies?.["@earendil-works/pi-tui"] !== "0.82.0") {
+  throw new Error("Pi 0.82.0 development contracts are not exact");
 }
 if (metadata.peerDependencies?.["@earendil-works/pi-coding-agent"] !== "*" || metadata.peerDependencies?.["@earendil-works/pi-tui"] !== "*") {
   throw new Error("Pi runtime peer contracts are invalid");

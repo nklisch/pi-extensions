@@ -171,7 +171,15 @@ try {
 
   // Install the package-under-test tarball beside the exact package-pinned Pi
   // runtime without importing any source checkout files.
-  await cp(join(project, "node_modules"), join(consumer, "node_modules"), { recursive: true, dereference: true });
+  // The monorepo hoists dependencies to the root; use the package-local tree
+  // when present, otherwise the workspace root tree.
+  const { existsSync } = await import("node:fs");
+  // Vitest caches and stray nested installs make a bare package-local tree
+  // unreliable; pick whichever tree actually contains the Pi runtime.
+  const localTree = join(project, "node_modules");
+  const rootTree = join(project, "..", "..", "node_modules");
+  const dependencyTree = existsSync(join(localTree, "@earendil-works", "pi-coding-agent", "package.json")) ? localTree : rootTree;
+  await cp(dependencyTree, join(consumer, "node_modules"), { recursive: true, dereference: true });
   const packageRoot = join(consumer, "node_modules", "@nklisch", "pi-plugins");
   await rm(packageRoot, { recursive: true, force: true });
   await mkdir(packageRoot, { recursive: true });
@@ -180,7 +188,7 @@ try {
   const piRoot = join(consumer, "node_modules", "@earendil-works", "pi-coding-agent");
   const piMetadata = JSON.parse(await readFile(join(piRoot, "package.json"), "utf8"));
   const hostMetadata = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-  if (piMetadata.version !== "0.80.8") throw new Error(`real Pi acceptance requires exact 0.80.8, got ${piMetadata.version}`);
+  if (piMetadata.version !== "0.82.0") throw new Error(`real Pi acceptance requires exact 0.82.0, got ${piMetadata.version}`);
   if (JSON.stringify(hostMetadata.pi?.extensions) !== JSON.stringify(["./dist/pi/production-subagents-extension.js", "./dist/pi/extension.js"])) throw new Error("packed extension discovery metadata missing");
   if (await realpath(packageRoot) === project) throw new Error("packed package resolved to the source checkout");
 

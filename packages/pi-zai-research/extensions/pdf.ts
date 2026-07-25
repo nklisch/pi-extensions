@@ -97,8 +97,10 @@ export async function pdfBufferToMarkdown(
       markdown: `${header}${body}${footer}`,
     };
   } finally {
-    // Release the PDF.js parser/worker resources (no unbounded retention across calls).
-    await pdf.destroy().catch(() => {});
+    // Release the PDF.js parser/worker resources (no unbounded retention across
+    // calls). pdf.js v5 moved destroy() off the document proxy onto the loading
+    // task, which unpdf does not expose — so cleanup is best-effort.
+    await (pdf as { destroy?: () => Promise<void> }).destroy?.().catch(() => {});
   }
 }
 

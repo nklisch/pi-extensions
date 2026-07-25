@@ -1,15 +1,18 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 // dependency-cruiser may be hoisted to the monorepo root, so resolve its bin
 // through the module graph instead of assuming a package-local node_modules.
-const DEPCRUISE_BIN = resolve(
-  dirname(createRequire(import.meta.url).resolve("dependency-cruiser/package.json")),
-  "bin/dependency-cruise.js",
-);
+// Its exports map is import-only and hides ./package.json, so resolve the
+// main entry via ESM resolution and walk up to the package root.
+const DEPCRUISE_BIN = (() => {
+  let dir = dirname(fileURLToPath(import.meta.resolve("dependency-cruiser")));
+  while (!existsSync(resolve(dir, "package.json"))) dir = dirname(dir);
+  return resolve(dir, "bin/dependency-cruise.mjs");
+})();
 
 function cruise(root: string, fixture: string): string {
   const result = spawnSync(
