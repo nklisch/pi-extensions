@@ -186,7 +186,7 @@ export type NativeEngineStatus =
 
 const require = createRequire(import.meta.url);
 const NATIVE_MODULE_BASENAME = "clearance-core";
-const NATIVE_PACKAGE_NAME = "pi-auto-approve";
+const NATIVE_PACKAGE_NAME = "pi-clearance";
 let cachedStatus: NativeEngineStatus | undefined;
 
 /**

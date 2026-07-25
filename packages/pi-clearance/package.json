@@ -1,5 +1,5 @@
 {
-  "name": "@nklisch/pi-auto-approve",
+  "name": "@nklisch/pi-clearance",
   "version": "0.1.0",
   "description": "Configurable auto-reviewer Pi extension for parsed, structural command policy",
   "type": "module",
@@ -82,12 +82,12 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nklisch/pi-extensions.git",
-    "directory": "packages/pi-auto-approve"
+    "directory": "packages/pi-clearance"
   },
   "bugs": {
     "url": "https://github.com/nklisch/pi-extensions/issues"
   },
-  "homepage": "https://github.com/nklisch/pi-extensions/tree/main/packages/pi-auto-approve#readme",
+  "homepage": "https://github.com/nklisch/pi-extensions/tree/main/packages/pi-clearance#readme",
   "publishConfig": {
     "access": "public",
     "provenance": true
