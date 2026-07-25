@@ -26,8 +26,8 @@ function projectScope(
     deniedDirectories: [],
     safeHomeDirectories: [],
     unknownPathBehavior: "review",
-  sensitivePathBehavior: "review",
-  homePathBehavior: "allow",
+    sensitivePathBehavior: "review",
+    homePathBehavior: "allow",
     ...overrides,
   };
 }

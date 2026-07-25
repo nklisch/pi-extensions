@@ -1,12 +1,11 @@
 import { homedir } from "node:os";
 
 import { describe, expect, it } from "vitest";
-
+import type { ResolvedProjectScope } from "../../src/config/loader.ts";
 import { analyzeBashCommand } from "../../src/parse/native-parser.ts";
 import { enrichToolShapeWithPathFacts } from "../../src/parse/native-path-facts.ts";
 import type { ToolShape } from "../../src/parse/shape.ts";
 import { buildHumanReviewCard } from "../../src/runtime/human-review-card.ts";
-import type { ResolvedProjectScope } from "../../src/config/loader.ts";
 
 function projectScope(): ResolvedProjectScope {
   return {
@@ -119,9 +118,7 @@ describe("buildHumanReviewCard", () => {
   });
 
   it("skips git leading-option values when naming the subcommand", async () => {
-    const card = buildHumanReviewCard(
-      await bashShape("git -C /repo status"),
-    );
+    const card = buildHumanReviewCard(await bashShape("git -C /repo status"));
 
     expect(card.whatItDoes[0]).toContain("git status");
     expect(card.whatItDoes[0]).not.toContain("git /repo");
@@ -158,9 +155,7 @@ describe("buildHumanReviewCard", () => {
 
     const card = buildHumanReviewCard(shape);
 
-    expect(card.whatItDoes[0]).toBe(
-      "Uses the Pi write tool (modifies files)",
-    );
+    expect(card.whatItDoes[0]).toBe("Uses the Pi write tool (modifies files)");
   });
 
   it("says when a tool could not be analyzed", () => {

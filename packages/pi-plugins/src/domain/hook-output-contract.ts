@@ -6,6 +6,7 @@ import {
 } from "./hook-runtime-contract.js";
 import { JsonValueSchema, type JsonValue } from "./schema.js";
 import type { HookExecutionBinding } from "./hook-execution-binding.js";
+import type { PluginKey } from "./identity.js";
 
 const permissionValues = ["allow", "deny", "ask"] as const;
 
@@ -86,9 +87,12 @@ export type ParsedHookDecision = Readonly<{
   continuation?: Readonly<{ reason?: string }>;
 }>;
 
+/** One injected context string, attributed to the plugin that produced it. */
+export type HookContextContribution = Readonly<{ text: string; plugin: PluginKey }>;
+
 export type AggregatedHookDecision = Readonly<{
   event: ExecutableHookEvent;
-  contexts: readonly string[];
+  contexts: readonly HookContextContribution[];
   systemMessages: readonly string[];
   block?: Readonly<{ reason?: string }>;
   permission?: Readonly<{ kind: "allow" | "deny" | "ask"; reason?: string }>;

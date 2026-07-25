@@ -486,8 +486,8 @@ describe("ratchet apply write planner", () => {
         agentSupportDirectories: [],
         agentSupportUseDefaults: true,
         unknownPathBehavior: "review",
-  sensitivePathBehavior: "review",
-  homePathBehavior: "allow",
+        sensitivePathBehavior: "review",
+        homePathBehavior: "allow",
       },
       promptAppends: ["Prefer bounded local workflows."],
     });

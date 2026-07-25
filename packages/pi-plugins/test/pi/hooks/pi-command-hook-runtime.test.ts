@@ -52,7 +52,7 @@ function stopRuntime(sendMessage: ExtensionAPI["sendMessage"], exitCode = 2) {
     catalog: catalog([snapshot({ kind: "user" }, [hook("Stop", undefined, [], "e")])]),
     currentProject: () => project,
   });
-  const decisions = createPiHookDecisionAdapter({ pi: { sendMessage, setSessionName: api.setSessionName } });
+  const decisions = createPiHookDecisionAdapter({ pi: { sendMessage, setSessionName: api.setSessionName }, visibility: async () => "line" });
   const stopInputs: Array<Record<string, unknown>> = [];
   const command = {
     run: async (request: { stdin?: AsyncIterable<Uint8Array> }) => {

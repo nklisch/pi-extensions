@@ -13,20 +13,20 @@ import type { PackageRegistrationSnapshot } from "../../../../src/packs/package-
 import { createPackRegistry } from "../../../../src/packs/registry.ts";
 import { createDefaultAnalyzerRegistry } from "../../../../src/parse/registry.ts";
 import type { EffectivePolicy } from "../../../../src/policy/core.ts";
+import { buildAutoReviewerStatusView } from "../../../../src/runtime/auto-reviewer-read-models.ts";
 import type { AutoReviewerCommandDependencies } from "../../../../src/runtime/command-registry.ts";
 import { dispatchSettingsAction } from "../../../../src/runtime/config-commands/settings/dispatcher.ts";
 import {
   packItems,
   SettingsNativeUiComponent,
 } from "../../../../src/runtime/config-commands/settings/native-ui.ts";
-import { availableReviewerModels } from "../../../../src/runtime/config-commands/settings.ts";
 import {
   buildSettingsReadModel,
   type SettingsReadModel,
 } from "../../../../src/runtime/config-commands/settings/read-model.ts";
+import { availableReviewerModels } from "../../../../src/runtime/config-commands/settings.ts";
 import type { PolicyResolver } from "../../../../src/runtime/policy-cache.ts";
 import { createAuditLogRecentDecisionSource } from "../../../../src/runtime/reviewer-context-adapter.ts";
-import { buildAutoReviewerStatusView } from "../../../../src/runtime/auto-reviewer-read-models.ts";
 
 const ORIGINAL_ENV = { ...process.env };
 const EMPTY_POLICY: EffectivePolicy = { rules: [] };
@@ -237,19 +237,24 @@ describe("inferScopePreset", () => {
         homePathBehavior: "review",
       }),
     ).toBe("project");
-    expect(
-      inferScopePreset({ ...base, sensitivePathBehavior: "deny" }),
-    ).toBe("unrestricted");
+    expect(inferScopePreset({ ...base, sensitivePathBehavior: "deny" })).toBe(
+      "unrestricted",
+    );
   });
 
   it("reports custom for mixed fields", () => {
-    expect(
-      inferScopePreset({ ...base, safeHomeUseDefaults: false }),
-    ).toBe("custom");
+    expect(inferScopePreset({ ...base, safeHomeUseDefaults: false })).toBe(
+      "custom",
+    );
   });
 
   it("normalizes schema defaults for older overlays", () => {
-    const { agentSupportUseDefaults, sensitivePathBehavior, homePathBehavior, ...older } = base;
+    const {
+      agentSupportUseDefaults,
+      sensitivePathBehavior,
+      homePathBehavior,
+      ...older
+    } = base;
     void agentSupportUseDefaults;
     void sensitivePathBehavior;
     void homePathBehavior;
@@ -356,7 +361,11 @@ describe("dossier navigation", () => {
       model: {} as unknown as SettingsReadModel,
       initialScreen: "pack-dossier",
       dossierOrigin: "scope",
-      message: { level: "info", text: "scope details", dossier: "line\n".repeat(3) },
+      message: {
+        level: "info",
+        text: "scope details",
+        dossier: "line\n".repeat(3),
+      },
       theme: {},
       done: () => {},
     });

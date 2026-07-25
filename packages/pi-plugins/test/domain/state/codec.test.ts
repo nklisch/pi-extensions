@@ -166,4 +166,23 @@ describe("state codecs", () => {
     expect(JSON.stringify(left)).toContain("alpha");
     expect(JSON.stringify(left).indexOf("alpha")).toBeLessThan(JSON.stringify(left).indexOf("team"));
   });
+
+  it("decodes pre-feature documents without hooks to the default and roundtrips a set preference", () => {
+    // Raw documents written before the preference existed carry no hooks key;
+    // the additive schema default must decode them to the transcript line.
+    const legacy = decodeStateDocument("hostConfig", encodedWith([validRecord]), context);
+    expect(legacy.value.hooks.contextVisibility).toBe("line");
+
+    const withPreference = HostConfigDocumentSchema.parse({ ...valid, hooks: { contextVisibility: "hidden" } });
+    const encoded = encodeStateDocument("hostConfig", withPreference, context);
+    expect(JSON.stringify(encoded)).toContain("hidden");
+    const roundtrip = decodeStateDocument("hostConfig", encoded, context);
+    expect(roundtrip.value.hooks.contextVisibility).toBe("hidden");
+    expect(roundtrip.corruptions).toEqual([]);
+  });
+
+  it("rejects a malformed hooks preference instead of guessing", () => {
+    expect(() => decodeStateDocument("hostConfig", { ...encodedWith([validRecord]), hooks: { contextVisibility: "loud" } }, context))
+      .toThrowError(StateCodecError);
+  });
 });

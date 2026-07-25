@@ -1,6 +1,6 @@
 import type { JsonValue } from "../../domain/schema.js";
 import { HOOK_MAX_AGGREGATED_TEXT_BYTES } from "../../domain/hook-runtime-limits.js";
-import type { AggregatedHookDecision, ParsedHookDecision } from "../../domain/hook-output-contract.js";
+import type { AggregatedHookDecision, HookContextContribution, ParsedHookDecision } from "../../domain/hook-output-contract.js";
 import type { ForeignHookInput } from "./event-contract.js";
 import { createHookRuntimeDiagnostic, type HookRuntimeDiagnostic } from "./hook-runtime-diagnostic.js";
 
@@ -53,7 +53,7 @@ export function aggregateHookDecisions(input: Readonly<{
   const ordered = [...input.decisions].sort((left, right) => sourceOrder(left).localeCompare(sourceOrder(right)));
   const diagnostics = ordered.filter(isDiagnostic);
 
-  const contexts: string[] = [];
+  const contexts: HookContextContribution[] = [];
   const systemMessages: string[] = [];
   let textBytes = 0;
   let block: Readonly<{ reason?: string }> | undefined;
@@ -68,7 +68,7 @@ export function aggregateHookDecisions(input: Readonly<{
   const decisions = ordered.filter((value): value is ParsedHookDecision => !isDiagnostic(value));
   for (const decision of decisions) {
     for (const context of decision.contexts) {
-      contexts.push(context);
+      contexts.push(Object.freeze({ text: context, plugin: decision.binding.plugin }));
       textBytes += new TextEncoder().encode(context).byteLength;
     }
     for (const message of decision.systemMessages) {

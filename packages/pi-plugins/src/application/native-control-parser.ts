@@ -238,6 +238,7 @@ function normalizeRequest(id: NativeControlCommandId, options: ParsedOptionValue
     case "updates.notices.acknowledge": return { ids: positionals };
     case "updates.automatic.run": return { ...(stringsValue(options, "noticeIds") === undefined ? {} : { noticeIds: stringsValue(options, "noticeIds") }), limit: numberValue(options, "limit") ?? 20 };
     case "config.host-precedence": return { order: positionals[0] };
+    case "config.hook-visibility": return { ...(positionals[0] === undefined ? {} : { visibility: positionals[0] }) };
     case "status": return {};
     case "operation.status":
     case "operation.cancel": return { token: positionals[0] };

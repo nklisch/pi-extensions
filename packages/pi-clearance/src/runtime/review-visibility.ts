@@ -3,11 +3,15 @@ import type {
   ResolvedReviewerConfig,
   ResolvedReviewNotePreference,
 } from "../config/loader.ts";
+import type { ClearanceMode } from "../config/schema.ts";
 import type { ToolShape } from "../parse/shape.ts";
 import type { Decision } from "../policy/core.ts";
 import type { AutoReviewerStatusView } from "./auto-reviewer-read-models.ts";
 import { compoundRecoveryReason } from "./compound-recovery.ts";
-import { buildHumanReviewCard, type HumanReviewCard } from "./human-review-card.ts";
+import {
+  buildHumanReviewCard,
+  type HumanReviewCard,
+} from "./human-review-card.ts";
 import { markdownCodeSpan } from "./markdown.ts";
 
 export type { ReviewNoteMode } from "../config/schema.ts";
@@ -56,6 +60,27 @@ const COMMAND_PREVIEW_LIMIT = 180;
 const STATUS_LINE_LIMIT = 240;
 const NOTICE_REASON_LIMIT = 220;
 const NOTE_DETAIL_MODEL_LABEL_LIMIT = 80;
+
+/** Theme color names understood by Pi's `theme.fg`; kept structural so tests can fake it. */
+export type StatusLineFg = (color: string, text: string) => string;
+
+/**
+ * Mode-token accent for the footer status line. The mode word is the only
+ * colored segment: off reads inactive (muted), ask reads "you will be
+ * prompted" (warning), auto reads "active coverage" (success). Applied after
+ * plain-text truncation so ANSI escapes never interfere with the length cap.
+ */
+export function styleStatusLineMode(
+  label: string,
+  mode: ClearanceMode,
+  fg: StatusLineFg,
+): string {
+  const prefix = `clearance: ${mode}`;
+  if (!label.startsWith(prefix)) return label;
+  const color =
+    mode === "off" ? "muted" : mode === "ask" ? "warning" : "success";
+  return `clearance: ${fg(color, mode)}${label.slice(prefix.length)}`;
+}
 
 export function formatStatusLine(view: AutoReviewerStatusView): string {
   // The status line says what the operator will experience; configuration
@@ -158,8 +183,6 @@ export function formatDenyBlockReason(decision: Decision): string {
     ? `${reason} — /clearance why for details; /clearance allow <plain language> to permit this family`
     : `${reason} — /clearance why for details`;
 }
-
-
 
 export function formatModelOutcomeNotice(
   input: ReviewOutcomeNoticeInput,
@@ -417,8 +440,6 @@ function isFileMutationShape(shape: ToolShape): shape is Extract<
   );
 }
 
-
-
 function modelReasonFromDecision(reason: string): string {
   const separator = ": ";
   const separatorIndex = reason.indexOf(separator);
@@ -440,5 +461,3 @@ function truncateOneLine(value: string, maxLength: number): string {
   if (singleLine.length <= maxLength) return singleLine;
   return `${singleLine.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
-
-

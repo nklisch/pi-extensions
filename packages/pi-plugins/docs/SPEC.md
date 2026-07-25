@@ -21,10 +21,10 @@ Individual components are not independently managed.
 - Module system: ESM
 - Runtime: Node.js 24 or newer
 - Host: Pi coding agent
-- Distribution: public `@nklisch/pi-plugins` Pi package (0.1.x, published
-  from the pi-extensions monorepo) containing the plugin-host extension and
-  its runtime dependencies; one top-level Pi installation loads the
-  receipt-gated bundled subagent extension before the host extension
+- Distribution: private `@nklisch/pi-plugins` Pi package (candidate version
+  `0.0.0`) containing the plugin-host extension and its runtime dependencies;
+  one top-level Pi installation loads the receipt-gated bundled subagent
+  extension before the host extension
 - Validation: runtime schemas at every external configuration boundary
 - Tests: Vitest with isolated filesystem, Git, process, and Pi-host adapters
 
@@ -458,6 +458,7 @@ trailing `...` is repeatable.
 | `updates.notices.acknowledge` | `/plugin updates notices acknowledge <notice-id>...` | `mutation` | `none` | Acknowledge update notices |
 | `updates.automatic.run` | `/plugin updates automatic run [--notice-id <value>]... [--limit <integer>] [--explicit]` | `mutation` | `none` | Run admitted plugin updates |
 | `config.host-precedence` | `/plugin config host-precedence <order>` | `mutation` | `none` | Set dual-host declaration precedence |
+| `config.hook-visibility` | `/plugin config hook-visibility [<visibility>]` | `mutation` | `none` | Show or set hook context visibility |
 | `status` | `/plugin status` | `local-read` | `none` | Show plugin host status |
 | `operation.status` | `/plugin operation status <token>` | `operation-control` | `none` | Poll an existing operation |
 | `operation.cancel` | `/plugin operation cancel <token>` | `operation-control` | `none` | Cancel an existing operation |
@@ -603,6 +604,16 @@ third-party sources. Enabling automatic updates authorizes Pi to acquire,
 validate, and activate compatible new revisions from the same trusted
 marketplace and plugin source, including revisions that change hook or MCP
 execution definitions. Source-identity changes still require explicit approval.
+
+Because exact trust grants do not carry across revisions, automatic trust
+continuity records the exact grant for the newly activated revision itself
+whenever the automatic policy, an unchanged source lineage, and a prior grant
+for another installed revision of the same plugin all hold. The chained grant
+is an ordinary trust record and remains individually revocable; an explicit
+revocation of the exact subject is never overridden, and a plugin with no
+granted lineage still requires interactive consent. Continuity runs with the
+background update cycle, so revisions activated before this mechanism existed
+are healed without manual re-consent.
 
 Network failure, validation failure, or activation failure never blocks Pi
 startup or disables the active revision.

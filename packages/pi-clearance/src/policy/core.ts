@@ -1069,10 +1069,7 @@ export const specificityChooseWinning: ChooseWinning = (rules) => {
       first,
     );
 };
-export function decide(
-  shape: ToolShape,
-  policy: EffectivePolicy,
-): Decision {
+export function decide(shape: ToolShape, policy: EffectivePolicy): Decision {
   try {
     const native = createNativePolicyHandle(policy);
     try {

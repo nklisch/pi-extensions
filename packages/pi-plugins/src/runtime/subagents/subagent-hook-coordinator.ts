@@ -8,6 +8,7 @@ import {
   type SubagentStartRequest,
 } from "../../application/ports/subagent-lifecycle.js";
 import { aggregateHookDecisions } from "../hooks/hook-decision-aggregator.js";
+import type { HookContextContribution } from "../../domain/hook-output-contract.js";
 import {
   HookSessionEvidenceSchema,
   type HookEventPlan,
@@ -67,16 +68,16 @@ function sameSessionEvidence(
     JSON.stringify(planned.currentProject) === JSON.stringify(current.currentProject);
 }
 
-function exactStartContinuation(prompt: string, contexts: readonly string[]): string {
-  const accepted = contexts.filter((context) => context.length > 0);
+function exactStartContinuation(prompt: string, contexts: readonly HookContextContribution[]): string {
+  const accepted = contexts.map((context) => context.text).filter((text) => text.length > 0);
   return accepted.length === 0 ? prompt : `${prompt}\n\n${accepted.join("\n\n")}`;
 }
 
 function exactStopContinuation(
-  contexts: readonly string[],
+  contexts: readonly HookContextContribution[],
   reason: string | undefined,
 ): string {
-  const parts = contexts.filter((context) => context.length > 0);
+  const parts = contexts.map((context) => context.text).filter((text) => text.length > 0);
   if (reason !== undefined && reason.length > 0) parts.push(reason);
   return parts.length === 0
     ? SUBAGENT_STOP_CONTINUATION_FALLBACK

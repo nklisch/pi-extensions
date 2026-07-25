@@ -1,4 +1,5 @@
 import { createAutomaticUpdateCoordinator } from "../application/automatic-update-coordinator.js";
+import { createAutomaticTrustContinuity } from "../application/automatic-trust-continuity.js";
 import { createNativeUpdateManagementService } from "../application/native-update-management-service.js";
 import { createNativeUpdatePolicyService } from "../application/native-update-policy-service.js";
 import { createUpdateNotificationService } from "../application/update-notification-service.js";
@@ -9,6 +10,7 @@ import type { LifecycleStateInventoryPort } from "../application/ports/lifecycle
 import type { LifecycleStateStore } from "../application/ports/lifecycle-state-store.js";
 import type { ProjectTrustPort } from "../application/ports/project-trust.js";
 import type { UpdateActivationContextPort } from "../application/ports/update-activation-context.js";
+import type { InstalledPluginLoader } from "../application/ports/installed-plugin-loader.js";
 import type { UpdateNotificationPublisherPort } from "../application/ports/update-notification-publisher.js";
 import type { GenerationMutationCoordinator } from "../application/generation-mutation-coordinator.js";
 import type { ScopeContext } from "../domain/state/scope.js";
@@ -26,6 +28,7 @@ export function createNativeUpdateManagementComposition(input: Readonly<{
   schedulerStatus?: UpdateSchedulerStatusProjection;
   lifecycle: AutomaticUpdateLifecyclePort;
   activation: UpdateActivationContextPort;
+  installed: InstalledPluginLoader;
   currentProject?: Extract<ScopeContext, { kind: "project" }>;
   projectTrust?: ProjectTrustPort;
   revalidateCurrentProject?: (signal: AbortSignal) => Promise<CurrentProjectRuntimeContext>;
@@ -54,6 +57,13 @@ export function createNativeUpdateManagementComposition(input: Readonly<{
     ...(input.projectTrust === undefined ? {} : { projectTrust: input.projectTrust }),
     ...(input.revalidateCurrentProject === undefined ? {} : { revalidateCurrentProject: input.revalidateCurrentProject }),
   });
+  const continuity = createAutomaticTrustContinuity({
+    state: input.state,
+    mutations: input.mutations,
+    installed: input.installed,
+    ...(input.projectTrust === undefined ? {} : { projectTrust: input.projectTrust }),
+    sha256: input.sha256,
+  });
   const automatic = createAutomaticUpdateCoordinator({
     state: input.state,
     inventory: input.inventory,
@@ -61,6 +71,7 @@ export function createNativeUpdateManagementComposition(input: Readonly<{
     policy: policy.authority,
     lifecycle: input.lifecycle,
     activation: input.activation,
+    continuity,
     clock: input.clock,
     sha256: input.sha256,
     ...(input.currentProject === undefined ? {} : { currentProject: input.currentProject }),

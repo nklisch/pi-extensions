@@ -59,8 +59,8 @@ function makeScope(
       "/home/user/Developer",
     ],
     unknownPathBehavior: "review",
-  sensitivePathBehavior: "review",
-  homePathBehavior: "allow",
+    sensitivePathBehavior: "review",
+    homePathBehavior: "allow",
     ...overrides,
   };
 }

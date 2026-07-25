@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { HostPrecedenceSchema } from "../host-precedence.js";
+import { DefaultHookContextVisibility, HookContextVisibilitySchema } from "../hook-visibility.js";
 import { MarketplaceNameSchema } from "../identity.js";
 import {
   MarketplaceSourceSchema,
@@ -66,6 +67,11 @@ export const HostUpdateScopePolicySchema = z.object({
 }).strict().readonly();
 export type HostUpdateScopePolicy = z.infer<typeof HostUpdateScopePolicySchema>;
 
+export const HostHookPreferencesSchema = z.object({
+  contextVisibility: HookContextVisibilitySchema,
+}).strict().readonly();
+export type HostHookPreferences = z.infer<typeof HostHookPreferencesSchema>;
+
 /**
  * The only host configuration schema. The literal version remains so a future
  * clean cut-over can recognize stale documents; stale versions are
@@ -76,6 +82,9 @@ export const HostConfigDocumentSchema = z.object({
   generation: GenerationSchema,
   global: HostUpdateGlobalPolicySchema.default({ application: "manual", cadence: "balanced", resolution: { hostPrecedence: ["claude", "codex"] } }),
   scope: HostUpdateScopePolicySchema.default({}),
+  // Additive presentation preference; the default keeps every pre-existing
+  // document decodable, so this does not bump the hostConfig schemaVersion.
+  hooks: HostHookPreferencesSchema.default({ contextVisibility: DefaultHookContextVisibility }),
   records: z.array(MarketplaceRegistrationRecordSchema).readonly(),
 }).strict().readonly().superRefine((document, context) => addDuplicateMarketplaceIssues(document.records, "records", context));
 export type HostConfigDocument = z.infer<typeof HostConfigDocumentSchema>;

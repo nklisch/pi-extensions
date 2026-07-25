@@ -12,7 +12,9 @@ import type { AggregatedHookDecision } from "../../domain/hook-output-contract.j
 type SessionBeforeCompactResult = { cancel?: boolean };
 type ToolResultEventResult = { content?: ToolResultEvent["content"]; details?: unknown; isError?: boolean };
 import { HOOK_ASK_TIMEOUT_MS } from "../../domain/hook-runtime-limits.js";
+import { DefaultHookContextVisibility, type HookContextVisibility } from "../../domain/hook-visibility.js";
 import { plainHookWarning } from "../plain-language.js";
+import { renderHookContextMessage, type HookContextMessageDetails } from "./pi-hook-context-renderer.js";
 
 const CONTEXT_MESSAGE_TYPE = "pi-plugin-host.hook-context-v1";
 
@@ -50,16 +52,32 @@ function firstDiagnosticSentence(value: AggregatedHookDecision): string {
 }
 
 export function createPiHookDecisionAdapter(input: Readonly<{
-  pi: Pick<ExtensionAPI, "sendMessage" | "setSessionName">;
+  pi: Pick<ExtensionAPI, "sendMessage" | "setSessionName"> & Partial<Pick<ExtensionAPI, "registerMessageRenderer">>;
+  visibility: () => Promise<HookContextVisibility>;
 }>): PiHookDecisionAdapter {
   if (input === null || typeof input !== "object" || input.pi === undefined ||
-      typeof input.pi.sendMessage !== "function" || typeof input.pi.setSessionName !== "function") {
-    throw new TypeError("Pi decision adapter requires message and title actions");
+      typeof input.pi.sendMessage !== "function" || typeof input.pi.setSessionName !== "function" ||
+      typeof input.visibility !== "function") {
+    throw new TypeError("Pi decision adapter requires message, title, and visibility actions");
   }
+  // Minimal non-TUI hosts may not implement message rendering; registration
+  // is best-effort and never gates context delivery.
+  input.pi.registerMessageRenderer?.(CONTEXT_MESSAGE_TYPE, renderHookContextMessage);
 
-  function sendContext(ctx: ExtensionContext, value: AggregatedHookDecision): void {
-    for (const text of value.contexts) {
-      input.pi.sendMessage({ customType: CONTEXT_MESSAGE_TYPE, content: text, display: false, details: undefined }, { deliverAs: delivery(value.event) });
+  async function sendContext(ctx: ExtensionContext, value: AggregatedHookDecision): Promise<void> {
+    if (value.contexts.length > 0) {
+      // Read per event so a preference change takes effect without a restart;
+      // a broken preference read degrades to the default, never to silence
+      // failure of the hook boundary itself.
+      const visibility = await input.visibility().catch(() => DefaultHookContextVisibility);
+      for (const contribution of value.contexts) {
+        input.pi.sendMessage({
+          customType: CONTEXT_MESSAGE_TYPE,
+          content: contribution.text,
+          display: visibility !== "hidden",
+          details: { plugin: contribution.plugin, event: value.event, presentation: visibility === "full" ? "full" : "line" } satisfies HookContextMessageDetails,
+        }, { deliverAs: delivery(value.event) });
+      }
     }
     if (ctx.hasUI) {
       for (const message of value.systemMessages) ctx.ui.notify(message, "info");
@@ -93,7 +111,7 @@ export function createPiHookDecisionAdapter(input: Readonly<{
 
   async function applyInput(event: InputEvent, ctx: ExtensionContext, value: AggregatedHookDecision): Promise<InputEventResult | undefined> {
     warnFailures(ctx, value);
-    sendContext(ctx, value);
+    await sendContext(ctx, value);
     if (value.block !== undefined || value.stop !== undefined || value.permission?.kind === "deny") return { action: "handled" };
     return undefined;
   }
@@ -101,7 +119,7 @@ export function createPiHookDecisionAdapter(input: Readonly<{
   async function applyToolCall(event: ToolCallEvent, ctx: ExtensionContext, value: AggregatedHookDecision): Promise<ToolCallEventResult | undefined> {
     warnFailures(ctx, value);
     if (value.block !== undefined || value.permission?.kind === "deny") return blocked(value);
-    sendContext(ctx, value);
+    await sendContext(ctx, value);
     if (value.permission?.kind === "ask" && !(await ask(ctx))) {
       return { block: true, reason: "Hook permission was not approved" };
     }
@@ -117,27 +135,27 @@ export function createPiHookDecisionAdapter(input: Readonly<{
 
   async function applyToolResult(_event: ToolResultEvent, ctx: ExtensionContext, value: AggregatedHookDecision): Promise<ToolResultEventResult | undefined> {
     warnFailures(ctx, value);
-    sendContext(ctx, value);
+    await sendContext(ctx, value);
     if (value.updatedToolOutput !== undefined && value.event === "PostToolUse") return { details: cloneJson(value.updatedToolOutput) };
     return undefined;
   }
 
   async function applyBeforeCompact(ctx: ExtensionContext, value: AggregatedHookDecision): Promise<SessionBeforeCompactResult | undefined> {
     warnFailures(ctx, value);
-    sendContext(ctx, value);
+    await sendContext(ctx, value);
     if (value.block !== undefined || value.stop !== undefined || value.continuation !== undefined) return { cancel: true };
     return undefined;
   }
 
   async function applyLifecycle(ctx: ExtensionContext, value: AggregatedHookDecision): Promise<void> {
     warnFailures(ctx, value);
-    sendContext(ctx, value);
+    await sendContext(ctx, value);
     if (value.stop !== undefined || value.continuation !== undefined) ctx.abort();
   }
 
   async function applyStop(ctx: ExtensionContext, value: AggregatedHookDecision): Promise<void> {
     warnFailures(ctx, value);
-    sendContext(ctx, value);
+    await sendContext(ctx, value);
   }
 
   return Object.freeze({ applyInput, applyToolCall, applyToolResult, applyBeforeCompact, applyLifecycle, applyStop });

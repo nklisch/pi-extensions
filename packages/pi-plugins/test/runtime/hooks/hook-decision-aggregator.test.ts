@@ -10,10 +10,10 @@ import { ComponentIdSchema } from "../../../src/domain/components.js";
 import { PluginKeySchema } from "../../../src/domain/identity.js";
 import type { HookExecutionBinding } from "../../../src/application/ports/hook-execution-context.js";
 
-function binding(order: number): HookExecutionBinding {
+function binding(order: number, plugin = "demo@catalog"): HookExecutionBinding {
   return {
     scope: { kind: "user" },
-    plugin: PluginKeySchema.parse("demo@catalog"),
+    plugin: PluginKeySchema.parse(plugin),
     revision: ContentDigestSchema.parse(`sha256:${"1".repeat(64)}`),
     projectionDigest: ContentDigestSchema.parse(`sha256:${"2".repeat(64)}`),
     contributionDigest: ContentDigestSchema.parse(`sha256:${"3".repeat(64)}`),
@@ -22,9 +22,9 @@ function binding(order: number): HookExecutionBinding {
   };
 }
 
-function decision(order: number, values: Omit<ParsedHookDecision, "binding" | "contexts" | "systemMessages"> & Partial<Pick<ParsedHookDecision, "contexts" | "systemMessages">>): ParsedHookDecision {
+function decision(order: number, values: Omit<ParsedHookDecision, "binding" | "contexts" | "systemMessages"> & Partial<Pick<ParsedHookDecision, "contexts" | "systemMessages">>, plugin?: string): ParsedHookDecision {
   return {
-    binding: binding(order),
+    binding: binding(order, plugin),
     contexts: values.contexts ?? [],
     systemMessages: values.systemMessages ?? [],
     ...values,
@@ -42,7 +42,10 @@ describe("ordered hook decision aggregation", () => {
         decision(0, { contexts: ["first"], systemMessages: ["notice"], block: { reason: "first reason" }, permission: { kind: "ask", reason: "first ask reason" }, updatedInput: { value: "first", keep: 1 }, title: "first" }),
       ],
     });
-    expect(result.contexts).toEqual(["first", "later"]);
+    expect(result.contexts).toEqual([
+  { text: "first", plugin: PluginKeySchema.parse("demo@catalog") },
+  { text: "later", plugin: PluginKeySchema.parse("demo@catalog") },
+]);
     expect(result.systemMessages).toEqual(["notice"]);
     expect(result.block).toEqual({ reason: "first reason" });
     expect(result.permission).toEqual({ kind: "ask", reason: "first ask reason" });
@@ -56,15 +59,35 @@ describe("ordered hook decision aggregation", () => {
     const ask = decision(0, { permission: { kind: "ask", reason: "ask" }, contexts: ["safe"] });
     const result = aggregateHookDecisions({ event: "UserPromptSubmit", originalInput: input, decisions: [deny, ask] });
     expect(result.permission).toEqual({ kind: "deny", reason: "deny" });
-    expect(result.contexts).toEqual(["safe", "unsafe"]);
+    expect(result.contexts).toEqual([
+  { text: "safe", plugin: PluginKeySchema.parse("demo@catalog") },
+  { text: "unsafe", plugin: PluginKeySchema.parse("demo@catalog") },
+]);
 
     // One broken hook no longer suppresses the healthy hook's decisions;
     // the diagnostic rides alongside so callers can warn and log.
     const diagnostic = createHookRuntimeDiagnostic(binding(1), "UserPromptSubmit", "HOOK_INVALID_OUTPUT");
     const failed = aggregateHookDecisions({ event: "UserPromptSubmit", originalInput: input, decisions: [ask, diagnostic] });
-    expect(failed.contexts).toEqual(["safe"]);
+    expect(failed.contexts).toEqual([{ text: "safe", plugin: PluginKeySchema.parse("demo@catalog") }]);
     expect(failed.permission).toEqual({ kind: "ask", reason: "ask" });
     expect(failed.diagnostics).toEqual([diagnostic]);
+  });
+
+  it("attributes every injected context to the plugin that produced it", () => {
+    const input = buildPreToolUseInput(session(), { toolName: "write", toolCallId: "tool", input: {} });
+    const result = aggregateHookDecisions({
+      event: "PreToolUse",
+      originalInput: input,
+      decisions: [
+        decision(0, { contexts: ["from alpha"] }, "alpha@catalog"),
+        decision(1, { contexts: ["from beta", "more from beta"] }, "beta@catalog"),
+      ],
+    });
+    expect(result.contexts).toEqual([
+      { text: "from alpha", plugin: PluginKeySchema.parse("alpha@catalog") },
+      { text: "from beta", plugin: PluginKeySchema.parse("beta@catalog") },
+      { text: "more from beta", plugin: PluginKeySchema.parse("beta@catalog") },
+    ]);
   });
 
   it("aggregates empty-session input without using cleanup aliases", () => {

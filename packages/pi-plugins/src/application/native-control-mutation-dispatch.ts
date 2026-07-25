@@ -3,6 +3,7 @@ import type { NativeControlApplicationDependencies, NativeControlDispatchContext
 import type { NativeControlDispatchResult } from "./native-control-projection.js";
 import { presentRecoveryRequired } from "./native-failure-presenter.js";
 import { humanForSelectionFailure, projectNativeControlFailure, projectNativeControlResponse } from "./native-control-projection.js";
+import { toSafeDisplayField } from "./native-inspection-display.js";
 import { currentProjectFailure } from "./native-control-read-dispatch.js";
 import type { MarketplaceRefreshResult } from "./update-contract.js";
 import { createNativeControlSelectionService, type NativeControlSelectionService } from "./native-control-selection.js";
@@ -226,6 +227,14 @@ export function createNativeControlMutationDispatcher(dependencies: NativeContro
           const result = await dependencies.config.hostPrecedence.setHostPrecedence(request, signal);
           const status = result.kind === "changed" ? "ok" : result.kind === "unchanged" ? "no-change" : result.kind === "stale" ? "stale" : "rejected";
           return projectNativeControlResponse(command.command, result, { status });
+        }
+        case "config.hook-visibility": {
+          const result = await dependencies.config.hookVisibility.setVisibility(request, signal);
+          const status = result.kind === "changed" || result.kind === "current" ? "ok" : result.kind === "unchanged" ? "no-change" : result.kind === "stale" ? "stale" : "rejected";
+          const human = result.kind === "rejected" || result.kind === "stale"
+            ? []
+            : [toSafeDisplayField(`hook context visibility: ${result.visibility}${result.kind === "current" ? "" : result.kind === "changed" ? " (updated)" : " (already set)"}`, { maxScalars: 128 })];
+          return projectNativeControlResponse(command.command, result, { status, human });
         }
         case "updates.notices.acknowledge": {
           const result = await dependencies.updates.acknowledge({ ids: request.ids }, signal);

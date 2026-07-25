@@ -79,8 +79,7 @@ export interface ResolvedReviewerConfig {
 }
 
 export type UnknownPathBehavior = ProjectScopeConfig["unknownPathBehavior"];
-export type SensitivePathBehavior =
-  ProjectScopeConfig["sensitivePathBehavior"];
+export type SensitivePathBehavior = ProjectScopeConfig["sensitivePathBehavior"];
 export type HomePathBehavior = ProjectScopeConfig["homePathBehavior"];
 
 /**

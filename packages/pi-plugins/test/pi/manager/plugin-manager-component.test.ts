@@ -254,6 +254,17 @@ describe("plugin manager component", () => {
     expect(h.done).not.toHaveBeenCalled();
   });
 
+  it("returns from a finished operation on Enter exactly like Escape", () => {
+    const h = harness();
+    let finished = pluginManagerReducer(createPluginManagerState(), { type: "operation-started", action: "update-all" });
+    finished = pluginManagerReducer(finished, { type: "operation-finished", envelope: {} as never });
+    h.setState(finished);
+    h.component.handleInput("\r");
+    expect(h.intents).toContainEqual({ type: "return-manager" });
+    expect(h.intents).not.toContainEqual({ type: "open-detail" });
+    expect(h.done).not.toHaveBeenCalled();
+  });
+
   it("makes repeated Escape a no-op while cancellation waits for owner truth", () => {
     const h = harness();
     let operation = pluginManagerReducer(createPluginManagerState(), { type: "operation-started", action: "enable" });

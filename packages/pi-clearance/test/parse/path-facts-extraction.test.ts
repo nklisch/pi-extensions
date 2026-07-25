@@ -42,8 +42,8 @@ function makeScope(
     deniedDirectories: ["/home/user/proj/secrets", "/opt/secret"],
     safeHomeDirectories: ["/home/user/dev", "/home/user/repos"],
     unknownPathBehavior: "review",
-  sensitivePathBehavior: "review",
-  homePathBehavior: "allow",
+    sensitivePathBehavior: "review",
+    homePathBehavior: "allow",
     ...overrides,
   };
 }

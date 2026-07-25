@@ -48,6 +48,9 @@ function environment(noticeCount = 1, application: "automatic" | "manual" = "aut
   let applyCalls = 0;
   let onApply: (() => void) | undefined;
   const mutationSignals: AbortSignal[] = [];
+  const ensureCalls: string[] = [];
+  const ensureSignals: (AbortSignal | undefined)[] = [];
+  let onEnsure: (() => void) | undefined;
   const dependencies = {
     state: { async read() { return { ok: true as const, snapshot: snapshot() }; } },
     inventory: { async discover() { return { scopes: [scope], complete: true }; } },
@@ -55,6 +58,7 @@ function environment(noticeCount = 1, application: "automatic" | "manual" = "aut
     policy: { async resolve() { return { application, winningLevel: "marketplace" as const, sourceGuard: "none" as const }; } },
     lifecycle: { async inspect() { return authority; }, async apply() { applyCalls += 1; onApply?.(); return lifecycleResult; } },
     activation: { availability: () => context },
+    continuity: { async ensure(ensureScope: any, ensureSignal?: AbortSignal) { ensureCalls.push(ensureScope.kind === "user" ? "user" : ensureScope.projectKey); ensureSignals.push(ensureSignal); onEnsure?.(); return { kind: "ensured" as const, granted: [] }; } },
     clock: { nowEpochMilliseconds: () => 100, monotonicMilliseconds: () => 100 }, sha256,
   } as any;
   return {
@@ -67,6 +71,9 @@ function environment(noticeCount = 1, application: "automatic" | "manual" = "aut
     acknowledgeDuringApply() { onApply = () => { record = { ...record, notices: record.notices.map((notice: any, index: number) => index === 0 ? { ...notice, unread: false, acknowledgedAt: 99 } : notice) }; }; },
     consumeContextDuringApply() { onApply = () => { context = "unavailable"; }; },
     onApply(hook: () => void) { onApply = hook; },
+    onEnsure(hook: () => void) { onEnsure = hook; },
+    ensureCalls,
+    ensureSignals,
     mutationSignals,
     notice: () => record.notices[0], applyCalls: () => applyCalls,
   };
@@ -200,5 +207,45 @@ describe("automatic update coordinator", () => {
     await recovery.service.run({ noticeIds: [recovery.id], limit: 1 }, signal);
     expect(recovery.notice()).toMatchObject({ disposition: "recovery-required" });
     expect(recovery.notice().resolution).toBeUndefined();
+  });
+
+  it("runs trust continuity for every authorized context even without notices", async () => {
+    const env = environment(0);
+    await expect(env.service.run({ limit: 1 }, signal)).resolves.toMatchObject({ outcomes: [] });
+    expect(env.ensureCalls).toEqual(["user"]);
+  });
+
+  it("chains trust continuity after a committed apply but not after stale or rejected outcomes", async () => {
+    const applied = environment();
+    applied.setContext("available");
+    await applied.service.run({ noticeIds: [applied.id], limit: 1 }, signal);
+    expect(applied.ensureCalls).toEqual(["user", "user"]);
+    // The post-apply chain must not inherit caller cancellation: the update
+    // has already committed, so continuity settles with a fresh signal.
+    expect(applied.ensureSignals[0]).toBe(signal);
+    expect(applied.ensureSignals[1]).not.toBe(signal);
+    expect(applied.ensureSignals[1]?.aborted).toBe(false);
+
+    const stale = environment();
+    stale.setContext("available");
+    stale.setResult({ kind: "stale" });
+    await stale.service.run({ noticeIds: [stale.id], limit: 1 }, signal);
+    expect(stale.ensureCalls).toEqual(["user"]);
+
+    const rejected = environment();
+    rejected.setContext("available");
+    rejected.setResult({ kind: "rejected", code: "UNTRUSTED" });
+    await rejected.service.run({ noticeIds: [rejected.id], limit: 1 }, signal);
+    expect(rejected.ensureCalls).toEqual(["user"]);
+  });
+
+  it("continues notice processing when trust continuity fails", async () => {
+    const env = environment();
+    env.setContext("available");
+    let calls = 0;
+    env.onEnsure(() => { calls += 1; throw new Error("continuity unavailable"); });
+    await expect(env.service.run({ noticeIds: [env.id], limit: 1 }, signal)).resolves.toMatchObject({ outcomes: [{ kind: "applied" }] });
+    expect(calls).toBe(2);
+    expect(env.applyCalls()).toBe(1);
   });
 });

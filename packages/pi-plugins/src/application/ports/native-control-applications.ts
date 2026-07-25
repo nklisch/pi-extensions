@@ -8,6 +8,7 @@ import type { NativeLifecycleOperationService } from "../native-lifecycle-operat
 import type { NativeUpdateManagementService } from "../native-update-management-service.js";
 import type { TrustedInstallationService } from "../trusted-install-contract.js";
 import type { HostPrecedenceService } from "../host-precedence-service.js";
+import type { HookVisibilityService } from "../hook-visibility-service.js";
 import type { NativeControlExecutionId } from "../native-control-contract.js";
 import type { NativeControlInputPort } from "./native-control-input.js";
 import type { NativeControlProgressSink } from "./native-control-execution.js";
@@ -19,6 +20,7 @@ export interface NativeControlHostStatusPort {
 
 export interface NativeControlConfigPort {
   readonly hostPrecedence: Pick<HostPrecedenceService, "setHostPrecedence">;
+  readonly hookVisibility: Pick<HookVisibilityService, "setVisibility">;
 }
 
 export interface NativeControlMarketplacePort {

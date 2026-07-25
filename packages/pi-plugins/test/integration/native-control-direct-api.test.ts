@@ -41,6 +41,7 @@ const samples: Readonly<Record<string, readonly string[]>> = {
   "updates.notices.acknowledge": ["updates", "notices", "acknowledge", notice],
   "updates.automatic.run": ["updates", "automatic", "run"],
   "config.host-precedence": ["config", "host-precedence", "codex-first"],
+"config.hook-visibility": ["config", "hook-visibility", "full"],
   status: ["status"],
   "operation.status": ["operation", "status", operationToken],
   "operation.cancel": ["operation", "cancel", operationToken],

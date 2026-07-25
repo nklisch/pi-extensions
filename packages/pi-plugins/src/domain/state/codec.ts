@@ -260,7 +260,7 @@ function sameJson(left: unknown, right: unknown): boolean {
 
 /** Record-tolerant roots let the codec quarantine individual bad children. */
 const rootSchemas: { readonly [K in StateDocumentKind]: z.ZodTypeAny } = {
-  hostConfig: z.object({ schemaVersion: z.literal(4), generation: GenerationSchema, global: z.unknown(), scope: z.unknown(), records: z.array(z.unknown()) }).strict(),
+  hostConfig: z.object({ schemaVersion: z.literal(4), generation: GenerationSchema, global: z.unknown(), scope: z.unknown(), hooks: z.unknown().optional(), records: z.array(z.unknown()) }).strict(),
   installedUser: z.object({ schemaVersion: z.literal(2), generation: GenerationSchema, marketplaces: z.array(z.unknown()), plugins: z.array(z.unknown()) }).strict(),
   trust: z.object({ schemaVersion: z.literal(1), generation: GenerationSchema, records: z.array(z.unknown()) }).strict(),
   projectLocal: z.object({ schemaVersion: z.literal(4), generation: GenerationSchema, projectKey: z.string(), identity: z.unknown(), declarationDigest: z.string(), scope: z.unknown(), marketplaces: z.array(z.unknown()), plugins: z.array(z.unknown()), marketplaceUpdates: z.array(z.unknown()) }).strict(),

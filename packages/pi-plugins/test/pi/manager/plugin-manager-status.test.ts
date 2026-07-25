@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { NativeControlStatusTone, pluginManagerStatusTone } from "../../../src/pi/manager/plugin-manager-status.js";
+import { NativeControlStatusClause, NativeControlStatusTone, pluginManagerStatusTone, styledNativeControlStatusLine } from "../../../src/pi/manager/plugin-manager-status.js";
+
+const theme = { fg: (_token: string, text: string) => text } as any;
 
 describe("plugin manager exact status presentation", () => {
   it.each([
@@ -28,5 +30,11 @@ describe("plugin manager exact status presentation", () => {
       failed: "error",
       "presentation-required": "warning",
     });
+  });
+
+  it("renders one shared tone-styled result line per facade status", () => {
+    expect(Object.keys(NativeControlStatusClause).sort()).toEqual(Object.keys(NativeControlStatusTone).sort());
+    expect(styledNativeControlStatusLine(theme, "ok")).toBe("✓ ok · done");
+    expect(styledNativeControlStatusLine(theme, "unavailable")).toBe("! unavailable · couldn't finish — something it needed wasn't available");
   });
 });

@@ -127,11 +127,13 @@ function describeStage(stage: BashStage): string {
     case "brace-group":
       return `Runs a command group (${describeBodyPrograms(stage.body.pipeline.stages)})`;
     case "conditional": {
-      const bodyPrograms = stage.arms.flatMap((arm) =>
-        arm.body.pipeline.stages.map((body) =>
-          body.kind === "command" ? body.program.program : null,
-        ),
-      ).filter((program): program is string => program !== null);
+      const bodyPrograms = stage.arms
+        .flatMap((arm) =>
+          arm.body.pipeline.stages.map((body) =>
+            body.kind === "command" ? body.program.program : null,
+          ),
+        )
+        .filter((program): program is string => program !== null);
       const suffix =
         bodyPrograms.length === 0
           ? ""
@@ -218,8 +220,7 @@ function describeCommandStage(
 
   const traits: string[] = [];
   if (stage.substitutions.length > 0) traits.push("uses command substitution");
-  const traitSuffix =
-    traits.length === 0 ? "" : `; ${traits.join("; ")}`;
+  const traitSuffix = traits.length === 0 ? "" : `; ${traits.join("; ")}`;
 
   if (verb === undefined) {
     return `Runs ${markdownCodeSpan(program)} (${effectLabel})${traitSuffix}`;

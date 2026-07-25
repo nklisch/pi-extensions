@@ -46,8 +46,8 @@ function projectScope(
     deniedDirectories: [`${TEST_CWD}/denied`],
     safeHomeDirectories: [],
     unknownPathBehavior: "review",
-  sensitivePathBehavior: "review",
-  homePathBehavior: "allow",
+    sensitivePathBehavior: "review",
+    homePathBehavior: "allow",
     ...overrides,
   };
 }

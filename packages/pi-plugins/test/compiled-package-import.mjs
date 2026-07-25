@@ -117,6 +117,7 @@ const expectedExports = [
   "UpdateScheduleMemorySchema",
   "UpdateSchedulerLeaseIdSchema",
   "UpdateSchedulerLeaseSchema",
+  "createAutomaticTrustContinuity",
   "createAutomaticUpdateCoordinator",
   "createAutomaticUpdateLifecycleAdapter",
   "createBackgroundUpdateCoordinator",

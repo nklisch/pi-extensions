@@ -9,6 +9,7 @@ import type { RevisionLease, RevisionLeaseStore } from "../application/ports/rev
 import type { RegisteredSubagentHookRuntime } from "../application/subagent-hook-runtime.js";
 import { registerSubagentHookRuntime } from "../application/subagent-hook-runtime.js";
 import { createPluginStoreIdentityFromEvidence } from "../domain/content-store.js";
+import type { HookContextVisibility } from "../domain/hook-visibility.js";
 import type { Sha256 } from "../domain/source.js";
 import { createManifestContentReader } from "../infrastructure/filesystem/manifest-content-reader.js";
 import { createManifestSkillPathVerifier } from "../infrastructure/filesystem/manifest-skill-path-verifier.js";
@@ -71,6 +72,7 @@ export async function createComposedSkillHookRuntime(input: Readonly<{
   selection: RuntimeSelectionCatalog;
   project: PiProjectContextAdapters;
   configuration: HostConfigurationDependencies;
+  hookVisibility: () => Promise<HookContextVisibility>;
   leases: RevisionLeaseStore;
   clock: LifecycleClock;
   subagents?: SubagentLifecyclePort;
@@ -113,7 +115,7 @@ export async function createComposedSkillHookRuntime(input: Readonly<{
       executables: executableResolver,
     });
     const events = createPiHookEventAdapter({ planner, currentProject: () => input.project.current() });
-    const decisions = createPiHookDecisionAdapter({ pi: input.pi });
+    const decisions = createPiHookDecisionAdapter({ pi: input.pi, visibility: input.hookVisibility });
     registerPiCommandHookRuntime({
       pi: delegates.pi,
       events,

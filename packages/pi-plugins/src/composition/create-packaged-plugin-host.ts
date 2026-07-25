@@ -75,6 +75,7 @@ import { createNativeUpdateManagementComposition } from "./create-native-update-
 import { createAutomaticUpdateLifecycleAdapter } from "./automatic-update-lifecycle-adapter.js";
 import { createNativeControlService } from "./create-native-control-service.js";
 import { createHostPrecedenceProvider, createHostPrecedenceService } from "../application/host-precedence-service.js";
+import { createHookContextVisibilityProvider, createHookVisibilityService } from "../application/hook-visibility-service.js";
 import { createNativeControlCurrentProjectPort } from "./create-native-control-current-project.js";
 import { createNodeControlTimeoutPort } from "../infrastructure/node/node-control-timeout.js";
 import type { NativePluginControlService } from "../application/native-control-service.js";
@@ -192,6 +193,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         // Host precedence is read through the state store at call time so a
         // preference change applies to the next inspection without restart.
         const hostPrecedence = createHostPrecedenceProvider(state.state);
+        const hookVisibility = createHookContextVisibilityProvider(state.state);
         const configurations = await createSqlitePluginConfigurationStore({ root: paths.configurationRoot });
         own(async () => configurations[Symbol.asyncDispose]());
         const recoveryAdapters = await createNodeRecoveryAdapters({ hostRoot: paths.hostRoot });
@@ -241,6 +243,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           content,
           project,
           configuration: configuration.execution,
+          hookVisibility,
           leases: recoveryAdapters.leases,
           clock,
           sha256,
@@ -311,6 +314,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         });
         const mutations = createGenerationMutationCoordinator({ scheduler: createKeyedMutationScheduler(), locks, state: state.state });
         const hostPrecedenceConfig = createHostPrecedenceService({ state: state.state, mutations, sha256 });
+        const hookVisibilityConfig = createHookVisibilityService({ state: state.state, mutations, sha256 });
         const reconciler = createLifecycleTransitionReconciler({ mutations, state: state.state, reload, transitions: recoveryAdapters.transitionStore, sha256 });
         const sourceOptions = {
           ...(options.source ?? {}),
@@ -479,6 +483,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           // A Pi command frame can fund exactly one reload. Once lifecycle
           // consumes that context, remaining automatic candidates stay pending.
           activation: { availability: () => operationContexts.getStore()?.reloadContext === undefined ? "unavailable" : "available" },
+          installed: content.installed,
           currentProject: project.scope,
           projectTrust: project.trust,
           revalidateCurrentProject: project.revalidate,
@@ -649,7 +654,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
             trustedInstallation: trustedInstallation.application,
             operations: operationApplication,
             updates: updateApplication,
-            config: Object.freeze({ hostPrecedence: hostPrecedenceConfig }),
+            config: Object.freeze({ hostPrecedence: hostPrecedenceConfig, hookVisibility: hookVisibilityConfig }),
             status: hostStatus,
             currentProject: createNativeControlCurrentProjectPort({
               scope: project.scope,

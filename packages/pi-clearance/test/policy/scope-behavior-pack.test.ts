@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import type { ResolvedProjectScope } from "../../src/config/loader.ts";
+import { bashInspectCorePack } from "../../src/packs/bash.inspect.core.ts";
+import { sealedFloor } from "../../src/packs/floor.ts";
 import { analyzeBashCommand } from "../../src/parse/native-parser.ts";
 import { enrichToolShapeWithPathFacts } from "../../src/parse/native-path-facts.ts";
 import type { ToolShape } from "../../src/parse/shape.ts";
-import { loadEffectivePolicy } from "../../src/policy/loader.ts";
 import { compilePack, decide } from "../../src/policy/core.ts";
+import { loadEffectivePolicy } from "../../src/policy/loader.ts";
 import {
   buildScopeBehaviorPack,
   SCOPE_BEHAVIOR_PACK_ID,
 } from "../../src/policy/scope-behavior-pack.ts";
-import { bashInspectCorePack } from "../../src/packs/bash.inspect.core.ts";
-import { sealedFloor } from "../../src/packs/floor.ts";
 
 function scope(
   overrides: Partial<ResolvedProjectScope> = {},

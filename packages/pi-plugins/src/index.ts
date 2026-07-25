@@ -572,6 +572,12 @@ export type {
   AutomaticUpdateCoordinator,
   AutomaticUpdateCoordinatorDependencies,
 } from "./application/automatic-update-coordinator.js";
+export { createAutomaticTrustContinuity } from "./application/automatic-trust-continuity.js";
+export type {
+  AutomaticTrustContinuity,
+  AutomaticTrustContinuityDependencies,
+  AutomaticTrustContinuityResult,
+} from "./application/automatic-trust-continuity.js";
 export type {
   AutomaticUpdateAuthoritySnapshot,
   AutomaticUpdateLifecycleResult,

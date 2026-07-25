@@ -52,8 +52,8 @@ const PROJECT_SCOPE: ResolvedProjectScope = {
     "/home/nathan/.pi/agent/plugin-host/stores",
   ],
   unknownPathBehavior: "review",
-    sensitivePathBehavior: "review",
-    homePathBehavior: "allow",
+  sensitivePathBehavior: "review",
+  homePathBehavior: "allow",
 };
 
 // The home-read baseline adds six ordinary-session rows: 48/60 = 80.0%.

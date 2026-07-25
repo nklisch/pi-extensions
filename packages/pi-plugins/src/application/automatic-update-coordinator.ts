@@ -4,6 +4,7 @@ import { ScopeContextSchema, type ScopeContext } from "../domain/state/scope.js"
 import { MarketplaceRegistrationRecordSchema, UpdateNoticeIdSchema, UpdateNoticeSchema, type UpdateNotice, type UpdateNoticeId } from "../domain/update-policy.js";
 import type { Sha256 } from "../domain/source.js";
 import { AutomaticUpdateEligibilitySchema, type AutomaticUpdateEligibility, type AutomaticUpdateEligibilityReason } from "./automatic-update-eligibility.js";
+import type { AutomaticTrustContinuity } from "./automatic-trust-continuity.js";
 import type { GenerationMutationCoordinator } from "./generation-mutation-coordinator.js";
 import { createMarketplaceUpdateRecordsMutation, marketplaceUpdateRecords } from "./marketplace-update-state.js";
 import { NativeAutomaticUpdateRunRequestSchema, NativeAutomaticUpdateRunResultSchema, type NativeAutomaticUpdateRunRequest, type NativeAutomaticUpdateRunResult } from "./native-update-contract.js";
@@ -31,6 +32,7 @@ export type AutomaticUpdateCoordinatorDependencies = Readonly<{
   policy: UpdatePolicyAuthorityPort;
   lifecycle: AutomaticUpdateLifecyclePort;
   activation: UpdateActivationContextPort;
+  continuity: AutomaticTrustContinuity;
   clock: LifecycleClock;
   sha256: Sha256;
 }> & CurrentScopeAuthorityDependencies;
@@ -201,6 +203,13 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
     const candidates: LocatedNotice[] = [];
     for (const context of await contexts(signal)) {
       if (!await authorized(context, signal)) continue;
+      // Heal already-installed revisions whose exact trust grant predates an
+      // authorized automatic update. Continuity never blocks notice work.
+      try {
+        await dependencies.continuity.ensure(context, signal);
+      } catch (error) {
+        if (signal.aborted) throw signal.reason ?? error;
+      }
       const loaded = await dependencies.state.read(context, signal);
       if (!loaded.ok) continue;
       for (const notice of marketplaceUpdateRecords(loaded.snapshot).flatMap((record) => record.notices)) {
@@ -229,6 +238,15 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
         continue;
       }
       const result = await dependencies.lifecycle.apply(latest.notice, signal);
+      if (result.kind === "changed") {
+        // Chain the exact trust grant for the just-activated revision within
+        // this run so its hooks and MCP servers launch without re-consent.
+        // Like ledger settlement, this local write outranks caller
+        // cancellation once the update has committed.
+        try {
+          await dependencies.continuity.ensure(latest.context, new AbortController().signal);
+        } catch { /* healed by the next scheduler cycle */ }
+      }
       const projected = lifecycleOutcome(latest.notice, result);
       // Once lifecycle may have committed, rollback/recovery truth outranks the
       // caller's cancellation. Settle the durable ledger with fresh authority.

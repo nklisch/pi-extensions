@@ -109,7 +109,10 @@ function presentReviewDecisionNote(
   emitText(ui, content);
 }
 
-function emitText(ui: ReviewDecisionUiShape | undefined, content: string): void {
+function emitText(
+  ui: ReviewDecisionUiShape | undefined,
+  content: string,
+): void {
   if (typeof ui?.setWidget === "function") {
     try {
       ui.setWidget(REVIEW_DECISION_WIDGET_KEY, content, {

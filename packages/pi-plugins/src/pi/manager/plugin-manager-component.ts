@@ -206,7 +206,7 @@ export class PluginManagerComponent implements Component, Focusable {
       this.controller.dispatch({ type: "cycle-filter", delta: 1 });
     } else if (this.keybindings.matches(data, "tui.select.pageUp")) this.page(-1);
     else if (this.keybindings.matches(data, "tui.select.pageDown")) this.page(1);
-    else if (this.keybindings.matches(data, "tui.select.confirm")) {
+    else if (this.keybindings.matches(data, "tui.select.confirm") || matchesKey(data, Key.enter)) {
       if (state.operation.state === "finished") {
         // A finished result is a read-out: Enter dismisses it back to the
         // rows exactly like Escape.

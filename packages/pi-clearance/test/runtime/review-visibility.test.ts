@@ -16,6 +16,7 @@ import {
   formatModelOutcomeNotice,
   formatReviewDecisionNote,
   formatStatusLine,
+  styleStatusLineMode,
 } from "../../src/runtime/review-visibility.ts";
 import { COMPOUND_COMMANDS } from "../fixtures/compound-clearance-corpus.ts";
 
@@ -90,9 +91,7 @@ describe("review visibility summary", () => {
 
     expect(summary.commandPreview.length).toBeLessThanOrEqual(180);
     expect(summary.commandPreview).toMatch(/\.\.\.$/);
-    expect(formatHumanReviewMessage(summary)).toContain(
-      summary.commandPreview,
-    );
+    expect(formatHumanReviewMessage(summary)).toContain(summary.commandPreview);
   });
 
   it("formats non-bash tools with generic JSON previews and unanalyzed labels", () => {
@@ -519,6 +518,30 @@ describe("review visibility status line", () => {
     );
 
     expect(statusLine).toBe("clearance: ask");
+  });
+
+  describe("styleStatusLineMode", () => {
+    const fakeFg = (color: string, text: string) => `<${color}>${text}</>`;
+
+    it.each([
+      ["off", "muted"],
+      ["ask", "warning"],
+      ["auto", "success"],
+    ] as const)("colors %s mode as %s", (mode, color) => {
+      const styled = styleStatusLineMode(
+        `clearance: ${mode} · warnings 2`,
+        mode,
+        fakeFg,
+      );
+
+      expect(styled).toBe(`clearance: <${color}>${mode}</> · warnings 2`);
+    });
+
+    it("leaves labels without the mode prefix untouched", () => {
+      expect(styleStatusLineMode("something else", "ask", fakeFg)).toBe(
+        "something else",
+      );
+    });
   });
 });
 

@@ -379,9 +379,7 @@ describe("handleScopeCommand", () => {
     );
     // The derived scope-behavior pack now consumes the deny intent, so the
     // stale "fails closed to review" warning is gone.
-    expect(ctx.confirmCalls[0]?.message).not.toContain(
-      "fail closed to review",
-    );
+    expect(ctx.confirmCalls[0]?.message).not.toContain("fail closed to review");
     await expect(readProjectScope(paths.projectOverlayFile)).resolves.toEqual(
       expect.objectContaining({ unknownPathBehavior: "deny" }),
     );
@@ -404,9 +402,7 @@ describe("handleScopeCommand", () => {
       "Apply scope preset: Full minus danger list",
     );
     // The unrestricted preset breadth warning requires acknowledgement.
-    expect(ctx.confirmCalls[0]?.message).toContain(
-      "requires acknowledgement",
-    );
+    expect(ctx.confirmCalls[0]?.message).toContain("requires acknowledgement");
     expect(result.level).not.toBe("error");
     await expect(readProjectScope(paths.projectOverlayFile)).resolves.toEqual(
       expect.objectContaining({
@@ -422,7 +418,11 @@ describe("handleScopeCommand", () => {
     const ctx = fakeContext();
     const deps = dependencies();
 
-    const result = await handleScopeCommand(["preset", "everything"], ctx, deps);
+    const result = await handleScopeCommand(
+      ["preset", "everything"],
+      ctx,
+      deps,
+    );
 
     expect(result.title).toBe("Pi Clearance usage");
     expect(ctx.confirmCalls).toEqual([]);

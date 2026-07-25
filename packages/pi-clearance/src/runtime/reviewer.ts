@@ -343,14 +343,10 @@ export function showReviewerConfigOnce(
       : []),
     ...(trustLabel === "untrusted" ? ["project untrusted"] : []),
   ];
-  const suffix =
-    qualifiers.length === 0 ? "" : ` (${qualifiers.join(" · ")})`;
+  const suffix = qualifiers.length === 0 ? "" : ` (${qualifiers.join(" · ")})`;
 
   try {
-    ctx.ui.notify(
-      `${headline}${suffix}. Details: /clearance status`,
-      "info",
-    );
+    ctx.ui.notify(`${headline}${suffix}. Details: /clearance status`, "info");
   } catch {
     // Visibility should never change the runtime approval decision.
   }

@@ -2,13 +2,13 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 
 import type { ProjectScopeListField } from "../../../config/config-command-plans.ts";
+import { handleScopeCommand } from "../scope.ts";
 import type { CommandReport } from "../types.ts";
 import type { SettingsAction, SettingsActionId } from "./actions.ts";
 import {
   dispatchSettingsAction,
   type SettingsDispatchDependencies,
 } from "./dispatcher.ts";
-import { handleScopeCommand } from "../scope.ts";
 import {
   dispatchScopePathInputAction,
   type ScopePathActionId,
@@ -914,9 +914,7 @@ function briefingItems(
       { id: "briefing.mode", args: { mode: "off" } },
     ),
     actionItem(
-      briefing.showModelLabel
-        ? "Model label: hide"
-        : "Model label: show",
+      briefing.showModelLabel ? "Model label: hide" : "Model label: show",
       "Include the reviewer model in the note detail.",
       {
         id: "briefing.model-label",

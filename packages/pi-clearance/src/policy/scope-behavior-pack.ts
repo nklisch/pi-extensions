@@ -24,11 +24,7 @@
  */
 
 import type { ResolvedProjectScope } from "../config/loader.ts";
-import {
-  type CompileError,
-  compilePack,
-  type PolicyPack,
-} from "./core.ts";
+import { type CompileError, compilePack, type PolicyPack } from "./core.ts";
 
 export const SCOPE_BEHAVIOR_PACK_ID = "config.scope.behavior";
 

@@ -4,7 +4,11 @@ import { buildAutoReviewerStatusView } from "./auto-reviewer-read-models.ts";
 import type { ResolvedPolicy } from "./policy-cache.ts";
 import type { RatchetModeManager } from "./ratchet-mode.ts";
 import type { CompactReviewSummary } from "./review-visibility.ts";
-import { formatStatusLine } from "./review-visibility.ts";
+import {
+  formatStatusLine,
+  type StatusLineFg,
+  styleStatusLineMode,
+} from "./review-visibility.ts";
 
 export interface OperatorStatusController {
   readonly refresh: (ctx: ExtensionContext, policy: ResolvedPolicy) => void;
@@ -18,6 +22,7 @@ export interface OperatorStatusController {
 
 interface StatusCapableUi {
   readonly setStatus?: (key: string, value: string | undefined) => void;
+  readonly theme?: { readonly fg?: StatusLineFg };
 }
 
 const STATUS_KEY = "auto-reviewer";
@@ -33,12 +38,15 @@ export function createOperatorStatusController(input: {
 
   return {
     refresh(ctx, policy) {
-      const label = formatStatusLine(
-        buildAutoReviewerStatusView({
-          ctx,
-          policy,
-          ratchet: input.ratchetModeManager.getStatus(),
-        }),
+      const view = buildAutoReviewerStatusView({
+        ctx,
+        policy,
+        ratchet: input.ratchetModeManager.getStatus(),
+      });
+      const label = styleStatusLineMode(
+        formatStatusLine(view),
+        view.mode,
+        themeFg(ctx),
       );
       baselines.set(ctx, label);
       setStatus(ctx, label);
@@ -75,6 +83,22 @@ function reviewingLabel(summary: CompactReviewSummary): string {
     `auto-reviewer: reviewing via ${summary.reviewerModeLabel} · ${summary.toolLabel}`,
     REVIEWING_LABEL_LIMIT,
   );
+}
+
+/**
+ * Resolve the theme fg defensively. The identity fallback keeps the status
+ * line functional when the host UI exposes no theme (or a partial one).
+ */
+function themeFg(ctx: ExtensionContext): StatusLineFg {
+  const fg = (ctx.ui as StatusCapableUi | undefined)?.theme?.fg;
+  if (typeof fg !== "function") return (_color, text) => text;
+  return (color, text) => {
+    try {
+      return fg(color, text);
+    } catch {
+      return text;
+    }
+  };
 }
 
 function setStatus(

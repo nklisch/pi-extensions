@@ -314,7 +314,11 @@ function parseScopeMutation(
       };
     }
     const preset = tokens[1];
-    if (preset !== "project" && preset !== "home" && preset !== "unrestricted") {
+    if (
+      preset !== "project" &&
+      preset !== "home" &&
+      preset !== "unrestricted"
+    ) {
       return {
         ok: false,
         reason: "Expected scope preset: project, home, or unrestricted.",
@@ -390,7 +394,7 @@ function parseScopeMutation(
     return {
       ok: false,
       reason:
-        "Expected `scope`, `scope preset <project|home|unrestricted>`, `scope roots|writable|temp|denied|safe-home|agent-support add|remove <path>`, `scope safe-home-defaults <on|off>`, `scope agent-support-defaults <on|off>`, or `scope unknown-path <review|deny>`."
+        "Expected `scope`, `scope preset <project|home|unrestricted>`, `scope roots|writable|temp|denied|safe-home|agent-support add|remove <path>`, `scope safe-home-defaults <on|off>`, `scope agent-support-defaults <on|off>`, or `scope unknown-path <review|deny>`.",
     };
   }
 
