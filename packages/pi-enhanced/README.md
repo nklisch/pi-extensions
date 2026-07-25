@@ -22,10 +22,12 @@ no separate installs, no version hunting.
 | pi-plugins | Plugin marketplace and lifecycle management, adopting Claude Code and Codex plugins natively. |
 | pi-subagents | Subagents with ordered lifecycle interception (bundled inside pi-plugins). |
 | pi-background-tasks | Background jobs with polling, status, cancellation, and wakeups. |
-| pi-zai-research | Z.ai-backed web search, page/PDF reading, and GitHub repo deep-reads. |
 | pi-model-modes | System-prompt adaptation per model and mode. |
 | pi-conveniences | `/exit`, `.agents/AGENTS.md` context loading, context-window footer, subagent model listing. |
 | pi-fff-compat | FFF-indexed file search through Pi-native find/grep semantics (no fuzzy fallback). |
+
+(`@nklisch/pi-zai-research` remains published separately if you prefer its
+Z.ai-backed research tools over pi-web-access.)
 
 ### Curated third-party
 
@@ -37,6 +39,7 @@ no separate installs, no version hunting.
 | @juicesharp/rpiv-todo | Todo tracking. |
 | @juicesharp/rpiv-ask-user-question | Structured agent questions. |
 | @ff-labs/pi-fff | Fuzzy file discovery (ffind/ffgrep) — complements pi-fff-compat. |
+| pi-web-access | Web search and page fetching. |
 
 ## What it doesn't set up
 

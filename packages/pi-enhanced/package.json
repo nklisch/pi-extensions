@@ -32,7 +32,6 @@
       "./node_modules/@nklisch/pi-fff-compat/extensions",
       "./node_modules/@nklisch/pi-model-modes/extensions/index.ts",
       "./node_modules/@nklisch/pi-background-tasks/extensions",
-      "./node_modules/@nklisch/pi-zai-research/extensions",
       "./node_modules/@nklisch/pi-plugins/dist/pi/production-subagents-extension.js",
       "./node_modules/@nklisch/pi-plugins/dist/pi/extension.js",
       "./node_modules/@nklisch/pi-clearance/src/index.ts",
@@ -41,13 +40,14 @@
       "./node_modules/@narumitw/pi-usage/src/index.ts",
       "./node_modules/@juicesharp/rpiv-todo/index.ts",
       "./node_modules/@juicesharp/rpiv-ask-user-question/index.ts",
-      "./node_modules/@ff-labs/pi-fff/src/index.ts"
+      "./node_modules/@ff-labs/pi-fff/src/index.ts",
+      "./node_modules/pi-web-access/index.ts"
     ],
     "skills": [
       "./node_modules/@nklisch/pi-background-tasks/skills",
-      "./node_modules/@nklisch/pi-zai-research/skills",
       "./node_modules/@nklisch/pi-clearance/src/skill/clearance-tune/SKILL.md",
-      "./node_modules/@nklisch/pi-clearance/src/skill/clearance-pack-authoring/SKILL.md"
+      "./node_modules/@nklisch/pi-clearance/src/skill/clearance-pack-authoring/SKILL.md",
+      "./node_modules/pi-web-access/skills"
     ],
     "themes": [
       "./node_modules/pi-catppuccin-tui/themes"
@@ -65,9 +65,9 @@
     "@nklisch/pi-fff-compat": "^0.1.0",
     "@nklisch/pi-model-modes": "^0.3.1",
     "@nklisch/pi-plugins": "^0.1.18",
-    "@nklisch/pi-zai-research": "^0.4.0",
     "pi-catppuccin-tui": "^0.1.3",
-    "pi-tool-display": "^0.5.0"
+    "pi-tool-display": "^0.5.0",
+    "pi-web-access": "^0.13.0"
   },
   "bundledDependencies": [
     "@ff-labs/pi-fff",
@@ -80,9 +80,9 @@
     "@nklisch/pi-fff-compat",
     "@nklisch/pi-model-modes",
     "@nklisch/pi-plugins",
-    "@nklisch/pi-zai-research",
     "pi-catppuccin-tui",
-    "pi-tool-display"
+    "pi-tool-display",
+    "pi-web-access"
   ],
   "scripts": {
     "test": "node test/verify-bundle.mjs"
