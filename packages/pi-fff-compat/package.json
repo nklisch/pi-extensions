@@ -1,0 +1,51 @@
+{
+  "name": "@nklisch/pi-fff-compat",
+  "version": "0.1.0",
+  "description": "Fast FFF-backed file search through Pi-native find/grep semantics — glob-only file lookup and exact regex/literal grep with no fuzzy fallback.",
+  "author": {
+    "name": "nklisch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nklisch/pi-extensions.git",
+    "directory": "packages/pi-fff-compat"
+  },
+  "bugs": {
+    "url": "https://github.com/nklisch/pi-extensions/issues"
+  },
+  "homepage": "https://github.com/nklisch/pi-extensions/tree/main/packages/pi-fff-compat#readme",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "fff",
+    "search",
+    "find",
+    "grep",
+    "ripgrep"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "private": false,
+  "dependencies": {
+    "@ff-labs/fff-node": ">=0.9.6 <1"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.80.8",
+    "@earendil-works/pi-coding-agent": "0.80.8"
+  },
+  "scripts": {
+    "test": "bun test extensions/*.test.ts"
+  }
+}

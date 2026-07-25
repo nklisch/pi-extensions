@@ -1,5 +1,5 @@
 /**
- * pi-claude-conveniences — small drop-in conveniences for muscle-memory parity
+ * pi-conveniences — small drop-in conveniences for muscle-memory parity
  * with Claude Code, Codex, and common shells.
  *
  * Currently registers:

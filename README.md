@@ -13,7 +13,8 @@ The publishing home for Nathan Klisch's Pi extensions. Every public package in t
 | [`@nklisch/pi-mcp-adapter`](packages/pi-mcp-adapter) | Maintained pi-mcp-adapter fork with a programmatic MCP source lifecycle. |
 | [`@nklisch/pi-subagents`](packages/pi-subagents) | Maintained pi-subagents fork with ordered lifecycle interception (bundled by pi-plugins). |
 | [`@nklisch/pi-clearance`](packages/pi-clearance) | Configurable auto-reviewer for parsed, structural command policy (tree-sitter native core). |
-| [`@nklisch/pi-claude-conveniences`](packages/pi-claude-conveniences) | Small drop-in conveniences for Claude Code/Codex muscle-memory parity (`/exit`, `.agents/AGENTS.md` context). |
+| [`@nklisch/pi-conveniences`](packages/pi-conveniences) | Small drop-in quality-of-life conveniences (`/exit`, `.agents/AGENTS.md` context, context-window footer, subagent model listing). |
+| [`@nklisch/pi-fff-compat`](packages/pi-fff-compat) | Fast FFF-backed file search through Pi-native find/grep semantics (no fuzzy fallback). |
 
 Install any package with:
 
@@ -66,4 +67,4 @@ Configure npm trusted publishing for each package to trust `.github/workflows/pu
 
 ## Migration status
 
-Package sources were consolidated from the sibling `pi-model-modes`, `pi-plugins`, `pi-mcp-adapter`, `pi-auto-approve` (renamed to `pi-clearance`), `skills`, and `pi-packages` (pi-subagents fork) repositories. `pi-claude-conveniences` is the renamed successor to `@nklisch/pi-nates-toolkit`'s extension surfaces. The old repositories have not been deleted or rewritten; this repository is intended to become the npm publishing source after its GitHub repository and trusted-publisher entries are configured. Skill-only plugins (workbench, agile-workflow, and friends) intentionally remain in the `skills` repository and are adopted through `@nklisch/pi-plugins`.
+Package sources were consolidated from the sibling `pi-model-modes`, `pi-plugins`, `pi-mcp-adapter`, `pi-auto-approve` (renamed to `pi-clearance`), `skills`, and `pi-packages` (pi-subagents fork) repositories. `pi-conveniences` is the renamed successor to `@nklisch/pi-nates-toolkit`'s extension surfaces plus select personal pi-config extensions. The old repositories have not been deleted or rewritten; this repository is intended to become the npm publishing source after its GitHub repository and trusted-publisher entries are configured. Skill-only plugins (workbench, agile-workflow, and friends) intentionally remain in the `skills` repository and are adopted through `@nklisch/pi-plugins`.
