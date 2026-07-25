@@ -1,9 +1,12 @@
 import { spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadPackages } from "./package-catalog.mjs";
 
+const packScript = join(dirname(fileURLToPath(import.meta.url)), "pack-package.mjs");
+
 for (const pkg of await loadPackages()) {
-  const result = spawnSync("npm", ["pack", "--dry-run", "--json"], {
-    cwd: pkg.directory,
+  const result = spawnSync("node", [packScript, pkg.directory, "--dry-run"], {
     encoding: "utf8",
   });
   if (result.status !== 0) {

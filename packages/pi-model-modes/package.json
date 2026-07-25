@@ -32,8 +32,8 @@
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.80.8",
-    "@earendil-works/pi-tui": "0.80.8",
+    "@earendil-works/pi-ai": "0.82.0",
+    "@earendil-works/pi-tui": "0.82.0",
     "@types/node": "^22.19.0",
     "typescript": "^6.0.0",
     "vitest": "^4.0.0"

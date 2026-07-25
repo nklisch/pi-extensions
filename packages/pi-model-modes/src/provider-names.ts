@@ -42,6 +42,8 @@ export const PROVIDER_DISPLAY_NAMES: Readonly<Record<KnownProvider, string>> = {
   "xiaomi-token-plan-cn":    "Xiaomi",
   "xiaomi-token-plan-ams":   "Xiaomi",
   "xiaomi-token-plan-sgp":   "Xiaomi",
+  "qwen-token-plan":         "Alibaba",
+  "qwen-token-plan-cn":      "Alibaba",
   "radius":                  "Radius",
 };
 

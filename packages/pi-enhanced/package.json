@@ -1,0 +1,90 @@
+{
+  "name": "@nklisch/pi-enhanced",
+  "version": "0.1.0",
+  "description": "Pi, enhanced — one install for nklisch's full harness: policy-gated command review, plugin marketplace, subagents, background tasks, research tools, search, model modes, and a curated UX set.",
+  "author": {
+    "name": "nklisch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nklisch/pi-extensions.git",
+    "directory": "packages/pi-enhanced"
+  },
+  "bugs": {
+    "url": "https://github.com/nklisch/pi-extensions/issues"
+  },
+  "homepage": "https://github.com/nklisch/pi-extensions/tree/main/packages/pi-enhanced#readme",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "meta-package",
+    "harness",
+    "bundle"
+  ],
+  "pi": {
+    "extensions": [
+      "./node_modules/@nklisch/pi-conveniences/extensions",
+      "./node_modules/@nklisch/pi-fff-compat/extensions",
+      "./node_modules/@nklisch/pi-model-modes/extensions/index.ts",
+      "./node_modules/@nklisch/pi-background-tasks/extensions",
+      "./node_modules/@nklisch/pi-zai-research/extensions",
+      "./node_modules/@nklisch/pi-plugins/dist/pi/production-subagents-extension.js",
+      "./node_modules/@nklisch/pi-plugins/dist/pi/extension.js",
+      "./node_modules/@nklisch/pi-clearance/src/index.ts",
+      "./node_modules/pi-catppuccin-tui/extensions/catppuccin-tui.ts",
+      "./node_modules/pi-tool-display/index.ts",
+      "./node_modules/@narumitw/pi-usage/src/index.ts",
+      "./node_modules/@juicesharp/rpiv-todo/index.ts",
+      "./node_modules/@juicesharp/rpiv-ask-user-question/index.ts",
+      "./node_modules/@ff-labs/pi-fff/src/index.ts"
+    ],
+    "skills": [
+      "./node_modules/@nklisch/pi-background-tasks/skills",
+      "./node_modules/@nklisch/pi-zai-research/skills",
+      "./node_modules/@nklisch/pi-clearance/src/skill/clearance-tune/SKILL.md",
+      "./node_modules/@nklisch/pi-clearance/src/skill/clearance-pack-authoring/SKILL.md"
+    ],
+    "themes": [
+      "./node_modules/pi-catppuccin-tui/themes"
+    ]
+  },
+  "private": false,
+  "dependencies": {
+    "@ff-labs/pi-fff": "^0.10.1",
+    "@juicesharp/rpiv-ask-user-question": "^2.1.0",
+    "@juicesharp/rpiv-todo": "^2.1.0",
+    "@narumitw/pi-usage": "^0.28.0",
+    "@nklisch/pi-background-tasks": "^0.1.5",
+    "@nklisch/pi-clearance": "^0.1.0",
+    "@nklisch/pi-conveniences": "^0.1.0",
+    "@nklisch/pi-fff-compat": "^0.1.0",
+    "@nklisch/pi-model-modes": "^0.3.1",
+    "@nklisch/pi-plugins": "^0.1.18",
+    "@nklisch/pi-zai-research": "^0.4.0",
+    "pi-catppuccin-tui": "^0.1.3",
+    "pi-tool-display": "^0.5.0"
+  },
+  "bundledDependencies": [
+    "@ff-labs/pi-fff",
+    "@juicesharp/rpiv-ask-user-question",
+    "@juicesharp/rpiv-todo",
+    "@narumitw/pi-usage",
+    "@nklisch/pi-background-tasks",
+    "@nklisch/pi-clearance",
+    "@nklisch/pi-conveniences",
+    "@nklisch/pi-fff-compat",
+    "@nklisch/pi-model-modes",
+    "@nklisch/pi-plugins",
+    "@nklisch/pi-zai-research",
+    "pi-catppuccin-tui",
+    "pi-tool-display"
+  ],
+  "scripts": {
+    "test": "node test/verify-bundle.mjs"
+  }
+}

@@ -34,8 +34,10 @@ for (const pkg of packages) {
 
   // TypeScript packages can point directly at source. Compiled packages may point
   // at dist, which is intentionally absent from a clean checkout until build.
+  // Meta packages reference bundled dependencies through node_modules paths,
+  // which only materialize inside the packed tarball (verified by check-packs).
   for (const extensionPath of manifest.pi?.extensions ?? []) {
-    if (extensionPath.includes("*") || extensionPath.startsWith("./dist/")) continue;
+    if (extensionPath.includes("*") || extensionPath.startsWith("./dist/") || extensionPath.startsWith("./node_modules/")) continue;
     try {
       await access(join(directory, extensionPath));
     } catch {
