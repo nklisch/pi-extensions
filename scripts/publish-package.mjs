@@ -45,9 +45,12 @@ for (const pkg of selected) {
 
   console.log(`Publishing ${spec} from ${pkg.directoryName}...`);
   // Provenance statements are only generated in CI (OIDC); local first-time
-  // publishes authenticate interactively and ship without them.
+  // publishes authenticate interactively and ship without them. The flag
+  // must be explicit both ways: every package carries publishConfig
+  // .provenance=true in its manifest (validator policy for CI), which npm
+  // honors even for local publishes unless negated.
   const publishArgs = ["publish", tarball, "--access", "public"];
-  if (!local) publishArgs.push("--provenance");
+  publishArgs.push(local ? "--no-provenance" : "--provenance");
   const publish = spawnSync("npm", publishArgs, {
     cwd: pkg.directory,
     stdio: "inherit",
