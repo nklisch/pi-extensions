@@ -43,6 +43,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends git util-linux libfaketime
       - run: npm ci
+      - name: Build pi-mcp-adapter interactive visualizer (test fixture)
+        run: |
+          npm install --prefix packages/pi-mcp-adapter/examples/interactive-visualizer --package-lock=false --ignore-scripts
+          npm run build --prefix packages/pi-mcp-adapter/examples/interactive-visualizer
       - run: npm run check
       - name: Publish unpublished versions with OIDC provenance
         run: npm run publish:package -- "${{ inputs.package }}"
