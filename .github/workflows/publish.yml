@@ -32,10 +32,12 @@ jobs:
             exit 1
           fi
       - uses: actions/checkout@v4
+      # No registry-url: it injects a NODE_AUTH_TOKEN that shadows the OIDC
+      # trusted-publishing exchange (E401). Trusted publishing needs id-token
+      # only, configured per package via `npm trust`.
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
-          registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
       - uses: oven-sh/setup-bun@v2
       - name: Install native test capabilities
