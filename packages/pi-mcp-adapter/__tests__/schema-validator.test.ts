@@ -32,6 +32,26 @@ describe("createMcpJsonSchemaValidator", () => {
     expect(validate!({})).toBe(false);
   });
 
+  it("enforces integer-width ranges", () => {
+    const validator = createMcpJsonSchemaValidator().getValidator({
+      type: "object",
+      properties: {
+        small: { type: "integer", format: "int32" },
+        big: { type: "integer", format: "uint64" },
+        byte: { type: "integer", format: "uint8" },
+      },
+    });
+    const valid = (data: unknown) => validator(data).valid;
+    expect(valid({ small: 2 ** 31 - 1, big: 0, byte: 255 })).toBe(true);
+    expect(valid({ small: -(2 ** 31), big: 2 ** 53, byte: 0 })).toBe(true);
+    expect(valid({ small: 2 ** 31 })).toBe(false); // exceeds int32
+    expect(valid({ small: -(2 ** 31) - 1 })).toBe(false);
+    expect(valid({ big: -1 })).toBe(false); // uint64 is unsigned
+    expect(valid({ big: 1.5 })).toBe(false); // not an integer
+    expect(valid({ byte: 256 })).toBe(false);
+    expect(valid({ byte: -1 })).toBe(false);
+  });
+
   it("still validates formats it knows", () => {
     const validator = createMcpJsonSchemaValidator().getValidator({
       type: "object",

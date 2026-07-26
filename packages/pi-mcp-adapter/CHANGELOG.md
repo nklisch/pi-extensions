@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.0-nklisch.6] - 2026-07-26
+
+### Changed
+
+- The integer-width formats registered in nklisch.5 now validate for real instead of passing through: `int8`/`int16`/`int32` and `uint8`/`uint16`/`uint32` are range-checked exactly; `int64`/`uint64` assert integer-ness (and non-negativity for `uint64`) since JSON numbers cannot carry the full 64-bit range with exact precision. Tool results that violate their own schema annotations now fail validation instead of sailing through silently.
+
 ## [2.11.0-nklisch.5] - 2026-07-26
 
 ### Fixed

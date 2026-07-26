@@ -10,24 +10,28 @@ const addFormats: (ajv: Ajv) => unknown =
     : (addFormatsImport as { default: (ajv: Ajv) => unknown }).default;
 
 /**
- * JSON Schema `format` is annotation-only, and servers generated with
- * schemars (Rust MCP services) annotate integers with the OpenAPI width
- * formats. Ajv does not know them and logs
+ * Servers generated with schemars (Rust MCP services) annotate integers with
+ * the OpenAPI width formats. Ajv does not know them and logs
  * `unknown format "uint64" ignored in schema` once per occurrence when the
  * SDK client compiles a tool outputSchema — pure noise for every tool call.
- * Registering them as pass-through validators keeps the annotation on the
- * wire while silencing the warning.
+ * Registering real validators both silences the warning and makes the
+ * annotation true: widths up to 32 bits are range-checked exactly; 64-bit
+ * checks assert integer-ness and sign because JSON numbers cannot carry the
+ * full 64-bit range with exact precision anyway.
  */
-const INTEGER_WIDTH_FORMATS = [
-  "int8",
-  "int16",
-  "int32",
-  "int64",
-  "uint8",
-  "uint16",
-  "uint32",
-  "uint64",
-] as const;
+const bounded = (min: number, max: number) => (value: number): boolean =>
+  Number.isInteger(value) && value >= min && value <= max;
+
+const INTEGER_WIDTH_FORMATS: Record<string, (value: number) => boolean> = {
+  int8: bounded(-(2 ** 7), 2 ** 7 - 1),
+  int16: bounded(-(2 ** 15), 2 ** 15 - 1),
+  int32: bounded(-(2 ** 31), 2 ** 31 - 1),
+  int64: (value) => Number.isInteger(value),
+  uint8: bounded(0, 2 ** 8 - 1),
+  uint16: bounded(0, 2 ** 16 - 1),
+  uint32: bounded(0, 2 ** 32 - 1),
+  uint64: (value) => Number.isInteger(value) && value >= 0,
+};
 
 /**
  * Build the JSON Schema validator handed to every MCP client. Mirrors the
@@ -42,8 +46,8 @@ export function createMcpJsonSchemaValidator(): AjvJsonSchemaValidator {
     allErrors: true,
   });
   addFormats(ajv);
-  for (const format of INTEGER_WIDTH_FORMATS) {
-    ajv.addFormat(format, () => true);
+  for (const [format, validate] of Object.entries(INTEGER_WIDTH_FORMATS)) {
+    ajv.addFormat(format, { type: "number", validate });
   }
   return new AjvJsonSchemaValidator(ajv);
 }
