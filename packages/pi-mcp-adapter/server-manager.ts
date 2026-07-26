@@ -18,6 +18,7 @@ import type {
 } from "./types.ts";
 import { serverStreamResultPatchNotificationSchema } from "./types.ts";
 import { resolveNpxBinary } from "./npx-resolver.ts";
+import { createMcpJsonSchemaValidator } from "./schema-validator.ts";
 import { logger } from "./logger.ts";
 import { McpOAuthProvider } from "./mcp-oauth-provider.ts";
 import { extractOAuthConfig, supportsOAuth } from "./mcp-auth-flow.ts";
@@ -242,7 +243,13 @@ export class McpServerManager {
     const capabilities = this.buildClientCapabilities();
     const client = new Client(
       { name: `pi-mcp-${serverName}`, version: "1.0.0" },
-      Object.keys(capabilities).length > 0 ? { capabilities } : undefined,
+      {
+        ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
+        // Custom validator: the SDK default Ajv logs a warning for every
+        // schemars-style integer-width format (int64, uint64, ...) it meets
+        // in a tool outputSchema. Ours registers them as pass-throughs.
+        jsonSchemaValidator: createMcpJsonSchemaValidator(),
+      },
     );
     if (this.samplingConfig) {
       registerSamplingHandler(client, { ...this.samplingConfig, serverName });

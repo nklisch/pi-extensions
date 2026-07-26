@@ -74,7 +74,8 @@ describe("McpServerManager sampling", () => {
     await manager.connect("demo", { command: "node", args: ["server.js"] });
 
     const client = mocks.clients[0];
-    expect(client.options).toEqual({ capabilities: { sampling: {} } });
+    expect(client.options).toMatchObject({ capabilities: { sampling: {} } });
+    expect(client.options.jsonSchemaValidator).toBeDefined();
     expect(client.setRequestHandler).toHaveBeenCalledTimes(1);
     expect(client.setRequestHandler.mock.invocationCallOrder[0]).toBeLessThan(
       client.connect.mock.invocationCallOrder[0],
@@ -92,7 +93,7 @@ describe("McpServerManager sampling", () => {
     await manager.connect("demo", { command: "node", args: ["server.js"] });
 
     const client = mocks.clients[0];
-    expect(client.options).toEqual({
+    expect(client.options).toMatchObject({
       capabilities: {
         elicitation: {
           form: {},
@@ -113,7 +114,7 @@ describe("McpServerManager sampling", () => {
 
     await manager.connect("demo", { command: "node", args: ["server.js"] });
 
-    expect(mocks.clients[0].options).toEqual({
+    expect(mocks.clients[0].options).toMatchObject({
       capabilities: { elicitation: { form: {} } },
     });
   });
@@ -189,7 +190,7 @@ describe("McpServerManager sampling", () => {
 
     await manager.connect("demo", { command: "node", args: ["server.js"] });
 
-    expect(mocks.clients[0].options).toEqual({
+    expect(mocks.clients[0].options).toMatchObject({
       capabilities: {
         sampling: {},
         elicitation: {
@@ -208,7 +209,10 @@ describe("McpServerManager sampling", () => {
     await manager.connect("demo", { command: "node", args: ["server.js"] });
 
     const client = mocks.clients[0];
-    expect(client.options).toBeUndefined();
+    // Options always carry the adapter's JSON Schema validator; capabilities
+    // stay absent when neither sampling nor elicitation is configured.
+    expect(client.options?.capabilities).toBeUndefined();
+    expect(client.options?.jsonSchemaValidator).toBeDefined();
     expect(client.setRequestHandler).not.toHaveBeenCalled();
   });
 

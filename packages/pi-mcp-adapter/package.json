@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-mcp-adapter",
-  "version": "2.11.0-nklisch.4",
+  "version": "2.11.0-nklisch.5",
   "description": "Maintained pi-mcp-adapter fork with a programmatic source lifecycle",
   "type": "module",
   "license": "MIT",
@@ -71,6 +71,7 @@
     "error-signal.ts",
     "state.ts",
     "utils.ts",
+    "schema-validator.ts",
     "abort.ts",
     "tool-metadata.ts",
     "init.ts",
@@ -123,7 +124,9 @@
     "open": "^10.2.0",
     "recheck": "^4.5.0",
     "typebox": "^1.1.24",
-    "zod": "^3.25.0 || ^4.0.0"
+    "zod": "^3.25.0 || ^4.0.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.79.1 <1",

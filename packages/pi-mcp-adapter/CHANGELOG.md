@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.0-nklisch.5] - 2026-07-26
+
+### Fixed
+
+- Servers whose schemas carry schemars-style integer-width formats (`int32`, `int64`, `uint32`, `uint64`, and the 8/16-bit variants) no longer flood stderr with Ajv `unknown format ... ignored in schema` warnings. Every MCP client now uses an adapter-built JSON Schema validator that registers those formats as pass-throughs; `format` is annotation-only, so validation behavior is unchanged. Previously the SDK's default Ajv warned once per occurrence when compiling a tool `outputSchema` — 27 of 52 tools on one Rust-generated server.
+
+## [2.11.0-nklisch.4] - 2026-07-26
+
+### Changed
+
+- Maintenance documentation only: `MAINTAINING.md` and `docs/VISION.md` refreshed for the monorepo layout. No runtime changes.
+
 ## [2.11.0-nklisch.3] - 2026-07-22
 
 ### Changed
