@@ -53,3 +53,11 @@ Not yet recorded.
 - pi-plugins bundles workspace siblings (pi-subagents, and depends on
   pi-mcp-adapter); the root check builds those two first because pi-plugins'
   typecheck and tests consume their built artifacts.
+- Release-order pitfall: `npm version --workspace` runs `npm install`
+  immediately. When bumping a sibling, update pi-plugins' dependency pin in
+  the same step before any install runs; if an install runs while pin !=
+  workspace version, npm nests the registry copy under
+  `packages/pi-plugins/node_modules/` (shadowing the workspace link and
+  tripping the load gate with PACKAGE_DRIFT). Fix: prune the nested lockfile
+  entries under `packages/pi-plugins/node_modules/`, delete the dir,
+  reinstall.
