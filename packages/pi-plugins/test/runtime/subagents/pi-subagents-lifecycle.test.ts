@@ -82,7 +82,7 @@ describe("published pi-subagents lifecycle adapter", () => {
       const port = await createPublishedPiSubagentsLifecyclePort();
       expect(port).toBeDefined();
       await expect(port!.capabilities(new AbortController().signal)).resolves.toMatchObject({
-        provider: { packageName: "@nklisch/pi-subagents", version: "18.0.4-nklisch.0" },
+        provider: { packageName: "@nklisch/pi-subagents", version: "18.0.4-nklisch.1" },
       });
     } finally {
       published.unpublishSubagentsService();
@@ -97,9 +97,9 @@ describe("published pi-subagents lifecycle adapter", () => {
     expect(capabilities.provider).toMatchObject({
       kind: "published-package",
       packageName: "@nklisch/pi-subagents",
-      version: "18.0.4-nklisch.0",
+      version: "18.0.4-nklisch.1",
       integrity: "sha512-33Q8JDffXUuiT1M3XjLXCI4If9p+3AOwsUp/b5f1+B7Y5JI8Z8SVU+Dncq0umAG2IjgVYKnT9FHToFHNoZGWoQ==",
-      releaseTag: "pi-subagents-v18.0.4-nklisch.0",
+      releaseTag: "pi-subagents-v18.0.4-nklisch.1",
       commit: "43efffb459f64e2f5f9aaee50d8ae5afa564f4f3",
       license: "MIT",
       nodeEngine: ">=22",

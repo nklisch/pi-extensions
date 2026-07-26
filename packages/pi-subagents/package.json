@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-subagents",
-  "version": "18.0.4-nklisch.0",
+  "version": "18.0.4-nklisch.1",
   "type": "module",
   "exports": {
     ".": {

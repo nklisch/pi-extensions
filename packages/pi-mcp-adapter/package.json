@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-mcp-adapter",
-  "version": "2.11.0-nklisch.3",
+  "version": "2.11.0-nklisch.4",
   "description": "Maintained pi-mcp-adapter fork with a programmatic source lifecycle",
   "type": "module",
   "license": "MIT",

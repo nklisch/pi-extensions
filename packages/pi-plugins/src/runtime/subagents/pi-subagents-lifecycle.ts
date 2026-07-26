@@ -29,10 +29,10 @@ import {
 import { BoundaryError, ErrorCodeRegistry } from "../../domain/errors.js";
 
 const PACKAGE_NAME = "@nklisch/pi-subagents";
-const PACKAGE_VERSION = "18.0.4-nklisch.0";
+const PACKAGE_VERSION = "18.0.4-nklisch.1";
 const PACKAGE_INTEGRITY =
   "sha512-33Q8JDffXUuiT1M3XjLXCI4If9p+3AOwsUp/b5f1+B7Y5JI8Z8SVU+Dncq0umAG2IjgVYKnT9FHToFHNoZGWoQ==";
-const PACKAGE_RELEASE_TAG = "pi-subagents-v18.0.4-nklisch.0";
+const PACKAGE_RELEASE_TAG = "pi-subagents-v18.0.4-nklisch.1";
 const PACKAGE_COMMIT = "43efffb459f64e2f5f9aaee50d8ae5afa564f4f3";
 const PACKAGE_NODE_ENGINE = ">=22";
 const PACKAGE_PI_PEER_RANGE = ">=0.75.0";
