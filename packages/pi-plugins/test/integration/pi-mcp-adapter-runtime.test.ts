@@ -19,7 +19,6 @@ import {
 
 const EXPECTED_PACKAGE = "@nklisch/pi-mcp-adapter";
 const EXPECTED_VERSION = "2.11.0-nklisch.3";
-const EXPECTED_INTEGRITY = "sha512-keVNCjw0ZldLr5p6TwB3UvM9dHc9SwhCHbSQQOvdR+nhMFRua2lHdAG3nMqmr9CK1torEd8e5PX3ZyptXXhmbQ==";
 const EXPECTED_LICENSE_SHA256 = "2d20dfacd9742706e564470dc77438608a1e54b0ed46959f080709389209093c";
 const fixtureServer = fileURLToPath(new URL("../fixtures/mcp/stdio-server.mjs", import.meta.url));
 const roots: string[] = [];
@@ -119,11 +118,13 @@ async function inventory(root: string): Promise<readonly string[]> {
 
 describe("published Pi MCP adapter boundary", () => {
   it("pins registry identity/exports/license and stays side-effect-free before explicit extension registration", async () => {
-    expect(PI_VERSION).toBe("0.80.8");
+    expect(PI_VERSION).toBe("0.82.0");
     const programmatic = fileURLToPath(import.meta.resolve(`${EXPECTED_PACKAGE}/programmatic`));
     const packageRoot = resolve(dirname(programmatic), "..");
     const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-    const lock = JSON.parse(await readFile(new URL("../../package-lock.json", import.meta.url), "utf8"));
+    // The monorepo links the sibling workspace: the root lockfile records the
+    // link (no registry SRI) at the pinned version.
+    const lock = JSON.parse(await readFile(new URL("../../../../package-lock.json", import.meta.url), "utf8"));
     const locked = lock.packages[`node_modules/${EXPECTED_PACKAGE}`];
     const license = await readFile(join(packageRoot, "LICENSE"));
 
@@ -138,7 +139,8 @@ describe("published Pi MCP adapter boundary", () => {
         "./programmatic": { types: "./dist/programmatic.d.ts", import: "./dist/programmatic.js" },
       },
     });
-    expect(locked).toMatchObject({ version: EXPECTED_VERSION, integrity: EXPECTED_INTEGRITY, license: "MIT" });
+    expect(locked).toMatchObject({ link: true, resolved: "packages/pi-mcp-adapter" });
+    expect(lock.packages["packages/pi-mcp-adapter"]?.version).toBe(EXPECTED_VERSION);
     expect(createHash("sha256").update(license).digest("hex")).toBe(EXPECTED_LICENSE_SHA256);
     expect(() => import.meta.resolve(`${EXPECTED_PACKAGE}/server-manager`)).toThrow(/not defined by "exports"/i);
 
@@ -203,7 +205,6 @@ describe("published Pi MCP adapter boundary", () => {
       kind: "published-package",
       packageName: EXPECTED_PACKAGE,
       version: EXPECTED_VERSION,
-      integrity: EXPECTED_INTEGRITY,
       nodeEngine: ">=22.19.0",
       piPeerRange: ">=0.79.1 <1",
       contractVersion: 1,

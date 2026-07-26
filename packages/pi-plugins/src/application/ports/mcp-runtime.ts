@@ -398,7 +398,8 @@ export const McpRuntimeProviderSchemaV1 = z.discriminatedUnion("kind", [
     kind: z.literal("published-package"),
     packageName: z.string().min(1).regex(/^(?:@[a-z0-9][a-z0-9._~-]*\/[a-z0-9][a-z0-9._~-]*|[a-z0-9][a-z0-9._~-]*)$/),
     version: z.string().min(1),
-    integrity: z.string().min(1),
+    // name+version is the identity; registry SRIs are post-publish values
+    // npm already verifies at install time.
     nodeEngine: z.string().min(1),
     piPeerRange: z.string().min(1),
     contractVersion: z.literal(1),

@@ -1,10 +1,9 @@
-import { chmod, cp, mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  digestPublishedPackageTree,
   probePublishedPackage,
   type PublishedPackageReceipt,
 } from "../../src/runtime/published-package-receipt.js";
@@ -17,8 +16,7 @@ afterEach(async () => {
 async function fixture(): Promise<Readonly<{ root: string; entry: string; receipt: PublishedPackageReceipt }>> {
   const root = await mkdtemp(join(tmpdir(), "published-package-receipt-"));
   roots.push(root);
-  await mkdir(join(root, "dist"), { recursive: true });
-  await writeFile(join(root, "dist", "entry.js"), "export const marker = 'exact';\n", { mode: 0o755 });
+  await writeFile(join(root, "entry.js"), "export const marker = 'exact';\n", { mode: 0o755 });
   await writeFile(join(root, "LICENSE"), "fixture license\n");
   await writeFile(join(root, "package.json"), `${JSON.stringify({
     name: "@fixture/runtime",
@@ -26,35 +24,26 @@ async function fixture(): Promise<Readonly<{ root: string; entry: string; receip
     license: "MIT",
     engines: { node: ">=24" },
     peerDependencies: { "@earendil-works/pi-coding-agent": ">=0.80.0 <0.81.0" },
-    exports: { ".": { import: "./dist/entry.js" } },
-    pi: { extensions: ["./dist/entry.js"] },
+    exports: { ".": { import: "./entry.js" } },
+    pi: { extensions: ["./entry.js"] },
   }, null, 2)}\n`);
-  const tree = await digestPublishedPackageTree(root);
-  const license = await import("node:crypto").then(({ createHash }) =>
-    createHash("sha256").update("fixture license\n").digest("hex"));
   return {
     root,
-    entry: join(root, "dist", "entry.js"),
+    entry: join(root, "entry.js"),
     receipt: {
       packageName: "@fixture/runtime",
       version: "1.2.3",
-      registryIntegrity: `sha512-${"A".repeat(86)}==`,
-      installedTreeDigest: tree,
       license: "MIT",
-      licenseSha256: license,
-      releaseTag: "v1.2.3@0123456789abcdef0123456789abcdef01234567",
-      releaseCommit: "0123456789abcdef0123456789abcdef01234567",
-      upstreamBaseCommit: "89abcdef0123456789abcdef0123456789abcdef",
       nodeEngine: ">=24",
       piPeerRange: ">=0.80.0 <0.81.0",
       requiredExports: ["."],
-      piExtensions: ["./dist/entry.js"],
+      piExtensions: ["./entry.js"],
     },
   };
 }
 
 describe("published package receipt", () => {
-  it("verifies manifest, license, exports/resources, and canonical installed bytes", async () => {
+  it("verifies the manifest contract, exports, and declared Pi resources", async () => {
     const value = await fixture();
     await expect(probePublishedPackage({
       entrySpecifier: pathToFileURL(value.entry).href,
@@ -63,36 +52,51 @@ describe("published package receipt", () => {
     })).resolves.toEqual({ kind: "verified", packageRoot: value.root, entry: value.entry });
   });
 
-  it("fails closed for missing, extra, modified, executable-mode, and manifest drift", async () => {
+  it("fails closed for manifest drift: version, license, engine, peer, exports, resources", async () => {
     const value = await fixture();
-    for (const mutate of [
-      async (root: string) => writeFile(join(root, "dist", "entry.js"), "globalThis.DRIFT_SENTINEL = true;\n"),
-      async (root: string) => writeFile(join(root, "extra.js"), "extra\n"),
-      async (root: string) => chmod(join(root, "dist", "entry.js"), 0o644),
-      async (root: string) => writeFile(join(root, "package.json"), "{}\n"),
-    ]) {
+    const mutations: Array<(manifest: Record<string, unknown>) => void> = [
+      (manifest) => { manifest.version = "9.9.9"; },
+      (manifest) => { manifest.license = "Apache-2.0"; },
+      (manifest) => { manifest.engines = { node: ">=99" }; },
+      (manifest) => { manifest.peerDependencies = { "@earendil-works/pi-coding-agent": ">=99" }; },
+      (manifest) => { manifest.exports = { "./other": { import: "./entry.js" } }; },
+      (manifest) => { manifest.pi = { extensions: ["./missing.js"] }; },
+    ];
+    for (const applyMutation of mutations) {
       const copy = await mkdtemp(join(tmpdir(), "published-package-drift-"));
       roots.push(copy);
       await cp(value.root, copy, { recursive: true, force: true });
-      await mutate(copy);
+      const manifest = JSON.parse(String(await import("node:fs/promises").then((fs) => fs.readFile(join(copy, "package.json"), "utf8"))));
+      applyMutation(manifest);
+      await writeFile(join(copy, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
       await expect(probePublishedPackage({
-        entrySpecifier: pathToFileURL(join(copy, "dist", "entry.js")).href,
+        entrySpecifier: pathToFileURL(join(copy, "entry.js")).href,
         receipt: value.receipt,
         signal: new AbortController().signal,
       })).resolves.toEqual({ kind: "unavailable", code: "PACKAGE_DRIFT" });
     }
-    expect((globalThis as { DRIFT_SENTINEL?: boolean }).DRIFT_SENTINEL).toBeUndefined();
   });
 
-  it("rejects links and package-root escapes without following them", async () => {
+  it("fails closed when the package is missing entirely", async () => {
     const value = await fixture();
-    const linked = await mkdtemp(join(tmpdir(), "published-package-link-"));
-    roots.push(linked);
-    await cp(value.root, linked, { recursive: true });
-    await symlink(value.entry, join(linked, "linked.js"));
-    await expect(digestPublishedPackageTree(linked)).rejects.toThrow(/symbolic link/i);
     await expect(probePublishedPackage({
-      entrySpecifier: pathToFileURL(join(linked, "dist", "entry.js")).href,
+      entrySpecifier: "definitely-not-an-installed-package-xyz",
+      receipt: value.receipt,
+      signal: new AbortController().signal,
+    })).resolves.toEqual({ kind: "unavailable", code: "PACKAGE_MISSING" });
+  });
+
+  it("rejects package-root escapes: a linked entry that realpaths outside the root", async () => {
+    const value = await fixture();
+    const outside = await mkdtemp(join(tmpdir(), "published-package-outside-"));
+    roots.push(outside);
+    const foreignTarget = join(outside, "foreign.js");
+    await writeFile(foreignTarget, "export {};\n");
+    const { symlink, rm: rmFile } = await import("node:fs/promises");
+    await rmFile(value.entry, { force: true });
+    await symlink(foreignTarget, value.entry);
+    await expect(probePublishedPackage({
+      entrySpecifier: pathToFileURL(value.entry).href,
       receipt: value.receipt,
       signal: new AbortController().signal,
     })).resolves.toEqual({ kind: "unavailable", code: "PACKAGE_DRIFT" });

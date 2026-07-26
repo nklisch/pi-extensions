@@ -14,13 +14,7 @@ import {
 export const PI_SUBAGENTS_RECEIPT: PublishedPackageReceipt = Object.freeze({
   packageName: "@nklisch/pi-subagents",
   version: "18.0.4-nklisch.0",
-  registryIntegrity: "sha512-33Q8JDffXUuiT1M3XjLXCI4If9p+3AOwsUp/b5f1+B7Y5JI8Z8SVU+Dncq0umAG2IjgVYKnT9FHToFHNoZGWoQ==",
-  installedTreeDigest: "sha256:7dc5579d3da204be379138453295375d8ab598fab19c97ce9d7e2b0b61fbe67f",
   license: "MIT",
-  licenseSha256: "e7d9d11c28cce34f09dc7d2b0a3a6609ccba5fbc8e926e6d1bfdf060930e9f05",
-  releaseTag: "pi-subagents-v18.0.4-nklisch.0@ad55fae043abf87d4ec74a5cb0f2f8f17b1fb175",
-  releaseCommit: "43efffb459f64e2f5f9aaee50d8ae5afa564f4f3",
-  upstreamBaseCommit: "c76a294a777a990950da23fc06cb0caf51da7ac6",
   nodeEngine: ">=22",
   piPeerRange: ">=0.75.0",
   requiredExports: [".", "./settings"],

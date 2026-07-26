@@ -48,7 +48,6 @@ const publishedProvider = {
   kind: "published-package",
   packageName: "qualified-mcp-adapter",
   version: "2.0.0",
-  integrity: "sha512-test",
   nodeEngine: ">=24 <25",
   piPeerRange: ">=0.79.1 <1",
   contractVersion: 1,

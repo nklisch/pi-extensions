@@ -61,7 +61,7 @@
     "test:e2e:production:final": "vitest run --config vitest.e2e.config.ts test/e2e/production/final-packed-registry.e2e.test.ts",
     "test:e2e:infrastructure": "vitest run --config vitest.e2e.config.ts test/e2e/infrastructure/packed-pi-smoke.e2e.test.ts",
     "test:package": "npm run build && node test/compiled-package-import.mjs && node test/compiled-pi-package-import.mjs && node test/packed-pi-consumer.mjs",
-    "test": "npm run typecheck && npm run boundaries && npm run test:unit"
+    "test": "npm run typecheck && npm run boundaries && npm run test:unit && npm run test:package"
   },
   "bundledDependencies": [
     "@nklisch/pi-subagents"

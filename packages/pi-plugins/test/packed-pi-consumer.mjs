@@ -180,6 +180,7 @@ try {
   const rootTree = join(project, "..", "..", "node_modules");
   const dependencyTree = existsSync(join(localTree, "@earendil-works", "pi-coding-agent", "package.json")) ? localTree : rootTree;
   await cp(dependencyTree, join(consumer, "node_modules"), { recursive: true, dereference: true });
+
   const packageRoot = join(consumer, "node_modules", "@nklisch", "pi-plugins");
   await rm(packageRoot, { recursive: true, force: true });
   await mkdir(packageRoot, { recursive: true });
@@ -371,7 +372,7 @@ if not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0:
   }
   if (tuiBytes.includes("SECRET-CANARY")) throw new Error("real Pi PTY transcript leaked a secret canary");
 
-  console.log("isolated packed real Pi 0.80.8 RPC/JSON/PTY acceptance passed");
+  console.log("isolated packed real Pi RPC/JSON/PTY acceptance passed");
 } finally {
   if (process.env.KEEP_PACKED_ACCEPTANCE === "1") console.error(`packed acceptance root retained at ${root}`);
   else {

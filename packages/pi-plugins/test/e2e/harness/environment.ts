@@ -342,22 +342,26 @@ async function prepare(): Promise<E2ESuiteArtifact> {
   if (tuiManifest.version !== E2E_PI_VERSION) throw new Error(`clean E2E requires Pi TUI ${E2E_PI_VERSION}, found ${tuiManifest.version}`);
   const lockReceipts = await auditConsumerLock(consumerTemplate, candidateIntegrity);
   const receiptModule = await import(pathToFileURL(join(packageRoot, "dist", "runtime", "subagents", "pi-subagents-package.js")).href) as {
-    PI_SUBAGENTS_RECEIPT: { packageName: string; version: string; registryIntegrity: string; installedTreeDigest: string };
-  };
-  const treeModule = await import(pathToFileURL(join(packageRoot, "dist", "runtime", "published-package-receipt.js")).href) as {
-    digestPublishedPackageTree(root: string): Promise<string>;
+    PI_SUBAGENTS_RECEIPT: { packageName: string; version: string };
   };
   const subagentReceipt = receiptModule.PI_SUBAGENTS_RECEIPT;
   const bundledSubagentRoot = join(packageRoot, "node_modules", "@nklisch", "pi-subagents");
+  const bundledManifest = JSON.parse(await readFile(join(bundledSubagentRoot, "package.json"), "utf8")) as { name?: string; version?: string };
   if (subagentReceipt.packageName !== "@nklisch/pi-subagents" ||
-      await treeModule.digestPublishedPackageTree(bundledSubagentRoot) !== subagentReceipt.installedTreeDigest) {
-    throw new Error("bundled subagent tree does not match its packed registry receipt");
+      bundledManifest.name !== subagentReceipt.packageName || bundledManifest.version !== subagentReceipt.version) {
+    throw new Error("bundled subagent tree does not match the sibling contract");
   }
+  const integrityView = await runChecked(capabilities.npm, ["view", `${subagentReceipt.packageName}@${subagentReceipt.version}`, "dist.integrity"], {
+    env: { ...process.env, NODE_OPTIONS: "" },
+    timeoutMs: E2E_TIMEOUTS.lifecycle,
+    label: "resolve sibling registry integrity",
+  });
+  const subagentIntegrity = integrityView.stdout.trim();
   const packageReceipts = Object.freeze([...lockReceipts, Object.freeze({
     name: subagentReceipt.packageName,
     version: subagentReceipt.version,
     resolved: `https://registry.npmjs.org/@nklisch/pi-subagents/-/pi-subagents-${subagentReceipt.version}.tgz`,
-    integrity: subagentReceipt.registryIntegrity,
+    integrity: subagentIntegrity as `sha512-${string}`,
   })].sort((left, right) => left.name.localeCompare(right.name) || left.version.localeCompare(right.version)));
   await auditIsolatedTree(nodeModules);
 

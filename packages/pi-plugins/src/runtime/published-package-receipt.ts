@@ -1,19 +1,20 @@
-import { createHash } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
-import { lstat, open, readFile, readdir, realpath } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+/**
+ * Manifest contract for a runtime sibling (pi-subagents, pi-mcp-adapter).
+ *
+ * All three packages are owned and released from the same monorepo, so the
+ * load-time gate verifies SHAPE — right package, right version, declared
+ * exports and Pi resources present — rather than byte-level registry
+ * attestation. Byte integrity is npm's job (lockfile SRIs at install), and
+ * the bundle ships inside this package's own tarball.
+ */
 export type PublishedPackageReceipt = Readonly<{
   packageName: string;
   version: string;
-  registryIntegrity: `sha512-${string}`;
-  installedTreeDigest: `sha256:${string}`;
   license: "MIT";
-  licenseSha256: string;
-  releaseTag: string;
-  releaseCommit: string;
-  upstreamBaseCommit: string;
   nodeEngine: string;
   piPeerRange: string;
   requiredExports: readonly string[];
@@ -24,90 +25,21 @@ export type PublishedPackageProbeResult =
   | Readonly<{ kind: "verified"; packageRoot: string; entry: string }>
   | Readonly<{ kind: "unavailable"; code: "PACKAGE_MISSING" | "PACKAGE_DRIFT" }>;
 
-const TREE_GRAMMAR = "pi-plugin-host-published-tree-v1\0";
-const SHA256_HEX = /^[a-f0-9]{64}$/u;
-const COMMIT = /^[a-f0-9]{40}$/u;
-
 function inside(parent: string, child: string): boolean {
   const path = relative(parent, child);
   return path === "" || path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
 }
 
 function receiptShape(receipt: PublishedPackageReceipt): boolean {
-  if (receipt === null || typeof receipt !== "object" || receipt.license !== "MIT" ||
-      !SHA256_HEX.test(receipt.licenseSha256) || !COMMIT.test(receipt.releaseCommit) ||
-      !COMMIT.test(receipt.upstreamBaseCommit) || typeof receipt.releaseTag !== "string" ||
-      receipt.releaseTag.length === 0 || !/^sha256:[a-f0-9]{64}$/u.test(receipt.installedTreeDigest) ||
-      !Array.isArray(receipt.requiredExports) || !Array.isArray(receipt.piExtensions)) return false;
-  if (!receipt.registryIntegrity.startsWith("sha512-")) return false;
-  const encoded = receipt.registryIntegrity.slice("sha512-".length);
-  try {
-    const bytes = Buffer.from(encoded, "base64");
-    if (bytes.length !== 64 || bytes.toString("base64") !== encoded) return false;
-  } catch { return false; }
-  return [receipt.packageName, receipt.version, receipt.nodeEngine, receipt.piPeerRange]
-    .every((value) => typeof value === "string" && value.length > 0);
+  return receipt !== null && typeof receipt === "object" && receipt.license === "MIT" &&
+    Array.isArray(receipt.requiredExports) && Array.isArray(receipt.piExtensions) &&
+    [receipt.packageName, receipt.version, receipt.nodeEngine, receipt.piPeerRange]
+      .every((value) => typeof value === "string" && value.length > 0);
 }
 
 function safeRelativePath(path: string): boolean {
   return path.length > 0 && !path.startsWith("/") && !path.includes("\\") && !path.includes("\0") &&
     path.split("/").every((part) => part.length > 0 && part !== "." && part !== "..");
-}
-
-/**
- * Hash package-owned installed bytes. npm-created dependency trees are excluded:
- * their own lock/SRI rows are separate authorities and are not tar entries of
- * the package being qualified.
- */
-export async function digestPublishedPackageTree(packageRoot: string): Promise<`sha256:${string}`> {
-  const root = await realpath(packageRoot);
-  const hash = createHash("sha256").update(TREE_GRAMMAR);
-  const entries: Array<Readonly<{ path: string; kind: "directory" | "file"; executable: boolean; bytes?: Buffer }>> = [];
-  const canonicalPaths = new Set<string>();
-
-  async function visit(directory: string, prefix: string): Promise<void> {
-    const children = await readdir(directory, { withFileTypes: true });
-    children.sort((left, right) => Buffer.from(left.name).compare(Buffer.from(right.name)));
-    for (const child of children) {
-      // node_modules is installation structure, not a package-owned tar entry.
-      if (prefix === "" && child.name === "node_modules") continue;
-      const relativePath = prefix === "" ? child.name : `${prefix}/${child.name}`;
-      if (!safeRelativePath(relativePath)) throw new TypeError("published package path is invalid");
-      const collisionKey = relativePath.normalize("NFC").toLocaleLowerCase("en-US");
-      if (canonicalPaths.has(collisionKey)) throw new TypeError("published package path collision detected");
-      canonicalPaths.add(collisionKey);
-      const absolute = join(directory, child.name);
-      const info = await lstat(absolute);
-      if (info.isSymbolicLink()) throw new TypeError("published package contains a symbolic link");
-      if (info.isDirectory()) {
-        entries.push({ path: relativePath, kind: "directory", executable: false });
-        await visit(absolute, relativePath);
-        continue;
-      }
-      if (!info.isFile()) throw new TypeError("published package contains a special file");
-      const handle = await open(absolute, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
-      try {
-        const current = await handle.stat();
-        if (!current.isFile()) throw new TypeError("published package entry changed type during verification");
-        entries.push({
-          path: relativePath,
-          kind: "file",
-          executable: (current.mode & 0o111) !== 0,
-          bytes: await handle.readFile(),
-        });
-      } finally { await handle.close(); }
-    }
-  }
-
-  await visit(root, "");
-  entries.sort((left, right) => Buffer.from(left.path).compare(Buffer.from(right.path)));
-  for (const entry of entries) {
-    const bytes = entry.bytes ?? Buffer.alloc(0);
-    hash.update(entry.kind).update("\0").update(entry.path).update("\0")
-      .update(entry.executable ? "1" : "0").update("\0")
-      .update(String(bytes.length)).update("\0").update(bytes).update("\0");
-  }
-  return `sha256:${hash.digest("hex")}`;
 }
 
 async function findPackageRoot(entry: string, receipt: PublishedPackageReceipt): Promise<string | undefined> {
@@ -154,12 +86,10 @@ async function verifyManifest(
     const resourcePath = resolve(root, resource);
     if (!inside(root, resourcePath) || !(await lstat(resourcePath)).isFile()) return false;
   }
-  const license = await readFile(join(root, "LICENSE"));
-  if (createHash("sha256").update(license).digest("hex") !== receipt.licenseSha256) return false;
-  return await digestPublishedPackageTree(root) === receipt.installedTreeDigest;
+  return true;
 }
 
-/** Resolve without importing, verify exact installed bytes, then hand the entry to a package-specific loader. */
+/** Resolve without importing, verify the manifest contract, then hand the entry to a package-specific loader. */
 export async function probePublishedPackage(input: Readonly<{
   entrySpecifier: string;
   receipt: PublishedPackageReceipt;

@@ -46,7 +46,6 @@ const PACKAGE_PROVIDER = Object.freeze({
   kind: "published-package" as const,
   packageName: "@nklisch/pi-mcp-adapter",
   version: "2.11.0-nklisch.3",
-  integrity: "sha512-keVNCjw0ZldLr5p6TwB3UvM9dHc9SwhCHbSQQOvdR+nhMFRua2lHdAG3nMqmr9CK1torEd8e5PX3ZyptXXhmbQ==",
   nodeEngine: ">=22.19.0",
   piPeerRange: ">=0.79.1 <1",
   contractVersion: 1 as const,
