@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-fff-compat",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Fast FFF-backed file search through Pi-native find/grep semantics — glob-only file lookup and exact regex/literal grep with no fuzzy fallback.",
   "author": {
     "name": "nklisch"
@@ -47,5 +47,8 @@
   },
   "scripts": {
     "test": "bun test extensions/*.test.ts"
-  }
+  },
+  "files": [
+    "extensions"
+  ]
 }

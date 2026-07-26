@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-conveniences",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Small drop-in quality-of-life conveniences for Pi — /exit, .agents/AGENTS.md context loading, context-window footer, and subagent model listing.",
   "author": {
     "name": "nklisch"
@@ -44,5 +44,8 @@
     "@earendil-works/pi-ai": "0.82.0",
     "@earendil-works/pi-coding-agent": "0.82.0",
     "@earendil-works/pi-tui": "0.82.0"
-  }
+  },
+  "files": [
+    "extensions"
+  ]
 }
