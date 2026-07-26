@@ -60,8 +60,11 @@ for (const pkg of selected) {
   if (publish.status !== 0) process.exit(publish.status ?? 1);
 
   // Fork convention: maintained-fork prereleases also carry the `maintained`
-  // dist-tag (see pi-subagents/pi-mcp-adapter MAINTAINING docs).
-  if (pkg.manifest.version.includes("-nklisch.")) {
+  // dist-tag (see pi-subagents/pi-mcp-adapter MAINTAINING docs). OIDC trusted
+  // publishing only authenticates `publish` — dist-tag needs a real login, so
+  // this only runs for interactive --local publishes; in CI it is skipped and
+  // can be applied by hand afterward.
+  if (local && pkg.manifest.version.includes("-nklisch.")) {
     const tag = spawnSync("npm", ["dist-tag", "add", spec, "maintained"], { stdio: "inherit" });
     if (tag.status !== 0) process.exit(tag.status ?? 1);
   }
