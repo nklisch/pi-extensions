@@ -48,8 +48,9 @@ for (const pkg of selected) {
   // publishes authenticate interactively and ship without them. The flag
   // must be explicit both ways: every package carries publishConfig
   // .provenance=true in its manifest (validator policy for CI), which npm
-  // honors even for local publishes unless negated.
-  const publishArgs = ["publish", tarball, "--access", "public"];
+  // honors even for local publishes unless negated. --tag is explicit so
+  // prerelease versions (the forks' -nklisch.N suffixes) publish cleanly.
+  const publishArgs = ["publish", tarball, "--access", "public", "--tag", "latest"];
   publishArgs.push(local ? "--no-provenance" : "--provenance");
   const publish = spawnSync("npm", publishArgs, {
     cwd: pkg.directory,
@@ -57,4 +58,11 @@ for (const pkg of selected) {
   });
   rmSync(tarball, { force: true });
   if (publish.status !== 0) process.exit(publish.status ?? 1);
+
+  // Fork convention: maintained-fork prereleases also carry the `maintained`
+  // dist-tag (see pi-subagents/pi-mcp-adapter MAINTAINING docs).
+  if (pkg.manifest.version.includes("-nklisch.")) {
+    const tag = spawnSync("npm", ["dist-tag", "add", spec, "maintained"], { stdio: "inherit" });
+    if (tag.status !== 0) process.exit(tag.status ?? 1);
+  }
 }
