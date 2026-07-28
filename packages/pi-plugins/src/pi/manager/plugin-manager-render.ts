@@ -65,7 +65,7 @@ function queryLine(state: PluginManagerState, theme: Theme, focused: boolean): s
   return `${theme.fg(active ? "accent" : "muted", "/ search")}  ${plain(state.query, 256)}${marker}${active ? "_" : ""}`;
 }
 
-function listLines(state: PluginManagerState, theme: Theme, focused: boolean, bodyHeight: number): readonly string[] {
+function listLines(state: PluginManagerState, theme: Theme, focused: boolean, bodyHeight: number, spinner: string): readonly string[] {
   // The heading stays quiet unless something needs attention: health only
   // appears when the host is not ready, the update count only when nonzero.
   const health = state.health.status === "ready" ? "" : state.health.status === "loading" ? " · checking host…" : ` · host ${state.health.status}`;
@@ -74,7 +74,8 @@ function listLines(state: PluginManagerState, theme: Theme, focused: boolean, bo
   const policy = policySurface && state.updatesPolicy !== undefined
     ? state.updatesPolicy.application === "automatic" ? ` · auto on · ${state.updatesPolicy.cadence}` : " · auto off"
     : "";
-  const heading = `${theme.fg("accent", theme.bold(VIEW_LABELS[state.view]))}${theme.fg("muted", `${health}${updates}${policy}`)}`;
+  const loading = state.page.loading ? ` ${spinner}` : "";
+  const heading = `${theme.fg("accent", theme.bold(VIEW_LABELS[state.view]))}${loading}${theme.fg("muted", `${health}${updates}${policy}`)}`;
   const rows = pluginManagerVisibleRows(state).map((row) => {
     const selected = selectedRow(state) !== undefined && rowKeyIdentity(selectedRow(state)!.key) === rowKeyIdentity(row.key);
     // The scope badge keeps the same plugin installed in both scopes from
@@ -95,7 +96,7 @@ function listLines(state: PluginManagerState, theme: Theme, focused: boolean, bo
   // empty-state guidance would flash a false "nothing here, add a source".
   const description = row !== undefined
     ? `${plain(row.subtitle, 512)}${row.availableScopes === undefined || row.availableScopes.length < 2 ? "" : ` · ${row.availableScopes.join(" + ")}`}`
-    : state.page.loading ? "Loading the current catalog…" : emptyMessage(state.view);
+    : state.page.loading ? `${spinner} Loading the current catalog…` : emptyMessage(state.view);
   return [
     heading,
     "",
@@ -176,11 +177,11 @@ function sourceSummary(value: unknown): string {
   return kind || "unavailable";
 }
 
-function detailLines(state: PluginManagerState, theme: Theme, bodyHeight: number): readonly string[] {
+function detailLines(state: PluginManagerState, theme: Theme, bodyHeight: number, spinner: string): readonly string[] {
   const row = selectedRow(state);
   const heading = `${theme.fg("accent", theme.bold("Plugin Manager"))} ${theme.fg("muted", `/ ${VIEW_LABELS[state.view]} / ${plain(row?.title ?? "Detail", 128)}`)}`;
   if (row === undefined) return [heading, "", theme.fg("muted", "No item selected")];
-  if (state.detail.loading) return [heading, "", theme.fg("accent", "… loading exact details")];
+  if (state.detail.loading) return [heading, "", theme.fg("accent", `${spinner} loading exact details`)];
   const lines: string[] = [heading, "", theme.bold(plain(row.plugin ?? row.title)), styledStatus(theme, row.status, row.statusTone), ""];
   const parsed = NativeInspectionDetailResultSchema.safeParse(state.detail.envelope?.data);
   if (parsed.success && parsed.data.kind === "found") {
@@ -202,7 +203,7 @@ function detailLines(state: PluginManagerState, theme: Theme, bodyHeight: number
     else lines.push(...envelopeLines(state.detail.envelope, theme));
   }
   if (state.operation.state !== "idle") {
-    lines.push("", styledStatus(theme, state.operation.state), ...(state.operation.state === "running" ? [theme.fg("accent", `… ${plain(state.operation.action ?? "working")}`)] : []));
+    lines.push("", styledStatus(theme, state.operation.state), ...(state.operation.state === "running" ? [theme.fg("accent", `${spinner} ${plain(state.operation.action ?? "working")}`)] : []));
     for (const item of state.operation.frames.slice(-3)) {
       if (item.type === "progress") lines.push(theme.fg("muted", `${plain(item.phase)} · ${plain(item.state)}`));
     }
@@ -261,8 +262,9 @@ function envelopeLines(envelope: NativeControlEnvelope | undefined, theme: Theme
   return lines;
 }
 
-function operationLines(state: PluginManagerState, theme: Theme): readonly string[] {
-  const lines = [theme.fg("accent", theme.bold(`Plugin operation / ${plain(state.operation.action ?? "result")}`)), "", styledStatus(theme, state.operation.state)];
+function operationLines(state: PluginManagerState, theme: Theme, spinner: string): readonly string[] {
+  const working = state.operation.state === "running" || state.operation.state === "cancelling";
+  const lines = [theme.fg("accent", theme.bold(`Plugin operation / ${plain(state.operation.action ?? "result")}`)), "", working ? `${spinner} ${styledStatus(theme, state.operation.state)}` : styledStatus(theme, state.operation.state)];
   for (const item of state.operation.frames) {
     if (item.type === "accepted") lines.push(theme.fg("muted", `#${item.sequence} accepted`));
     else if (item.type === "progress") lines.push(`#${item.sequence} ${plainLifecyclePhase(item.phase)} · ${plain(item.state)}`);
@@ -302,6 +304,9 @@ function footer(state: PluginManagerState, theme: Theme, keybindings: Keybinding
   return theme.fg("dim", `${move} · ←/→ lens · a add · d disable · x remove · u update · ctrl+u all · m marketplaces · ${confirm} details · ${interrupt} close`);
 }
 
+/** Braille spinner frames, matching pi-tui's own Loader. */
+export const SPINNER_FRAMES = Object.freeze(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]);
+
 export function renderPluginManager(input: Readonly<{
   state: PluginManagerState;
   width: number;
@@ -309,14 +314,16 @@ export function renderPluginManager(input: Readonly<{
   theme: Theme;
   keybindings: KeybindingsManager;
   focused?: boolean;
+  spinnerFrame?: string | undefined;
 }>): readonly string[] {
+  const spinner = input.spinnerFrame ?? "…";
   const width = Math.max(1, Math.floor(input.width));
   const height = Math.max(4, Math.floor(input.height));
   const bodyHeight = Math.max(1, height - 3);
   let content: readonly string[];
-  if (input.state.focus.pane === "detail") content = detailLines(input.state, input.theme, bodyHeight);
-  else if (input.state.screen === "operation-result" || input.state.operation.state !== "idle") content = operationLines(input.state, input.theme);
-  else content = listLines(input.state, input.theme, input.focused === true, bodyHeight);
+  if (input.state.focus.pane === "detail") content = detailLines(input.state, input.theme, bodyHeight, spinner);
+  else if (input.state.screen === "operation-result" || input.state.operation.state !== "idle") content = operationLines(input.state, input.theme, spinner);
+  else content = listLines(input.state, input.theme, input.focused === true, bodyHeight, spinner);
   const wrapped = content.flatMap((line) => wrap(line, width));
   const offset = input.state.operation.state !== "idle" || input.state.screen === "operation-result" ? input.state.scroll.operation : input.state.focus.pane === "detail" ? input.state.scroll.detail : 0;
   const body = wrapped.slice(offset, offset + bodyHeight);

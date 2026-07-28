@@ -59,12 +59,22 @@ export function createCompletePluginReloadPort(input: Readonly<{
   ): Promise<readonly ActivationObservation[]> {
     const byTarget = new Map<string, RuntimeSelection>(desired.selections.map((selection) => [target(selection.skillHook.prepared.expectation), selection]));
     const all = new Map<string, ProjectionExpectation>(desired.selections.map((selection) => [target(selection.skillHook.prepared.expectation), selection.skillHook.prepared.expectation]));
+    const explicit = new Set<string>(expectations.map((expectation) => target(expectation)));
     for (const expectation of expectations) all.set(target(expectation), expectation);
     const results: ActivationObservation[] = [];
     for (const expectation of all.values()) {
       signal.throwIfAborted();
+      // Isolation covers only recognized per-plugin observation degradation:
+      // a participant reporting failed/unavailable, or contribution evidence
+      // that no longer composes (trust-invalid, drifted projection).
+      // Structural failures — missing desired state, observe() throwing — are
+      // systemic and must still tear down the reconcile.
+      const isolated = (): boolean => !explicit.has(target(expectation));
       const skill = await input.skillHook.participant.observe(expectation, signal);
-      if (skill.kind !== "ready") throw new Error(`skill/hook observation unavailable: ${skill.kind === "failed" ? skill.code : skill.kind}`);
+      if (skill.kind !== "ready") {
+        if (isolated()) continue;
+        throw new Error(`skill/hook observation unavailable: ${skill.kind === "failed" ? skill.code : skill.kind}`);
+      }
       const selection = byTarget.get(target(expectation));
       const plannedMcpState = desired.mcp.find((transition) => target(transition.to.expectation) === target(expectation))?.to;
       const mcpState = plannedMcpState ?? (selection === undefined && expectation.kind === "inactive"
@@ -76,8 +86,21 @@ export function createCompletePluginReloadPort(input: Readonly<{
         to: mcpState,
         currentProject: desired.currentProject,
       }, signal);
-      if (mcp.kind !== "ready") throw new Error(`MCP observation unavailable: ${mcp.kind === "failed" ? mcp.code : mcp.kind}`);
-      results.push(composeActivationObservation({ expectation, skillsHooks: skill.observation, mcp: mcp.observation }));
+      if (mcp.kind !== "ready") {
+        if (isolated()) continue;
+        throw new Error(`MCP observation unavailable: ${mcp.kind === "failed" ? mcp.code : mcp.kind}`);
+      }
+      try {
+        results.push(composeActivationObservation({ expectation, skillsHooks: skill.observation, mcp: mcp.observation }));
+      } catch (error) {
+        // One degraded plugin must not poison the observation batch: every
+        // unrelated install/update/recovery lands recovery-required when a
+        // single trust-invalid or mismatched plugin throws here. Explicit
+        // expectations (the plugin a lifecycle operation is settling) still
+        // fail the operation; everyone else degrades in place and owns its
+        // own recovery.
+        if (!isolated() || signal.aborted) throw error;
+      }
     }
     return Object.freeze(results);
   }

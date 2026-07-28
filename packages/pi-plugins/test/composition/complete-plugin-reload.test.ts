@@ -85,4 +85,51 @@ describe("complete plugin reload", () => {
     await expect(test.reload.reload({ scope: { kind: "user" }, transition: `pending:${"b".repeat(64)}` as never }, new AbortController().signal))
       .resolves.toEqual({ kind: "failed", code: "PI_RELOAD_CONTEXT_UNAVAILABLE" });
   });
+
+  it("isolates one degraded plugin's observation failure from the shared batch", async () => {
+    // The krometrail scenario: one plugin whose runtime observation throws
+    // (trust-invalid hook, mismatched projection) must not fail observation
+    // for every other plugin — that poisoning landed every unrelated install
+    // in recovery-required.
+    const poisoned = { kind: "active", projection: { scope: { kind: "user" }, plugin: "poisoned@market", revision: "r1", digest: "d1" } } as never;
+    const healthy = { kind: "active", projection: { scope: { kind: "user" }, plugin: "healthy@market", revision: "r2", digest: "d2" } } as never;
+    const test = fixture();
+    (test as never as { events: string[] }).events.length = 0;
+    const desiredWithSelections = {
+      ...desired,
+      selections: [
+        { scope: { kind: "user" }, plugin: "poisoned@market", skillHook: { prepared: { expectation: poisoned } }, hooks: [], mcp: [] },
+        { scope: { kind: "user" }, plugin: "healthy@market", skillHook: { prepared: { expectation: healthy } }, hooks: [], mcp: [] },
+      ] as never,
+    };
+    const reload = createCompletePluginReloadPort({
+      binding: { current: () => ({ sessionId: "s", cwd: "/workspace", mode: "interactive", projectTrusted: true }), assertContext: vi.fn(), isProjectTrusted: () => true },
+      operationContext: { takeReloadContext: () => undefined },
+      broker: createPiReloadBroker(),
+      desired: { load: async () => desiredWithSelections as never },
+      selections: test.catalog,
+      skillHook: {
+        participant: {
+          reconcile: vi.fn(async () => ({ kind: "applied", count: 0 })),
+          observe: vi.fn(async () => ({ kind: "failed", code: "OBSERVATION_MISMATCH" })),
+        },
+        resources: { discover: vi.fn(async () => ({ kind: "ready", skillPaths: [], failedTargets: [] })) },
+        replaceSessionLease: vi.fn(async () => undefined),
+        quiesce: vi.fn(),
+        resume: vi.fn(),
+      } as never,
+      mcp: { reconcileAll: vi.fn(async () => []), participant: { observe: vi.fn() } } as never,
+      transitions: () => ({} as never),
+      sha256: () => new Uint8Array(32),
+    });
+    // No explicit expectations (startup/reload path): both failures isolate.
+    await expect(reload.reconcileCurrent(new AbortController().signal)).resolves.toEqual([]);
+    // Explicit expectation (lifecycle settle path): failure still propagates.
+    await expect(reload.reconcileLocal({
+      scope: { kind: "user" },
+      plugin: "poisoned@market",
+      target: null,
+      expectation: { kind: "inactive", scope: { kind: "user" }, plugin: "poisoned@market", digest: "d0" },
+    } as never, new AbortController().signal)).rejects.toThrow();
+  });
 });

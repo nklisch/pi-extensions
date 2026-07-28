@@ -64,6 +64,9 @@ export const DefaultMarketplaceUpdatePolicy = Object.freeze({
   inventoryPollMs: 15 * 60 * 1_000,
 });
 
+/** Bound on how long an unchanged marketplace may go without re-probing installed plugins. */
+export const PROBE_SKIP_WINDOW_MS = 15 * 60 * 1_000;
+
 export type MarketplacePluginProbeResult = Readonly<{
   plugin: import("../domain/identity.js").PluginKey;
   entry: import("../domain/marketplace.js").NormalizedMarketplaceEntry;
@@ -488,7 +491,25 @@ export function createMarketplaceRefreshService(dependencies: MarketplaceRefresh
       const catalog = await dependencies.inspection.inspect(materialized, signal);
       if (catalog.marketplace.name.value !== current.marketplace) throw new Error("STATE_STALE");
       const selected = createMarketplaceSnapshotRecord({ marketplace: current.marketplace, source: materialized.source, content: materialized.content, binding: materialized.binding }, dependencies.sha256);
-      const probes = dependencies.probe === undefined ? [] : await dependencies.probe({ scope, record: claimed, snapshot: selected, catalog, marketplace: materialized, signal });
+      // Plugin probes cost one materialize+inspect+assess cycle per installed
+      // plugin. Skipping them entirely on an unchanged marketplace can miss
+      // updates indefinitely (installed-inventory drift, transient probe
+      // failure, capability changes), so the skip is bounded to a short
+      // window: an unchanged marketplace re-probes at least every
+      // PROBE_SKIP_WINDOW_MS, and any failed attempt forces a re-probe.
+      const priorSnapshot = snapshotFor(loaded.snapshot, current);
+      const snapshotUnchanged = priorSnapshot !== undefined &&
+        priorSnapshot.source.revision === selected.source.revision &&
+        priorSnapshot.contentDigest === selected.contentDigest &&
+        priorSnapshot.binding === selected.binding;
+      const lastAttempt = current.refresh.lastAttempt;
+      const probesRecentlySucceeded = lastAttempt !== undefined &&
+        (lastAttempt.outcome === "succeeded" || lastAttempt.outcome === "unchanged") &&
+        time - lastAttempt.completedAt < PROBE_SKIP_WINDOW_MS;
+      const skipProbes = snapshotUnchanged && probesRecentlySucceeded;
+      const probes = skipProbes || dependencies.probe === undefined
+        ? []
+        : await dependencies.probe({ scope, record: claimed, snapshot: selected, catalog, marketplace: materialized, signal });
       const completedAt = now();
       await assertScopeAuthority(dependencies, scope, signal);
       const latest = await dependencies.state.read(scope, signal);

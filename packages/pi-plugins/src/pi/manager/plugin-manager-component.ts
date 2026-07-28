@@ -9,7 +9,7 @@ import {
 } from "@earendil-works/pi-tui";
 import type { PluginManagerController } from "./plugin-manager-controller.js";
 import { projectTerminalText } from "./pi-terminal-text.js";
-import { renderPluginManager } from "./plugin-manager-render.js";
+import { SPINNER_FRAMES, renderPluginManager } from "./plugin-manager-render.js";
 import { pluginManagerAvailableActions, pluginManagerMenuActions, pluginManagerVisibleRows, rowKeyIdentity, type PluginManagerScrollRegion } from "./plugin-manager-model.js";
 
 export type PluginManagerCloseResult = Readonly<{ kind: "closed" | "action"; action?: string }>;
@@ -33,6 +33,8 @@ export class PluginManagerComponent implements Component, Focusable {
   private cachedRows: number | undefined;
   private cachedLines: string[] | undefined;
   private inline: Readonly<{ component: Component; finish(value?: unknown): void }> | undefined;
+  private spinIndex = 0;
+  private spinTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(input: Readonly<{
     tui: TUI;
@@ -93,6 +95,7 @@ export class PluginManagerComponent implements Component, Focusable {
     if (this.disposed) return [];
     const rows = Math.max(4, this.tui.terminal.rows);
     const state = this.controller.state();
+    this.syncSpinner(state.operation.state === "running" || state.operation.state === "cancelling" || state.page.loading || state.detail.loading);
     if (state.viewport.columns !== width || state.viewport.rows !== rows) {
       this.controller.dispatch({ type: "resized", columns: width, rows });
     }
@@ -109,9 +112,24 @@ export class PluginManagerComponent implements Component, Focusable {
       const child = this.inline.component.render(width).slice(0, available);
       this.cachedLines = [...context, ...child, this.theme.fg("dim", "esc back/cancel")].slice(0, rows);
     } else {
-      this.cachedLines = [...renderPluginManager({ state: this.controller.state(), width, height: rows, theme: this.theme, keybindings: this.keybindings, focused: this.focused })];
+      this.cachedLines = [...renderPluginManager({ state: this.controller.state(), width, height: rows, theme: this.theme, keybindings: this.keybindings, focused: this.focused, spinnerFrame: SPINNER_FRAMES[this.spinIndex % SPINNER_FRAMES.length] })];
     }
     return this.cachedLines;
+  }
+
+  /** Spinner ticks only while something is actually in flight. */
+  private syncSpinner(active: boolean): void {
+    if (active && this.spinTimer === undefined) {
+      this.spinTimer = setInterval(() => {
+        this.spinIndex += 1;
+        this.invalidate();
+        this.tui.requestRender();
+      }, 100);
+      this.spinTimer.unref?.();
+    } else if (!active && this.spinTimer !== undefined) {
+      clearInterval(this.spinTimer);
+      this.spinTimer = undefined;
+    }
   }
 
   private escape(): void {
@@ -266,6 +284,10 @@ export class PluginManagerComponent implements Component, Focusable {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    if (this.spinTimer !== undefined) {
+      clearInterval(this.spinTimer);
+      this.spinTimer = undefined;
+    }
     this.inline?.finish();
     this.unsubscribe?.();
     this.unsubscribe = undefined;

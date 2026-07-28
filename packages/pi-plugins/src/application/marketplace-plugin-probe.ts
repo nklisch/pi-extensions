@@ -19,6 +19,8 @@ function sourceRevision(source: ResolvedPluginSource): string {
 }
 
 /** Probe installed catalog entries without promoting or retaining staging bytes. */
+const PROBE_CONCURRENCY = 4;
+
 export function createMarketplacePluginProbe(input: Readonly<{
   state: LifecycleStateStore;
   content: ContentStorePort;
@@ -37,12 +39,15 @@ export function createMarketplacePluginProbe(input: Readonly<{
     const installed = ("installed" in loaded.snapshot ? loaded.snapshot.installed.plugins : loaded.snapshot.project.plugins)
       .filter((record) => record.plugin.endsWith(`@${request.snapshot.marketplace}`));
     const byPlugin = new Map(request.catalog.marketplace.entries.map((entry) => [entry.identity.value.key, entry]));
-    const results: MarketplacePluginProbeResult[] = [];
-    for (const record of installed.sort((left, right) => left.plugin.localeCompare(right.plugin))) {
-      request.signal.throwIfAborted();
+    const targets = installed.sort((left, right) => left.plugin.localeCompare(right.plugin));
+    // Each iteration owns its staging slot and is read-only against state, so
+    // probes run with bounded parallelism. Indexed results preserve the
+    // sorted plugin order: the notice array lands in state and must stay
+    // deterministic.
+    const probeOne = async (record: (typeof targets)[number]): Promise<MarketplacePluginProbeResult | undefined> => {
       const entry = byPlugin.get(record.plugin);
       const current = record.revisions.find((revision) => revision.revision === record.selectedRevision);
-      if (entry === undefined || current === undefined) continue;
+      if (entry === undefined || current === undefined) return undefined;
       const allocation = await input.content.allocateStaging(request.signal);
       try {
         const context: SourceContext = entry.source.value.kind === "marketplace-path"
@@ -57,14 +62,14 @@ export function createMarketplacePluginProbe(input: Readonly<{
           : { kind: "external" };
         const materialized = await input.materializer.materialize(entry.source.value, context, allocation.slot, request.signal);
         const inspected = await input.inspector.inspect({ entry, materialized }, request.signal);
-        if (!inspected.ok) continue;
+        if (!inspected.ok) return undefined;
         const plugin = inspected.value;
         if (plugin.identity.key !== record.plugin) throw new Error("catalog plugin identity changed during update probe");
         const compatibility = await input.compatibility.assess({
           plugin,
           ...(entry.policy === undefined ? {} : { marketplacePolicy: entry.policy }),
         }, request.signal);
-        if (!compatibility.activatable) continue;
+        if (!compatibility.activatable) return undefined;
         const declaredVersion = plugin.version?.value ?? entry.version?.value;
         const marketplaceSourceIdentity = deriveMarketplaceSourceIdentity(request.record.source, input.sha256);
         const pluginSourceIdentity = derivePluginSourceIdentity(entry.source.value, input.sha256);
@@ -77,7 +82,7 @@ export function createMarketplacePluginProbe(input: Readonly<{
           pluginSourceIdentity,
           ...(declaredVersion === undefined ? {} : { declaredVersion }),
         }, input.sha256);
-        if (revision.revision === current.revision) continue;
+        if (revision.revision === current.revision) return undefined;
         const available = AvailableRevisionSchema.parse({
           immutableRevision: revision.revision,
           marketplaceSourceIdentity,
@@ -85,7 +90,7 @@ export function createMarketplacePluginProbe(input: Readonly<{
           ...(declaredVersion === undefined ? {} : { declaredVersion }),
           sourceRevision: sourceRevision(materialized.source),
         });
-        results.push(Object.freeze({
+        return Object.freeze({
           plugin: record.plugin,
           entry,
           available,
@@ -100,11 +105,32 @@ export function createMarketplacePluginProbe(input: Readonly<{
             installed: current.evidence.source.declaredVersion ?? current.evidence.source.sourceRevision ?? current.revision,
             available: available.declaredVersion ?? available.sourceRevision,
           }),
-        }));
+        });
       } finally {
         await input.content.discardStaging(allocation, new AbortController().signal).catch(() => undefined);
       }
-    }
-    return Object.freeze(results);
+    };
+    const indexed: Array<MarketplacePluginProbeResult | undefined> = new Array(targets.length);
+    let cursor = 0;
+    // First failure wins: stop scheduling new probes, but let every STARTED
+    // probe finish its staging cleanup before the error propagates. Plain
+    // Promise.all rejection would strand sibling workers mid-materialize
+    // while the caller discards the marketplace staging they read from.
+    let firstError: unknown;
+    const worker = async () => {
+      while (firstError === undefined && cursor < targets.length) {
+        const index = cursor;
+        cursor += 1;
+        try {
+          request.signal.throwIfAborted();
+          indexed[index] = await probeOne(targets[index]!);
+        } catch (error) {
+          firstError ??= error;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(PROBE_CONCURRENCY, targets.length) }, worker));
+    if (firstError !== undefined) throw firstError;
+    return Object.freeze(indexed.filter((result): result is MarketplacePluginProbeResult => result !== undefined));
   };
 }
