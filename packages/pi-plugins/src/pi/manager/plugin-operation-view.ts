@@ -105,7 +105,7 @@ export class PluginOperationView implements Component {
         if (install.data.kind === "succeeded") {
           lines.push(`${safe(install.data.plugin)} · ${safe(install.data.scope.kind)} · ${safe(install.data.revision)}`);
           lines.push(`${install.data.components.skills} skills discoverable · ${install.data.components.hooks} hooks registered · ${install.data.components.mcpServers} MCP servers ready`);
-        } else if (install.data.kind === "recovery-required") lines.push("setup didn't finish — run recovery from /plugins to complete it");
+        } else if (install.data.kind === "recovery-required") lines.push("setup didn't finish — restart pi and it finishes automatically (/plugins doctor shows what's pending)");
         else if (install.data.kind === "rolled-back") lines.push(`couldn't finish — ${plainLifecycleFailure(install.data.failure)} · ${install.data.restored ? "the change was undone" : "check /plugins → Health"}`);
         else if (install.data.kind === "stale" || install.data.kind === "conflict") lines.push("things changed — refresh and try again");
         if ("progress" in install.data) for (const event of install.data.progress) lines.push(`#${event.sequence} ${safe(event.phase)} ${safe(event.state)}${event.code === undefined ? "" : ` ${safe(event.code)}`}`);
