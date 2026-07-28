@@ -32,7 +32,7 @@ function harness(mode: ExtensionContext["mode"] = "tui", commandPath: string | r
   const pi = {
     registerCommand(name: string, options: any) { commands.push({ name, options }); },
     getCommands: () => (typeof commandPath === "string" ? [commandPath] : commandPath).map((path, index) => ({
-      name: index === 0 ? "plugin" : "plugin:1",
+      name: index === 0 ? "plugins" : "plugins:1",
       source: "extension" as const,
       sourceInfo: { path, source: "pkg", scope: "user" as const, origin: "package" as const },
     })),
@@ -109,7 +109,7 @@ function adapter(input: Readonly<{
   });
 }
 
-describe("Pi /plugin command adapter", () => {
+describe("Pi /plugins command adapter", () => {
   it("opens the live operation presentation before preserving raw argv text byte-for-byte", async () => {
     const h = harness();
     const order: string[] = [];
@@ -125,7 +125,7 @@ describe("Pi /plugin command adapter", () => {
     const value = adapter({ pi: h.pi, host: host(service), manager: presentation });
 
     value.register();
-    expect(h.commands.map((entry) => entry.name)).toEqual(["plugin"]);
+    expect(h.commands.map((entry) => entry.name)).toEqual(["plugins"]);
     const raw = "browse  'α beta'\t--scope=all-current";
     await h.commands[0]!.options.handler(raw, h.context);
     expect(order).toEqual(["view", "facade"]);
@@ -160,7 +160,7 @@ describe("Pi /plugin command adapter", () => {
     const value = adapter({ pi: h.pi, host: host(control()), manager: manager() });
     value.register();
     value.bindSession(h.context);
-    expect(h.notifications).toEqual([expect.stringContaining("/plugin:1")]);
+    expect(h.notifications).toEqual([expect.stringContaining("/plugins:1")]);
     expect(h.commands).toHaveLength(1);
 
     const lookalikeOnly = harness("tui", `/other${sourcePath}`);

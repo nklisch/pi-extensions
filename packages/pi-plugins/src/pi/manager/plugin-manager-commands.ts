@@ -66,7 +66,7 @@ export function updateNoticesCommand(next?: string): readonly string[] {
   });
 }
 
-/** Host health shows as a heading indicator, not a view; diagnostics stay on /plugin doctor. */
+/** Host health shows as a heading indicator, not a view; diagnostics stay on /plugins doctor. */
 export function hostStatusCommand(): readonly string[] {
   return nativeControlArgv("status");
 }

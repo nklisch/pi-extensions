@@ -46,6 +46,7 @@ describe("plugin manager action runner", () => {
   });
 
   it.each([
+    { action: "trust", row },
     { action: "uninstall-delete", row },
     { action: "marketplace-remove", row: marketplaceRow },
     { action: "project-sync", mode: "apply-intent" },
@@ -57,6 +58,7 @@ describe("plugin manager action runner", () => {
   });
 
   it.each([
+    [{ action: "trust", row }, ["trust", "demo@market", "--scope", "user", "--snapshot-id", snapshotId, "--detail-id", detailId, "--yes"]],
     [{ action: "uninstall-delete", row }, ["remove", "demo@market", "--scope", "user", "--snapshot-id", snapshotId, "--detail-id", detailId, "--yes", "--delete-data"]],
     [{ action: "marketplace-remove", row: marketplaceRow }, ["marketplace", "remove", "registration-1", "--yes"]],
     [{ action: "project-sync", mode: "apply-intent" }, ["project", "sync", "--mode", "apply-intent", "--yes"]],

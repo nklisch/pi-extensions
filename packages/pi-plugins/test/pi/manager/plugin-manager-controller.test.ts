@@ -114,15 +114,35 @@ describe("plugin manager controller", () => {
       completion: Object.freeze({ category: "plugin" as const, value: "demo@market", safe: safe("demo") }),
       data: Object.freeze({}),
     });
-    const notice = (id: string, unread: boolean, plugin = "demo@market"): PluginManagerRow => Object.freeze({
+    const notice = (id: string, unread: boolean, plugin = "demo@market", unresolved = true): PluginManagerRow => Object.freeze({
       key: Object.freeze({ subject: "notice" as const, key: id }),
       title: plugin, subtitle: "1.0 → 1.1", status: "manual-required", scope: "user" as const, plugin,
       completion: Object.freeze({ category: "notice" as const, value: id, safe: safe(plugin) }),
-      data: Object.freeze({ id, unread }),
+      data: Object.freeze({ id, unread, unresolved }),
     });
     const rows = mergePluginCatalogRows([installed], [], [notice("n-read", false), notice("n-unread", true), notice("n-other", true, "other@market")]);
     expect(rows[0]?.unreadNoticeIds).toEqual(["n-unread"]);
     expect(rows[0]?.hasUpdate).toBe(true);
+  });
+
+  it("does not decorate installed rows from resolved notice tombstones", () => {
+    const installed: PluginManagerRow = Object.freeze({
+      key: Object.freeze({ subject: "installed" as const, key: "user:demo@market", snapshotId: "s", detailId: "d" }),
+      title: "demo", subtitle: "market · user", status: "installed", scope: "user" as const, plugin: "demo@market",
+      completion: Object.freeze({ category: "plugin" as const, value: "demo@market", safe: safe("demo") }),
+      data: Object.freeze({}),
+    });
+    // Resolved tombstones stay listed on the Updates page by retention policy;
+    // they must not readvertise "update available" on the installed row.
+    const tombstone: PluginManagerRow = Object.freeze({
+      key: Object.freeze({ subject: "notice" as const, key: "n-resolved" }),
+      title: "demo@market", subtitle: "1.0 → 1.1", status: "automatic-applied", scope: "user" as const, plugin: "demo@market",
+      completion: Object.freeze({ category: "notice" as const, value: "n-resolved", safe: safe("demo@market") }),
+      data: Object.freeze({ id: "n-resolved", unread: false, unresolved: false }),
+    });
+    const rows = mergePluginCatalogRows([installed], [], [tombstone]);
+    expect(rows[0]?.hasUpdate).toBeUndefined();
+    expect(rows[0]?.status).toBe("installed");
   });
 
   it("loads installed authority and update counts only through canonical facade argv", async () => {

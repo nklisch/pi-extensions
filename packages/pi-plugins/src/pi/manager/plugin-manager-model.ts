@@ -17,6 +17,7 @@ export const PluginManagerActionRegistry = Object.freeze({
   enable: { label: "Enable", description: "Load this plugin's runtime components" },
   disable: { label: "Disable", description: "Stop loading runtime components but keep the plugin installed" },
   update: { label: "Update plugin", description: "Update the selected installed plugin" },
+  trust: { label: "Trust plugin", description: "Trust this exact installed revision so its hooks and MCP servers can run" },
   "update-all": { label: "Update all", description: "Apply every currently eligible plugin update" },
   "update-policy": { label: "Auto updates…", description: "Turn automatic plugin updates on or off and choose how often Pi checks" },
   "uninstall-delete": { label: "Remove plugin", description: "Uninstall the plugin and erase its persistent data" },
@@ -218,6 +219,9 @@ export function pluginManagerAvailableActions(state: PluginManagerState): readon
   const actions: PluginManagerActionId[] = [...lens, "inspect"];
   // Update leads when one is available: it is why the row is highlighted.
   if (lifecycle?.update !== undefined && !["current", "not-applicable", "unknown"].includes(lifecycle.update)) actions.push("update");
+  // A trust-required verdict blocks every runtime component; re-trusting the
+  // exact installed revision is the only remedy short of remove + add.
+  if (detail.data.detail.trust === "required") actions.push("trust");
   if (lifecycle?.activationIntent === "enabled") actions.push("disable");
   else if (lifecycle?.activationIntent === "disabled") actions.push("enable");
   actions.push(...ack, "uninstall-delete");

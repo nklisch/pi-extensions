@@ -85,7 +85,7 @@ export interface PackagedPluginHost {
   start(event: SessionStartEvent, context: ExtensionContext): Promise<StartedPackagedPluginHost>;
   current(): StartedPackagedPluginHost | undefined;
   runWithPiOperationContext<T>(
-    context: ExtensionCommandContext,
+    context: ExtensionContext,
     signal: AbortSignal,
     use: (application: PackagedPluginHostApplication) => Promise<T>,
   ): Promise<T>;

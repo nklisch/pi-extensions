@@ -754,7 +754,7 @@ settings.
 When an installed plugin has a newer revision, Pi notifies the user once for
 that revision. The notification identifies the plugin, installed version,
 available version or source revision, and whether Pi applied the update
-automatically or requires `/plugin update`.
+automatically or requires `/plugins update`.
 
 Update checks run outside the startup-critical path. Offline operation and
 network failure preserve the active revision and do not block Pi startup.
@@ -765,7 +765,7 @@ network failure preserve the active revision and do not block Pi startup.
 
 The extension factory registers:
 
-- `/plugin`;
+- `/plugins`;
 - lifecycle event handlers;
 - the hook adapter;
 - the MCP integration;
@@ -786,7 +786,7 @@ after a committed change requires resource replacement.
 The Pi adapter contains no installation rules. It renders domain results and
 sends typed commands to application services.
 
-`/plugin` presents five user-centered sections: My Plugins, Discover, Sources,
+`/plugins` presents five user-centered sections: My Plugins, Discover, Sources,
 Updates, and Health. Empty states provide Add Source and Discover onboarding,
 and lifecycle actions are derived from current facade detail rather than shown
 unconditionally. Trust and destructive confirmation use a framed replacement

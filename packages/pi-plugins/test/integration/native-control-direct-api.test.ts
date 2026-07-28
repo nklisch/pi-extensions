@@ -32,6 +32,7 @@ const samples: Readonly<Record<string, readonly string[]>> = {
   "lifecycle.disable": ["disable", "demo@market", "--scope", "user", "--yes"],
   "lifecycle.update": ["update", "demo@market", "--scope", "user"],
   "lifecycle.uninstall": ["uninstall", "demo@market", "--scope", "user", "--yes", "--keep-data"],
+  "trust.grant": ["trust", "demo@market", "--scope", "user", "--yes"],
   "project.sync": ["project", "sync", "--mode", "apply-intent", "--preview-only"],
   "updates.status": ["updates", "status"],
   "updates.policy.preview": ["updates", "policy", "preview", "--kind", "application", "--target", "global", "--mode", "manual"],

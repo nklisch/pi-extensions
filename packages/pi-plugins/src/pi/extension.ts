@@ -8,6 +8,7 @@ import { createPiManagerReloadHandoff } from "./pi-manager-reload-handoff.js";
 import { createPiUpdateNotificationPublisher } from "./pi-update-notification-publisher.js";
 import { createPiControlInputPort } from "./manager/pi-control-input.js";
 import { createPluginManagerSession } from "./manager/plugin-manager-session.js";
+import { createPiTrustReview } from "./pi-trust-review.js";
 
 /** Construct-only Pi extension entry; host startup remains session_start-owned. */
 export default async function packagedPluginHostExtension(pi: ExtensionAPI): Promise<void> {
@@ -37,5 +38,5 @@ export default async function packagedPluginHostExtension(pi: ExtensionAPI): Pro
     createInput: (context, mode) => createPiControlInputPort({ context, mode, present: () => manager.inlinePresenter?.() }),
   });
   command.register();
-  createPluginManagerLifecycle({ pi, publisher, manager, command, channel, handoff }).register();
+  createPluginManagerLifecycle({ pi, publisher, manager, command, channel, handoff, trustReview: createPiTrustReview({ host }) }).register();
 }

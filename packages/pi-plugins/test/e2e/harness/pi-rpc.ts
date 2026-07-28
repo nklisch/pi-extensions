@@ -75,7 +75,7 @@ export class PiRpcProcess {
   readonly process: ManagedProcess;
   readonly events: any[] = [];
   readonly sandbox: CleanE2ESandbox;
-  commandName = "plugin";
+  commandName = "plugins";
   private readonly pending = new Map<string, { resolve(value: RpcResponse): void; reject(error: unknown): void }>();
   private readonly decoder = new StringDecoder("utf8");
   private buffer = "";

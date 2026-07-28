@@ -39,6 +39,7 @@ import {
 } from "./marketplace-management-contract.js";
 import { MarketplaceCatalogPageSchema } from "./marketplace-catalog-contract.js";
 import { MarketplaceRefreshResultSchema } from "./update-contract.js";
+import { NativeTrustGrantResultSchema } from "./installed-trust-grant-service.js";
 import {
   NativeAutomaticUpdateRunResultSchema,
   NativeUpdateAcknowledgmentResultSchema,
@@ -149,6 +150,7 @@ const DiagnoseControlSchema = exactPair(z.object({ plugin: PluginKeySchema.optio
 });
 const InstallTokenControlSchema = z.object({ token: TrustedInstallSessionTokenSchema }).strict().readonly();
 const LifecycleControlSchema = exactPair(z.object({ plugin: PluginKeySchema, scope: ScopeSchema, previewOnly: z.boolean().default(false), confirmed: z.boolean().default(false), ...ExactPair }).strict());
+const TrustGrantControlSchema = exactPair(z.object({ plugin: PluginKeySchema, scope: ScopeSchema, confirmed: z.boolean().default(false), ...ExactPair }).strict());
 const UpdateLifecycleControlSchema = exactPair(z.object({
   plugin: PluginKeySchema,
   scope: ScopeSchema,
@@ -283,6 +285,7 @@ const registry = {
   "lifecycle.disable": command({ path: ["disable"], visibility: "primary", aliases: [], summary: safe("Disable a plugin"), safety: "mutation", input: "confirmation", request: LifecycleControlSchema, response: z.union([NativeLifecycleOperationPreviewResultSchema, NativeLifecycleOperationResultSchema]), positionals: [positional("plugin-key")], options: lifecycleOptions }),
   "lifecycle.update": command({ path: ["update"], visibility: "primary", aliases: [], summary: safe("Update a plugin"), safety: "mutation", input: "configuration", request: UpdateLifecycleControlSchema, response: z.union([NativeLifecycleOperationPreviewResultSchema, NativeLifecycleOperationResultSchema]), positionals: [positional("plugin-key")], options: [...lifecycleOptions, option("--candidate-snapshot-id", "candidateSnapshotId", "string"), option("--candidate-detail-id", "candidateDetailId", "string")] }),
   "lifecycle.uninstall": command({ path: ["remove"], visibility: "primary", aliases: [{ path: ["uninstall"] }], summary: safe("Remove a plugin"), safety: "mutation", input: "confirmation", request: UninstallControlSchema, response: z.union([NativeLifecycleOperationPreviewResultSchema, NativeLifecycleOperationResultSchema]), positionals: [positional("plugin-key")], options: [...lifecycleOptions, option("--keep-data", "keepData", "flag", { conflicts: ["deleteData"] }), option("--delete-data", "deleteData", "flag", { conflicts: ["keepData"] })] }),
+  "trust.grant": command({ path: ["trust"], visibility: "primary", aliases: [], summary: safe("Trust the exact installed plugin revision"), safety: "mutation", input: "confirmation", request: TrustGrantControlSchema, response: NativeTrustGrantResultSchema, positionals: [positional("plugin-key")], options: [scopeOption, ...exactOptions, option("--yes", "confirmed", "flag", { required: true })] }),
   "project.sync": command({ path: ["project", "sync"], aliases: [{ path: ["project-sync"] }], summary: safe("Synchronize current project intent"), safety: "mutation", input: "decision", request: ProjectSyncControlSchema, response: z.union([NativeLifecycleOperationPreviewResultSchema, NativeLifecycleOperationResultSchema]), positionals: [], options: [option("--mode", "mode", "enum", { required: true, values: ["apply-intent", "publish-intent", "merge"] }), option("--preview-only", "previewOnly", "flag"), option("--yes", "confirmed", "flag")] }),
   "updates.status": command({ path: ["updates", "status"], aliases: [], summary: safe("Show update status"), safety: "local-read", input: "none", request: UpdatesStatusControlSchema, response: NativeUpdateStatusSchema, positionals: [], options: [readScopeOption, option("--plugin", "plugin", "string")] }),
   "updates.policy.preview": command({ path: ["updates", "policy", "preview"], aliases: [], summary: safe("Preview an update policy change"), safety: "local-read", input: "none", request: PolicyPreviewControlSchema, response: NativeUpdatePolicyPreviewResultSchema, positionals: [], options: policyOptions(false) }),

@@ -57,6 +57,17 @@ describe("plugin manager renderer", () => {
     expect(renderPluginManager({ state: list, width: 42, height: 5, theme, keybindings, focused: true }).join("\n")).toContain("demo");
   });
 
+  it("badges each row with its scope so cross-scope duplicates are distinguishable", () => {
+    const projectRow: PluginManagerRow = { ...row, key: { ...row.key, key: "project:demo@market", detailId: "detail-p" }, scope: "project" };
+    let value = createPluginManagerState();
+    value = pluginManagerReducer(value, { type: "page-loading", request: 1, append: false });
+    value = pluginManagerReducer(value, { type: "page-loaded", request: 1, rows: [row, projectRow], append: false });
+    value = pluginManagerReducer(value, { type: "resized", columns: 120, rows: 24 });
+    const rendered = renderPluginManager({ state: value, width: 120, height: 24, theme, keybindings, focused: true }).join("\n");
+    expect(rendered).toContain("[user]");
+    expect(rendered).toContain("[project]");
+  });
+
   it("keeps long-list selection and the focused tail action visible in small terminals", () => {
     const rows = Array.from({ length: 50 }, (_, index): PluginManagerRow => ({
       ...row,

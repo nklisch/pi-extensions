@@ -62,11 +62,11 @@ function resultLines(result: TrustedInstallActivationResult, theme: Theme): stri
         ? "Press enter to finish setting it up — this is safe to retry."
         : "Press enter to review its settings and finish setup.",
       result.session === undefined
-        ? "If this keeps happening, /plugin → Health shows what's pending."
+        ? "If this keeps happening, /plugins → Health shows what's pending."
         : "Leaving this screen won't uninstall anything.",
     );
   } else if (result.kind === "rolled-back") {
-    lines.push(`It couldn't be added — ${plainLifecycleFailure(result.failure)}. The change was undone${result.restored ? "" : "; check /plugin → Health"}.`);
+    lines.push(`It couldn't be added — ${plainLifecycleFailure(result.failure)}. The change was undone${result.restored ? "" : "; check /plugins → Health"}.`);
   } else if (result.kind === "rejected" || result.kind === "failed") {
     lines.push(`It couldn't be added — ${plainLifecycleFailure(result.code)}.`);
   } else if (result.kind === "cancelled") {

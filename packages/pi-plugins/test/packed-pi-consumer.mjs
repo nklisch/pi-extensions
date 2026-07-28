@@ -197,7 +197,7 @@ try {
   const subagentsExtension = join(packageRoot, hostMetadata.pi.extensions[0]);
   const extension = join(packageRoot, hostMetadata.pi.extensions[1]);
   const collision = join(consumer, "collision-extension.mjs");
-  await writeFile(collision, `export default function (pi) { pi.registerCommand("plugin", { description: "Acceptance collision", handler: async (_args, ctx) => { ctx.ui.notify("collision command", "info"); } }); pi.registerCommand("acceptance-tools", { description: "Report active acceptance tools", handler: async (_args, ctx) => { ctx.ui.notify(JSON.stringify(pi.getAllTools().map((tool) => tool.name).sort()), "info"); } }); }\n`);
+  await writeFile(collision, `export default function (pi) { pi.registerCommand("plugins", { description: "Acceptance collision", handler: async (_args, ctx) => { ctx.ui.notify("collision command", "info"); } }); pi.registerCommand("acceptance-tools", { description: "Report active acceptance tools", handler: async (_args, ctx) => { ctx.ui.notify(JSON.stringify(pi.getAllTools().map((tool) => tool.name).sort()), "info"); } }); }\n`);
   const commonArgs = [
     "--offline",
     "--approve",
@@ -224,12 +224,12 @@ try {
   const rpc = await startRpc({ cli, args: commonArgs, cwd: workspace, env });
   const commands = await rpc.request({ type: "get_commands" });
   const pluginCommands = commands.data.commands.filter((command) => command.source === "extension" && command.name.startsWith("plugin"));
-  if (pluginCommands.length !== 2) throw new Error(`expected collision plus packed /plugin, got ${JSON.stringify(pluginCommands)}`);
+  if (pluginCommands.length !== 2) throw new Error(`expected collision plus packed /plugins, got ${JSON.stringify(pluginCommands)}`);
   const owned = pluginCommands.find((command) => {
     const path = command.path ?? command.sourceInfo?.path;
     return typeof path === "string" && resolve(path) === resolve(extension);
   });
-  if (owned === undefined || owned.name === "plugin") throw new Error(`packed command did not retain exact collision suffix ownership: ${JSON.stringify(pluginCommands)}`);
+  if (owned === undefined || owned.name === "plugins") throw new Error(`packed command did not retain exact collision suffix ownership: ${JSON.stringify(pluginCommands)}`);
   if (!rpc.events.some((event) => event.type === "extension_ui_request" && event.method === "notify" && String(event.message).includes(`/${owned.name}`))) {
     throw new Error("real Pi collision notification did not name the exact suffixed command");
   }
@@ -265,7 +265,7 @@ try {
   ];
   // Real JSON mode must remain strict JSONL even while the extension publishes
   // custom control frames and reports through Pi's session channel.
-  const json = checked(process.execPath, [cli, ...packageOnlyArgs, "--mode", "json", "--no-session", "/plugin status"], { cwd: workspace, env, timeout: 60_000 });
+  const json = checked(process.execPath, [cli, ...packageOnlyArgs, "--mode", "json", "--no-session", "/plugins status"], { cwd: workspace, env, timeout: 60_000 });
   const jsonLines = json.stdout.split("\n").filter(Boolean);
   if (jsonLines.length === 0) throw new Error("real Pi JSON mode emitted no framing");
   for (const line of jsonLines) JSON.parse(line);

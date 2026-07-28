@@ -9,7 +9,7 @@ import { createNativeControlHandlerMap } from "../../src/application/native-cont
 describe("native control registry", () => {
   it("owns one unique canonical path and complete command metadata", () => {
     const ids = nativeControlCommandIds();
-    expect(ids).toHaveLength(34);
+    expect(ids).toHaveLength(35);
     expect(new Set(ids).size).toBe(ids.length);
     const paths = ids.map((id) => NativeControlCommandRegistry[id].path.join(" "));
     expect(new Set(paths).size).toBe(paths.length);

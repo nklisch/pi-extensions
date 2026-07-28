@@ -67,6 +67,7 @@ export function createNativeControlHandlerMap(input: Readonly<{
     "lifecycle.disable": mutation,
     "lifecycle.update": mutation,
     "lifecycle.uninstall": mutation,
+    "trust.grant": mutation,
     "project.sync": mutation,
     "updates.status": read,
     "updates.policy.preview": read,

@@ -91,7 +91,7 @@ export function createPluginCommandAdapter(input: Readonly<{
     }
     const current = input.host.current();
     if (current === undefined) {
-      context.ui.notify("Plugin Host is still starting; retry /plugin.", "warning");
+      context.ui.notify("Plugin Host is still starting; retry /plugins.", "warning");
       return;
     }
     const parsed = current.application.control.parseText(args);
@@ -170,7 +170,7 @@ export function createPluginCommandAdapter(input: Readonly<{
     register(): void {
       if (registered) return;
       registered = true;
-      input.pi.registerCommand("plugin", {
+      input.pi.registerCommand("plugins", {
         description: "Manage Pi plugins",
         getArgumentCompletions(argumentPrefix): AutocompleteItem[] | null {
           const control = input.host.current()?.application.control;
@@ -189,7 +189,7 @@ export function createPluginCommandAdapter(input: Readonly<{
     },
     bindSession(context): void {
       const invocationName = ownInvocationName(input.pi, input.sourceUrl);
-      if (invocationName !== undefined && invocationName !== "plugin") {
+      if (invocationName !== undefined && invocationName !== "plugins") {
         input.channel.publishCollision(context, invocationName);
       }
     },

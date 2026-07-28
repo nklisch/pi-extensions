@@ -17,6 +17,7 @@ import type { PluginManagerRow } from "./plugin-manager-model.js";
 
 export type PluginManagerActionIntent =
   | Readonly<{ action: "enable" | "disable" | "update"; row: PluginManagerRow }>
+  | Readonly<{ action: "trust"; row: PluginManagerRow }>
   | Readonly<{ action: "uninstall-delete"; row: PluginManagerRow }>
   | Readonly<{ action: "install-open" | "install-run"; row: PluginManagerRow; snapshotId: string; detailId: string }>
   | Readonly<{ action: "install-apply" | "install-recover"; token: string }>
@@ -29,12 +30,13 @@ export type PluginManagerActionIntent =
   | Readonly<{ action: "operation-status" | "operation-cancel"; token: string }>;
 
 type ConfirmedPluginManagerActionIntent =
+  | Readonly<{ action: "trust"; row: PluginManagerRow }>
   | Readonly<{ action: "uninstall-delete"; row: PluginManagerRow }>
   | Readonly<{ action: "marketplace-remove"; row: PluginManagerRow }>
   | Readonly<{ action: "project-sync"; mode: "apply-intent" | "publish-intent" | "merge" }>;
 
 export type PluginManagerActionConfirmation = Readonly<{
-  action: "uninstall-delete" | "marketplace-remove" | "project-sync";
+  action: "trust" | "uninstall-delete" | "marketplace-remove" | "project-sync";
   title: string;
   lines: readonly string[];
   destructive: boolean;
@@ -68,10 +70,23 @@ function exactRow(row: PluginManagerRow): Readonly<{ plugin: string; scope: "use
 }
 
 function needsConfirmation(intent: PluginManagerActionIntent): intent is ConfirmedPluginManagerActionIntent {
-  return intent.action === "uninstall-delete" || intent.action === "marketplace-remove" || intent.action === "project-sync";
+  return intent.action === "trust" || intent.action === "uninstall-delete" || intent.action === "marketplace-remove" || intent.action === "project-sync";
 }
 
 export function pluginManagerActionConfirmation(intent: ConfirmedPluginManagerActionIntent): PluginManagerActionConfirmation {
+  if (intent.action === "trust") {
+    const row = exactRow(intent.row);
+    return Object.freeze({
+      action: intent.action,
+      title: `Trust ${row.plugin} again?`,
+      lines: Object.freeze([
+        `scope: ${row.scope}`,
+        "The installed revision's executable content is not covered by a current trust grant, so its skills, hooks, and MCP servers are not running.",
+        "Continuing trusts this exact content and lets the plugin run after reload.",
+      ]),
+      destructive: false,
+    });
+  }
   if (intent.action === "project-sync") {
     const sentence = intent.mode === "apply-intent"
       ? "Install and remove this project's plugins to match its declared intent."
@@ -112,6 +127,15 @@ function actionArgv(intent: PluginManagerActionIntent, confirmed: boolean): read
   if (intent.action === "enable" || intent.action === "disable" || intent.action === "update") {
     const row = exactRow(intent.row);
     return nativeControlArgv(`lifecycle.${intent.action}`, [row.plugin], {
+      scope: row.scope,
+      snapshotId: row.snapshotId,
+      detailId: row.detailId,
+      confirmed,
+    });
+  }
+  if (intent.action === "trust") {
+    const row = exactRow(intent.row);
+    return nativeControlArgv("trust.grant", [row.plugin], {
       scope: row.scope,
       snapshotId: row.snapshotId,
       detailId: row.detailId,

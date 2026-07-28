@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ActivationObservation } from "../application/ports/lifecycle-reload.js";
 import type { PendingTransitionRef } from "../domain/state/references.js";
 import type { ScopeReference } from "../domain/state/scope.js";
@@ -32,7 +32,7 @@ function registry(): Registry {
 export type PiReloadTicket = Readonly<{ id: string; sessionId: string; cwd: string; scope: ScopeReference; transition: PendingTransitionRef }>;
 export type PiOperationContextPort = Readonly<{
   /** Consume the one reload authority carried by an admitted Pi call frame. */
-  takeReloadContext(): ExtensionCommandContext | undefined;
+  takeReloadContext(): ExtensionContext | undefined;
 }>;
 export type PiReloadBroker = Readonly<{
   open(binding: PiSessionBinding, scope: ScopeReference, transition: PendingTransitionRef): PiReloadTicket;

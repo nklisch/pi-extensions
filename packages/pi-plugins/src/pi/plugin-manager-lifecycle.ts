@@ -4,6 +4,7 @@ import type { PiManagerReloadHandoff } from "./pi-manager-reload-handoff.js";
 import type { PiUpdateNotificationPublisher } from "./pi-update-notification-publisher.js";
 import type { PiControlChannel } from "./pi-control-channel.js";
 import type { PluginManagerSession } from "./manager/plugin-manager-session.js";
+import type { PiTrustReview } from "./pi-trust-review.js";
 
 export type PluginManagerLifecycle = Readonly<{
   register(): void;
@@ -18,6 +19,7 @@ export function createPluginManagerLifecycle(input: Readonly<{
   command: PluginCommandAdapter;
   channel: PiControlChannel;
   handoff: PiManagerReloadHandoff;
+  trustReview: PiTrustReview;
 }>): PluginManagerLifecycle {
   let registered = false;
   let pending: Promise<void> = Promise.resolve();
@@ -31,7 +33,14 @@ export function createPluginManagerLifecycle(input: Readonly<{
         input.publisher.restore(context);
         input.manager.bind(context);
         input.command.bindSession(context);
-        if (event.reason !== "reload") return;
+        if (event.reason !== "reload") {
+          // Trust re-review owns its own errors: a broken review must never
+          // take down session start.
+          pending = pending
+            .then(() => input.trustReview.review(context))
+            .catch(() => context.hasUI ? context.ui.notify("Plugin trust review could not complete; /plugins doctor has details.", "warning") : undefined);
+          return;
+        }
         const claim = input.handoff.claimSuccessor({ sessionId: context.sessionManager.getSessionId(), cwd: context.cwd });
         if (claim === undefined) return;
         pending = claim.result
@@ -39,7 +48,7 @@ export function createPluginManagerLifecycle(input: Readonly<{
             ? input.manager.presentHandoff(context, claim.destination, report.envelope)
             : input.channel.publishReport(context, report))
           .catch(() => {
-            if (context.hasUI) context.ui.notify("Plugin operation handoff was not available; open /plugin to inspect authoritative status.", "warning");
+            if (context.hasUI) context.ui.notify("Plugin operation handoff was not available; open /plugins to inspect authoritative status.", "warning");
           });
       });
       input.pi.on("session_shutdown", async (event, context) => {

@@ -8,7 +8,7 @@ Native plugin management for [Pi](https://github.com/badlogic/pi-mono), with com
 - transactional install, enable, disable, update, recovery, and uninstall;
 - Agent Skills and command-hook activation;
 - receipt-qualified MCP and subagent lifecycle integration;
-- deterministic `/plugin` commands and a Pi-native interactive manager;
+- deterministic `/plugins` commands and a Pi-native interactive manager;
 - offline-safe startup, update policy, diagnostics, and multiprocess coordination.
 
 ## Requirements
@@ -22,24 +22,27 @@ Native plugin management for [Pi](https://github.com/badlogic/pi-mono), with com
 pi install npm:@nklisch/pi-plugins
 ```
 
-Then start Pi and run `/plugin`. The manager uses the same progressive list footprint as Pi settings: choose **My Plugins**, **Discover**, **Sources**, **Updates**, or **Health**, then drill into an item and its available actions. Escape returns one level. On a clean installation, open Sources and choose **Add Source**, or use:
+Then start Pi and run `/plugins`. The manager uses the same progressive list footprint as Pi settings: choose **My Plugins**, **Discover**, **Sources**, **Updates**, or **Health**, then drill into an item and its available actions. Escape returns one level. On a clean installation, open Sources and choose **Add Source**, or use:
 
 ```text
-/plugin marketplace add nklisch/skills
-/plugin add <plugin@marketplace> --scope user
+/plugins marketplace add nklisch/skills
+/plugins add <plugin@marketplace> --scope user
 ```
 
-`/plugin add` adds the complete plugin to the selected user or project plugin list, collects any required configuration and executable trust, installs and enables it, and reloads Pi when activation changes. Use `/plugin help` for the concise command surface:
+`/plugins add` adds the complete plugin to the selected user or project plugin list, collects any required configuration and executable trust, installs and enables it, and reloads Pi when activation changes. Use `/plugins help` for the concise command surface:
+
+If an installed plugin's executable content changes outside a managed update (a rebuilt local source, a refreshed payload), its exact-trust grant no longer covers it and its hooks and MCP servers stop. At the next session start Pi asks whether to trust the changed content again; accepting records the grant and one `/reload` reactivates the plugin. The same remedy is available any time as the manager's **Trust plugin** action or `/plugins trust`.
 
 ```text
-/plugin add <plugin> --scope user|project
-/plugin remove <plugin> --scope user|project --keep-data|--delete-data
-/plugin update <plugin> --scope user|project
-/plugin enable <plugin> --scope user|project
-/plugin disable <plugin> --scope user|project
-/plugin list
-/plugin doctor [plugin]
-/plugin marketplace add|list|refresh|remove ...
+/plugins add <plugin> --scope user|project
+/plugins remove <plugin> --scope user|project --keep-data|--delete-data
+/plugins update <plugin> --scope user|project
+/plugins enable <plugin> --scope user|project
+/plugins disable <plugin> --scope user|project
+/plugins trust <plugin> --scope user|project --yes
+/plugins list
+/plugins doctor [plugin]
+/plugins marketplace add|list|refresh|remove ...
 ```
 
 The older `install`, `uninstall`, and `diagnose` forms remain accepted as compatibility aliases. Workflow-phase and operation-token routes remain available to automation but are intentionally omitted from normal help and completion.

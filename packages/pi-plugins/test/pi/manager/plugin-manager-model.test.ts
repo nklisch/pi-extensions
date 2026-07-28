@@ -98,7 +98,20 @@ describe("plugin manager reducer", () => {
       type: "detail-loaded", request: 1, row: row("demo").key, open: true,
       envelope: { data: { kind: "found", detail: { ...trustedInstallFlowFixture.chooseInspect, lifecycle: { ...trustedInstallFlowFixture.chooseInspect.lifecycle, activationIntent: "enabled", update: "current" } } } } as never,
     });
-    expect(pluginManagerAvailableActions(state)).toEqual(["inspect", "disable", "uninstall-delete"]);
+    // The shared fixture carries trust "required", so re-trust is offered.
+    expect(pluginManagerAvailableActions(state)).toEqual(["inspect", "trust", "disable", "uninstall-delete"]);
+    expect(pluginManagerMenuActions(state)).toEqual(["trust", "disable", "uninstall-delete"]);
+  });
+
+  it("offers re-trust only when the exact detail says trust is required", () => {
+    let state = createPluginManagerState();
+    state = pluginManagerReducer(state, { type: "page-loading", request: 1, append: false });
+    state = pluginManagerReducer(state, { type: "page-loaded", request: 1, rows: [row("demo")], append: false });
+    state = pluginManagerReducer(state, { type: "detail-loading", request: 1, row: row("demo").key });
+    state = pluginManagerReducer(state, {
+      type: "detail-loaded", request: 1, row: row("demo").key, open: true,
+      envelope: { data: { kind: "found", detail: { ...trustedInstallFlowFixture.chooseInspect, trust: "authorized", lifecycle: { ...trustedInstallFlowFixture.chooseInspect.lifecycle, activationIntent: "enabled", update: "current" } } } } as never,
+    });
     expect(pluginManagerMenuActions(state)).toEqual(["disable", "uninstall-delete"]);
   });
 
@@ -112,7 +125,7 @@ describe("plugin manager reducer", () => {
       type: "detail-loaded", request: 1, row: updateRow.key, open: true,
       envelope: { data: { kind: "found", detail: { ...trustedInstallFlowFixture.chooseInspect, lifecycle: { ...trustedInstallFlowFixture.chooseInspect.lifecycle, activationIntent: "enabled", update: "manual-required" } } } } as never,
     });
-    expect(pluginManagerMenuActions(state)).toEqual(["update", "disable", "uninstall-delete"]);
+    expect(pluginManagerMenuActions(state)).toEqual(["update", "trust", "disable", "uninstall-delete"]);
     state = pluginManagerReducer(state, { type: "intent", intent: { type: "cycle-filter", delta: -1 } });
     // The lens switch clears the open detail; mark-read must still be offered
     // because it only needs the notice ids carried by the row itself.
@@ -123,7 +136,7 @@ describe("plugin manager reducer", () => {
       type: "detail-loaded", request: 2, row: updateRow.key, open: true,
       envelope: { data: { kind: "found", detail: { ...trustedInstallFlowFixture.chooseInspect, lifecycle: { ...trustedInstallFlowFixture.chooseInspect.lifecycle, activationIntent: "enabled", update: "manual-required" } } } } as never,
     });
-    expect(pluginManagerMenuActions(state)).toEqual(["update-all", "update-policy", "update", "disable", "notice-acknowledge", "uninstall-delete"]);
+    expect(pluginManagerMenuActions(state)).toEqual(["update-all", "update-policy", "update", "trust", "disable", "notice-acknowledge", "uninstall-delete"]);
   });
 
   it("offers update-all and auto-update setup from the installed view's updates lens", () => {

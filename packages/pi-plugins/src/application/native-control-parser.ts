@@ -227,6 +227,7 @@ function normalizeRequest(id: NativeControlCommandId, options: ParsedOptionValue
     case "install.recover": return { token: positionals[0] };
     case "lifecycle.enable":
     case "lifecycle.disable": return { ...targetRequest(options, positionals), previewOnly: boolValue(options, "previewOnly"), confirmed: boolValue(options, "confirmed") };
+    case "trust.grant": return { ...targetRequest(options, positionals), confirmed: boolValue(options, "confirmed") };
     case "lifecycle.update": return { ...targetRequest(options, positionals), previewOnly: boolValue(options, "previewOnly"), confirmed: boolValue(options, "confirmed"), ...(stringValue(options, "candidateSnapshotId") === undefined ? {} : { candidateSnapshotId: stringValue(options, "candidateSnapshotId") }), ...(stringValue(options, "candidateDetailId") === undefined ? {} : { candidateDetailId: stringValue(options, "candidateDetailId") }) };
     case "lifecycle.uninstall": return { ...targetRequest(options, positionals), previewOnly: boolValue(options, "previewOnly"), confirmed: boolValue(options, "confirmed"), persistentData: boolValue(options, "deleteData") ? "delete-confirmed" : "keep" };
     case "project.sync": return { mode: stringValue(options, "mode"), previewOnly: boolValue(options, "previewOnly"), confirmed: boolValue(options, "confirmed") };

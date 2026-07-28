@@ -7,6 +7,7 @@ import type { NativeInspectionService } from "../native-inspection-contract.js";
 import type { NativeLifecycleOperationService } from "../native-lifecycle-operation-contract.js";
 import type { NativeUpdateManagementService } from "../native-update-management-service.js";
 import type { TrustedInstallationService } from "../trusted-install-contract.js";
+import type { InstalledTrustGrantService } from "../installed-trust-grant-service.js";
 import type { HostPrecedenceService } from "../host-precedence-service.js";
 import type { HookVisibilityService } from "../hook-visibility-service.js";
 import type { NativeControlExecutionId } from "../native-control-contract.js";
@@ -35,6 +36,7 @@ export type NativeControlApplicationDependencies = Readonly<{
   inspection: NativeInspectionService;
   trustedInstallation: TrustedInstallationService;
   operations: NativeLifecycleOperationService;
+  trustGrant: Pick<InstalledTrustGrantService, "grant">;
   updates: NativeUpdateManagementService;
   config: NativeControlConfigPort;
   status: NativeControlHostStatusPort;

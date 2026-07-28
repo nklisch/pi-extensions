@@ -18,7 +18,7 @@ function selectedCorpus(): readonly MutationVector[] {
   return selected === undefined ? all : all.filter((entry) => entry.caseId === selected);
 }
 
-describe("bounded packed /plugin grammar and token fuzz", () => {
+describe("bounded packed /plugins grammar and token fuzz", () => {
   it("generates a byte-identical fixed corpus with replay receipts", () => {
     const first = mutationCorpus({ seed: E2E_SEED, cases: 128, maxBytes: 8_192 });
     const second = mutationCorpus({ seed: E2E_SEED, cases: 128, maxBytes: 8_192 });

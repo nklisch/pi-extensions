@@ -189,7 +189,11 @@ export function createCompletePluginReloadPort(input: Readonly<{
 
   async function reload(request: Parameters<LifecycleReloadPort["reload"]>[0], signal: AbortSignal) {
     const context = input.operationContext.takeReloadContext();
-    if (context === undefined) return { kind: "failed" as const, code: "PI_RELOAD_CONTEXT_UNAVAILABLE" };
+    // Frames may originate from session-scope contexts (trust review), which
+    // carry no reload authority; only command contexts can drive pi reload.
+    if (context === undefined || !("reload" in context) || typeof context.reload !== "function") {
+      return { kind: "failed" as const, code: "PI_RELOAD_CONTEXT_UNAVAILABLE" };
+    }
     const ticket = input.broker.open(input.binding.current(), request.scope, request.transition);
     input.markDraining?.(ticket.id);
     try {

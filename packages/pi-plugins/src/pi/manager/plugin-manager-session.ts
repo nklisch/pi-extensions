@@ -448,7 +448,7 @@ export function createPluginManagerSession(input: Readonly<{
           } else if (activation.data.kind === "current-state") {
             context.ui.notify(`${activation.data.plugin} is already added`, "info");
           } else if (activation.data.kind === "rolled-back") {
-            context.ui.notify(`Couldn't add it — ${plainLifecycleFailure(activation.data.failure)}. The change was undone${activation.data.restored ? "" : "; check /plugin → Health for what's left pending"}.`, "error");
+            context.ui.notify(`Couldn't add it — ${plainLifecycleFailure(activation.data.failure)}. The change was undone${activation.data.restored ? "" : "; check /plugins → Health for what's left pending"}.`, "error");
           } else if (activation.data.kind === "cancelled") {
             context.ui.notify("Add cancelled — nothing was installed.", "warning");
           } else if (activation.data.kind === "rejected") {
@@ -676,7 +676,7 @@ export function createPluginManagerSession(input: Readonly<{
       const current = bound;
       if (current === undefined || current.sessionId !== context.sessionManager.getSessionId() || current.cwd !== context.cwd) return;
       // Success across a reload is one notification, not a result screen: the
-      // reload itself is the visible effect, and the next /plugin open shows
+      // reload itself is the visible effect, and the next /plugins open shows
       // authoritative state. Failures keep the inspectable operation view.
       if (envelope.status === "ok" || envelope.status === "no-change") {
         if (context.mode === "tui" && !closed) {

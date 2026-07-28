@@ -77,7 +77,10 @@ function listLines(state: PluginManagerState, theme: Theme, focused: boolean, bo
   const heading = `${theme.fg("accent", theme.bold(VIEW_LABELS[state.view]))}${theme.fg("muted", `${health}${updates}${policy}`)}`;
   const rows = pluginManagerVisibleRows(state).map((row) => {
     const selected = selectedRow(state) !== undefined && rowKeyIdentity(selectedRow(state)!.key) === rowKeyIdentity(row.key);
-    const line = `${selected ? "→" : " "} ${plain(row.title, 256)}  ${styledStatus(theme, row.status, row.statusTone)}`;
+    // The scope badge keeps the same plugin installed in both scopes from
+    // rendering as indistinguishable duplicates.
+    const badge = row.scope === undefined ? "" : theme.fg(row.scope === "project" ? "accent" : "muted", ` [${row.scope}]`);
+    const line = `${selected ? "→" : " "} ${plain(row.title, 256)}${badge}  ${styledStatus(theme, row.status, row.statusTone)}`;
     return selected ? theme.bg("selectedBg", line) : line;
   });
   const available = Math.max(1, bodyHeight - (state.view === "installed" ? 10 : 8));

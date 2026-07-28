@@ -220,6 +220,35 @@ export function createNativeControlMutationDispatcher(dependencies: NativeContro
         case "lifecycle.uninstall":
         case "project.sync":
           return lifecycle(command, dependencies, selection, context, signal);
+        case "trust.grant": {
+          if (!request.confirmed) return inputFailure({ code: "CONFIRMATION_REQUIRED" });
+          const selected = await selection.installed(pluginSelector(request), signal);
+          if (selected.kind !== "selected") return projectNativeControlFailure(selected.kind === "stale" ? "stale" : selected.kind === "ambiguous" ? "partial" : selected.kind === "unavailable" ? "unavailable" : "not-found", "CONTROL_TARGET_SELECTION_FAILED", "reinspect", humanForSelectionFailure(selected));
+          const immutable = selected.detail.summary.revision.immutable;
+          if (immutable === undefined) return projectNativeControlFailure("unavailable", "CONTROL_TARGET_SELECTION_FAILED", "reinspect");
+          const reportFingerprint = selected.detail.compatibility.reportFingerprint;
+          if (reportFingerprint === undefined) return projectNativeControlFailure("unavailable", "CONTROL_TARGET_SELECTION_FAILED", "reinspect");
+          const result = await dependencies.trustGrant.grant({
+            scope: selected.detail.summary.scope,
+            plugin: selected.detail.summary.plugin,
+            expectedRevision: immutable,
+            expectedCompatibilityFingerprint: reportFingerprint,
+          }, signal);
+          const status = result.kind === "granted" ? "ok"
+            : result.kind === "current-state" ? "no-change"
+            : result.kind === "stale" ? "stale"
+            : result.kind === "rejected" ? "rejected"
+            : result.kind === "unavailable" ? "unavailable"
+            : "recovery-required";
+          const human = result.kind === "granted"
+            ? [toSafeDisplayField(`trusted ${result.plugin} — restart or reload pi to activate`, { maxScalars: 256 })]
+            : [];
+          return projectNativeControlResponse(command.command, result, {
+            status,
+            human,
+            ...(result.kind === "recovery-required" ? { human: [presentRecoveryRequired()] } : {}),
+          });
+        }
         case "updates.policy.apply":
         case "updates.policy.set":
           return dispatchNativeControlPolicy(command, { updates: dependencies.updates, selection }, signal);

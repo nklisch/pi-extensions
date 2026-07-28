@@ -141,7 +141,14 @@ function rowsFor(view: PluginManagerState["view"] | "browse", envelope: NativeCo
 }
 
 export function mergePluginCatalogRows(installed: readonly PluginManagerRow[], available: readonly PluginManagerRow[], notices: readonly PluginManagerRow[]): readonly PluginManagerRow[] {
-  const updates = new Set(notices.flatMap((row) => row.plugin === undefined || row.scope === undefined ? [] : [`${row.scope}\0${row.plugin}`]));
+  // Only UNRESOLVED notices advertise an update. Resolved notices are kept as
+  // tombstones by the retention policy and remain visible on the Updates page;
+  // decorating from them is what made "update available" never clear.
+  const updates = new Set(notices.flatMap((row) => {
+    if (row.plugin === undefined || row.scope === undefined) return [];
+    const notice = row.data as Readonly<{ unresolved?: unknown }>;
+    return notice.unresolved === true ? [`${row.scope}\0${row.plugin}`] : [];
+  }));
   const unread = new Map<string, string[]>();
   for (const row of notices) {
     if (row.plugin === undefined || row.scope === undefined) continue;

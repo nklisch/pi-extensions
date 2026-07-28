@@ -52,6 +52,8 @@ import { createRuntimeSelectionCatalog } from "./runtime-selection-catalog.js";
 import { createComposedSkillHookRuntime } from "./create-skill-hook-runtime.js";
 import { createComposedMcpRuntime } from "./create-mcp-runtime.js";
 import { createCompletePluginReloadPort } from "./complete-plugin-reload.js";
+import { createInstalledTrustGrantService } from "../application/installed-trust-grant-service.js";
+import { createExactTrustGrantService } from "../application/exact-trust-grant-service.js";
 import { createPiProjectContextAdapters } from "../pi/pi-project-context.js";
 import { createPiSessionBinding } from "../pi/pi-session-binding.js";
 import { createPluginHostBootstrap, claimPackagedPluginHostComposition } from "../pi/plugin-host-bootstrap.js";
@@ -85,8 +87,8 @@ const sha256 = (bytes: Uint8Array): Uint8Array => new Uint8Array(createHash("sha
 
 type Cleanup = () => Promise<void>;
 type PiApplicationOperationFrame = {
-  readonly context: ExtensionCommandContext;
-  reloadContext: ExtensionCommandContext | undefined;
+  readonly context: ExtensionContext;
+  reloadContext: ExtensionContext | undefined;
 };
 
 function startupResult(input: Readonly<{
@@ -636,6 +638,15 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           acknowledge: requireOperationContext(updates.application.acknowledge),
           runAutomatic: requireOperationContext(updates.application.runAutomatic),
         });
+        const installedTrustGrant = createInstalledTrustGrantService({
+          state: state.state,
+          installed: content.installed,
+          compatibility,
+          trust: createExactTrustGrantService({ state: state.state, mutations, projectTrust: project.trust, projectRoots: project.authority, sha256 }),
+          projectRoots: project.authority,
+          projectScope: project.scope,
+          sha256,
+        });
         const refreshAndWake: typeof marketplace.refresh.refresh = async (request, signal) => {
           const result = await marketplace.refresh.refresh(request, signal);
           background.wake();
@@ -653,6 +664,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
             inspection: nativeInspection.application,
             trustedInstallation: trustedInstallation.application,
             operations: operationApplication,
+            trustGrant: Object.freeze({ grant: requireOperationContext(installedTrustGrant.grant) }),
             updates: updateApplication,
             config: Object.freeze({ hostPrecedence: hostPrecedenceConfig, hookVisibility: hookVisibilityConfig }),
             status: hostStatus,
@@ -787,7 +799,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
     start,
     current: () => started,
     async runWithPiOperationContext<T>(
-      context: ExtensionCommandContext,
+      context: ExtensionContext,
       signal: AbortSignal,
       use: (application: PackagedPluginHostApplication) => Promise<T>,
     ): Promise<T> {

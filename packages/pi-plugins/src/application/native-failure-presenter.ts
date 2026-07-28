@@ -134,7 +134,7 @@ export function presentNativeDiagnostics(diagnostics: readonly NativeDiagnostic[
  * enough to keep, but activation must be finished by the recovery pass.
  */
 export function presentRecoveryRequired(): SafeDisplayField {
-  return safe("The plugin is installed, but activation didn't finish in this session; the plugin host finishes it on recovery (usually automatic when pi restarts). `/plugin doctor` shows details.");
+  return safe("The plugin is installed, but activation didn't finish in this session; the plugin host finishes it on recovery (usually automatic when pi restarts). `/plugins doctor` shows details.");
 }
 
 /** Human text for control-level failure codes that carry no detail context. */

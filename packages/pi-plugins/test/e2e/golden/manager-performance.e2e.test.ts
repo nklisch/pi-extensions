@@ -35,7 +35,7 @@ describe("plugin manager step latency through the real PTY", () => {
     try {
       await pty.waitFor("clear/exit", 0, 60_000);
       let mark = pty.mark();
-      pty.send("/plugin\r");
+      pty.send("/plugins\r");
       await step("open manager", () => pty.waitFor("Plugins", mark, 60_000));
       await step("manager rows ready", () => pty.waitFor("core-local", mark, 60_000));
 

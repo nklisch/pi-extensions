@@ -141,12 +141,12 @@ describe("production concurrency, presentation, and secret non-retention", () =>
 
     const printed = await runChecked(sandbox.capabilities.node, [
       sandbox.piCli, "--offline", "--approve", "--no-prompt-templates", "--no-themes", "--no-context-files",
-      "--mode", "text", "--print", "--no-session", "/plugin status",
+      "--mode", "text", "--print", "--no-session", "/plugins status",
     ], { cwd: sandbox.project, env: sandbox.env, timeoutMs: 30_000 });
     expect(`${printed.stdout}${printed.stderr}`).toContain("Host ready · recovery settled · runtime reconciled");
     const json = await runChecked(sandbox.capabilities.node, [
       sandbox.piCli, "--offline", "--approve", "--no-prompt-templates", "--no-themes", "--no-context-files",
-      "--mode", "json", "--no-session", "/plugin status",
+      "--mode", "json", "--no-session", "/plugins status",
     ], { cwd: sandbox.project, env: sandbox.env, timeoutMs: 30_000 });
     for (const line of json.stdout.split("\n").filter(Boolean)) JSON.parse(line);
     expect(json.stdout).toContain("RUNTIME_ALIAS_UNAVAILABLE");
@@ -157,7 +157,7 @@ describe("production concurrency, presentation, and secret non-retention", () =>
       const pty = await PiPtyProcess.start({ sandbox, columns, rows, extraArgs: productionModelArgs });
       await pty.waitFor("clear/exit", 0, 60_000);
       const mark = pty.mark();
-      pty.send("/plugin\r");
+      pty.send("/plugins\r");
       const output = await pty.waitFor("Plugins", mark, 60_000);
       pty.send("\r");
       await pty.waitFor("production-bundle", mark, 60_000);
@@ -178,7 +178,7 @@ describe("production concurrency, presentation, and secret non-retention", () =>
     if (!ptyCapability.available) return;
     const pty = await PiPtyProcess.start({ sandbox, columns: 120, rows: 30 });
     let mark = pty.mark();
-    pty.send("/plugin install secret-required@native-e2e-market --scope user\r");
+    pty.send("/plugins install secret-required@native-e2e-market --scope user\r");
     await pty.waitFor("Secret token", mark, 120_000);
     pty.send(`${E2E_SECRET_CANARY}\r`);
     await pty.waitFor("Confirm exact plugin action", mark, 120_000);

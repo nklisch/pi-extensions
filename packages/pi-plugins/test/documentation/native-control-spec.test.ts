@@ -28,7 +28,7 @@ function optionSyntax(option: NativeControlOptionDefinition): string {
 }
 
 function commandSyntax(definition: NativeControlCommandDefinition): string {
-  const parts = ["/plugin", ...definition.path];
+  const parts = ["/plugins", ...definition.path];
   for (const positional of definition.positionals) {
     const value = `<${positional.name}>${positional.repeatable === true ? "..." : ""}`;
     parts.push(positional.required === true ? value : `[${value}]`);
@@ -56,7 +56,7 @@ function aliasTable(): string {
   const lines = ["| Alias | Canonical path |", "|---|---|"];
   for (const definition of Object.values(NativeControlCommandRegistry)) {
     for (const alias of definition.aliases) {
-      lines.push(`| \`/plugin ${alias.path.join(" ")}\` | \`/plugin ${definition.path.join(" ")}\` |`);
+      lines.push(`| \`/plugins ${alias.path.join(" ")}\` | \`/plugins ${definition.path.join(" ")}\` |`);
     }
   }
   return lines.join("\n");
@@ -76,10 +76,10 @@ describe("native control SPEC contract", () => {
     const parser = createNativeControlParser();
     for (const line of examples.split("\n")) {
       const [expectation, invocation] = line.split(" | ", 2);
-      if (expectation === undefined || invocation === undefined || !invocation.startsWith("/plugin")) {
+      if (expectation === undefined || invocation === undefined || !invocation.startsWith("/plugins")) {
         throw new Error(`invalid documented control example: ${line}`);
       }
-      const parsed = parser.parseText(invocation.slice("/plugin".length).trimStart());
+      const parsed = parser.parseText(invocation.slice("/plugins".length).trimStart());
       if (expectation === "valid") expect(parsed, line).toMatchObject({ kind: "parsed" });
       else {
         const code = expectation.match(/^invalid:([A-Z][A-Z0-9_]*)$/u)?.[1];

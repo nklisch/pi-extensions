@@ -22,7 +22,7 @@ describe("packed headless and native Pi manager parity", () => {
     const printed = await runChecked(sandbox.capabilities.node, [
       sandbox.piCli,
       "--offline", "--approve", "--no-prompt-templates", "--no-themes", "--no-context-files",
-      "--mode", "text", "--print", "--no-session", "/plugin status",
+      "--mode", "text", "--print", "--no-session", "/plugins status",
     ], { cwd: sandbox.project, env: sandbox.env, timeoutMs: 30_000 });
     const userOutput = `${printed.stdout}${printed.stderr}`;
     expect(userOutput).toContain("Host ready · recovery settled · runtime reconciled");
@@ -45,7 +45,7 @@ describe("packed headless and native Pi manager parity", () => {
     // extension host admits commands only after session startup completes.
     await wide.waitFor("clear/exit", 0, 60_000);
     const start = wide.mark();
-    wide.send("/plugin\r");
+    wide.send("/plugins\r");
     await wide.waitFor("Plugins", start, 60_000);
     const browse = wide.mark();
     wide.send("\u001b[B\r");
@@ -57,7 +57,7 @@ describe("packed headless and native Pi manager parity", () => {
     const narrow = await PiPtyProcess.start({ sandbox, columns: 58, rows: 24 });
     await narrow.waitFor("clear/exit", 0, 60_000);
     const narrowStart = narrow.mark();
-    narrow.send("/plugin\r");
+    narrow.send("/plugins\r");
     const output = await narrow.waitFor("Plugins", narrowStart, 60_000);
     expect(output.slice(narrowStart)).toContain("[all]");
     expect(output.slice(narrowStart)).toContain("installed");
@@ -80,7 +80,7 @@ describe("packed headless and native Pi manager parity", () => {
     const pty = await PiPtyProcess.start({ sandbox, columns: 120, rows: 30 });
     await pty.waitFor("clear/exit", 0, 60_000);
     let mark = pty.mark();
-    pty.send("/plugin\r");
+    pty.send("/plugins\r");
     await pty.waitFor("Plugins", mark, 60_000);
     await pty.waitFor("core-local", mark, 60_000);
     mark = pty.mark();
