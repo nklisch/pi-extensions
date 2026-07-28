@@ -320,6 +320,17 @@ The host supplies expanded plugin root and data paths to the MCP runtime.
 Transport management, authentication, elicitation, sampling, discovery, and
 process lifecycle belong to the MCP implementation.
 
+Standard-I/O servers additionally receive the host's desktop session variables
+— `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY`, `DBUS_SESSION_BUS_ADDRESS`, and
+`XDG_RUNTIME_DIR` — whenever they are present, so servers that spawn graphical
+processes (browser automation, screenshot capture, desktop tooling) can reach
+the user's session. These are capability-bearing session pointers whose
+passthrough is intentional; no general credential or agent variables are
+inherited, credential-agent sockets such as `SSH_AUTH_SOCK` remain
+declaration-only, an explicit environment declaration takes precedence over a
+passthrough value, and absent or empty host values are omitted rather than
+forwarded.
+
 Pi Plugin Host integrates through a narrow plugin-scoped configuration-source
 contract. The preferred implementation extends `pi-mcp-adapter`; a maintained
 fork supplies the same contract when upstream does not.

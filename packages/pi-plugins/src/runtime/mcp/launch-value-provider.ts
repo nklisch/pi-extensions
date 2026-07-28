@@ -26,6 +26,7 @@ import {
   type McpLateValue,
   type McpLaunchTemplate,
 } from "../../domain/mcp-launch-template.js";
+import { MCP_STDIO_SESSION_ENVIRONMENT_NAMES } from "../../domain/mcp-session-environment.js";
 import { parseMcpTemplateTokens } from "../../domain/mcp-late-values.js";
 import {
   isPluginLaunchRootName,
@@ -116,6 +117,12 @@ function ambientNames(
       if (header.value.kind === "environment") inspectSelector(header.value.name);
     }
     if (template.bearerToken?.kind === "environment") inspectSelector(template.bearerToken.name);
+  } else {
+    // Every stdio server may spawn GUI children; the desktop session pointers
+    // are ambient reads even though no template references them.
+    for (const name of MCP_STDIO_SESSION_ENVIRONMENT_NAMES) {
+      if (!Object.prototype.hasOwnProperty.call(configured, name)) result.add(name);
+    }
   }
   return Object.freeze([...result].sort());
 }
@@ -258,6 +265,18 @@ function processEnvironment(
   for (const name of Object.keys(configured).sort()) append(name, configured[name]!);
   for (const entry of template.env) {
     append(entry.name, resolveTemplate(entry.value, roots, configuration, configured, environment, signal));
+  }
+  // Desktop session passthrough: present host values only, empty values are
+  // meaningless, and an explicit template declaration always wins.
+  for (const name of MCP_STDIO_SESSION_ENVIRONMENT_NAMES) {
+    if (seen.has(environmentKey(name, platform))) continue;
+    signal.throwIfAborted();
+    if (!environment.has(name)) continue;
+    signal.throwIfAborted();
+    const value = environment.substitute(`\${${name}}`);
+    signal.throwIfAborted();
+    if (value.length === 0) continue;
+    append(name, value);
   }
   entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
   return nullPrototypeRecord(entries);

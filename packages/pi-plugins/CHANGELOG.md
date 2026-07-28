@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.1
+
+### Fixes
+
+- Pass desktop session variables (`DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR`) through to standard-I/O MCP servers when present on the host, so servers that spawn graphical processes (browser automation, screenshot capture) can reach the user's session instead of dying at startup. Explicit template declarations take precedence; absent or empty host values are omitted; credential-bearing variables remain declaration-only.
+
 ## v0.1.5
 
 ### Features

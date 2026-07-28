@@ -19,6 +19,7 @@ import { PluginKeySchema } from "../../../src/domain/identity.js";
 import { SourceLocationSchema } from "../../../src/domain/provenance-location.js";
 import { createTrustedMcpLaunchValueProvider } from "../../../src/runtime/mcp/launch-value-provider.js";
 import { classifyMcpLaunchFailure } from "../../../src/runtime/mcp/launch-error.js";
+import { MCP_STDIO_SESSION_ENVIRONMENT_NAMES } from "../../../src/domain/mcp-session-environment.js";
 import { FakeMcpLaunchEnvironment } from "../../support/fakes/mcp-launch-context.js";
 
 const location = SourceLocationSchema.parse({
@@ -171,12 +172,59 @@ describe("trusted MCP launch value provider", () => {
       DECLARED: "ambient-value",
     });
     expect(Object.getPrototypeOf(values.env)).toBeNull();
-    expect(fixture.environment.requests).toEqual([["AMBIENT"]]);
+    expect(fixture.environment.requests).toEqual([["AMBIENT", ...MCP_STDIO_SESSION_ENVIRONMENT_NAMES].sort()]);
     expect(JSON.stringify(values)).toBe('"[REDACTED]"');
     expect(String(values)).toBe("[REDACTED]");
     expect(Object.isFrozen(values.args)).toBe(true);
     fixture.provider.dispose(values);
     expect(() => values.transport).toThrow("disposed");
+    fixture.provider.dispose(values);
+  });
+
+  it("passes desktop session variables through to stdio servers when present", async () => {
+    const fixture = setup({
+      ambient: {
+        AMBIENT: "ambient-value",
+        DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
+        DISPLAY: ":0",
+        WAYLAND_DISPLAY: "wayland-0",
+        XAUTHORITY: "/run/user/1000/.Xauthority",
+        XDG_RUNTIME_DIR: "/run/user/1000",
+      },
+    });
+    const values = await fixture.provider.resolve(fixture.request, new AbortController().signal);
+    expect(values.transport).toBe("stdio");
+    if (values.transport !== "stdio") throw new Error("expected stdio values");
+    expect(values.env).toMatchObject({
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
+      DISPLAY: ":0",
+      WAYLAND_DISPLAY: "wayland-0",
+      XAUTHORITY: "/run/user/1000/.Xauthority",
+      XDG_RUNTIME_DIR: "/run/user/1000",
+    });
+    fixture.provider.dispose(values);
+  });
+
+  it("omits session variables that are absent or empty on the host", async () => {
+    const fixture = setup({ ambient: { AMBIENT: "ambient-value", DISPLAY: "" } });
+    const values = await fixture.provider.resolve(fixture.request, new AbortController().signal);
+    expect(values.transport).toBe("stdio");
+    if (values.transport !== "stdio") throw new Error("expected stdio values");
+    for (const name of MCP_STDIO_SESSION_ENVIRONMENT_NAMES) {
+      expect(Object.prototype.hasOwnProperty.call(values.env, name)).toBe(false);
+    }
+    fixture.provider.dispose(values);
+  });
+
+  it("lets an explicit template declaration win over session passthrough", async () => {
+    const fixture = setup({
+      template: stdioTemplate({ env: [{ name: "DISPLAY", value: "template-display" }] }),
+      ambient: { DISPLAY: "ambient-display" },
+    });
+    const values = await fixture.provider.resolve(fixture.request, new AbortController().signal);
+    expect(values.transport).toBe("stdio");
+    if (values.transport !== "stdio") throw new Error("expected stdio values");
+    expect(values.env.DISPLAY).toBe("template-display");
     fixture.provider.dispose(values);
   });
 
