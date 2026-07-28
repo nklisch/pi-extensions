@@ -2,6 +2,7 @@
 owner: workbench
 schema: 1
 release_mode: summarized
+completed_items: summarize
 # Optional project overrides—omit to use Workbench defaults:
 # interaction: collaborative|checkpointed|autonomous
 # rigor: lean|standard|rigorous

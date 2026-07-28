@@ -1,0 +1,53 @@
+{
+  "name": "@nklisch/pi-legible",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Rewrites assistant prose through a second model for legibility, with configurable rules, context depth, and model choice.",
+  "type": "module",
+  "author": {
+    "name": "Nathan Klisch"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nklisch/pi-extensions.git",
+    "directory": "packages/pi-legible"
+  },
+  "bugs": {
+    "url": "https://github.com/nklisch/pi-extensions/issues"
+  },
+  "homepage": "https://github.com/nklisch/pi-extensions/tree/main/packages/pi-legible#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@types/node": "^24.0.0",
+    "typescript": ">=7.0.0 <8",
+    "vitest": "^4.0.0",
+    "@earendil-works/pi-ai": "0.82.0"
+  }
+}
