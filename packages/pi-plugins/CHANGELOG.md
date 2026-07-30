@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.3
+
+### Fixes
+
+- Stop treating `st_dev` as stable file identity. btrfs (and overlayfs et al.) assign anonymous device numbers per mount, so every reboot changed device while files and inodes were unchanged — the host then hard-failed startup with "SQLite database identity marker does not match its path", and project keys rotated each mount epoch, orphaning project-scoped state. Identity acceptance is now inode-based (device remains recorded as forensic metadata), and the repository fingerprint preimage drops device (one-time project-key rotation; the old keys were already unstable per mount epoch).
+- Startup failures now inline the underlying cause chain in the extension error message instead of the bare "packaged plugin host startup failed".
+
 ## v0.2.1
 
 ### Fixes
