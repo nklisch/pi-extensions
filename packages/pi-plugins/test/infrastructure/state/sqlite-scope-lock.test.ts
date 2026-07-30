@@ -239,6 +239,35 @@ describe("SQLite scope lock adapter", () => {
     }
   });
 
+  it("tolerates device drift with an unchanged inode (btrfs/overlayfs remount)", async () => {
+    const lockRoot = await root();
+    try {
+      const locks = await manager(lockRoot);
+      const first = await locks.acquire(user, new AbortController().signal);
+      await first.release();
+      // btrfs/overlayfs reassign anonymous device numbers per mount; the file
+      // (and inode) is unchanged. Rewrite the marker with a foreign device,
+      // exactly as a pre-fix marker looks after a routine reboot.
+      const markerPath = join(lockRoot, "user.sqlite.identity");
+      const marker = JSON.parse(await readFile(markerPath, "utf8")) as { identity: { device: string; inode: string } };
+      const drifted = { ...marker, identity: { ...marker.identity, device: "remounted" } };
+      await writeFile(markerPath, JSON.stringify(drifted), "utf8");
+      const lease = await locks.acquire(user, new AbortController().signal);
+      await lease.assertOwned(new AbortController().signal);
+      // A device-only marker rewrite during ownership is tamper evidence, not
+      // drift: marker-to-marker comparison stays strict and must reject.
+      await writeFile(markerPath, JSON.stringify({ ...drifted, identity: { ...drifted.identity, device: "rewritten" } }), "utf8");
+      await expect(lease.assertOwned(new AbortController().signal)).rejects.toBeInstanceOf(BoundaryError);
+      await lease.release();
+      // The rewritten marker still names the same inode, so the next mount
+      // epoch accepts it again.
+      const healed = await locks.acquire(user, new AbortController().signal);
+      await healed.release();
+    } finally {
+      await rm(lockRoot, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a durable marker replacement before ownership is accepted", async () => {
     const lockRoot = await root();
     try {

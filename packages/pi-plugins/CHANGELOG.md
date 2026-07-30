@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Complete the inode-based identity work for the scope lock store, the one adapter v0.2.3 missed. Its marker check still compared `st_dev`, so after any reboot or remount on btrfs/overlayfs every scoped mutation failed persistently with `ADAPTER_FAILED` ("scope lock database path was replaced") — including `update all`, where the failure surfaced as `unavailable · retry` and stranded a prepared lifecycle transition per attempt. Device remains recorded in markers as forensic metadata; acceptance is inode-only, matching the state store and transition journal.
+
 ## v0.2.3
 
 ### Fixes

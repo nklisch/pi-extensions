@@ -160,6 +160,22 @@ function sameFileIdentity(left: FileIdentity, right: FileIdentity): boolean {
   return left.device === right.device && left.inode === right.inode;
 }
 
+// Persisted-marker acceptance is inode-only. st_dev is not a stable
+// filesystem identifier: btrfs, overlayfs, and similar filesystems assign
+// anonymous device numbers per mount, so a reboot or remount changes device
+// while the file (and its inode) is genuinely unchanged. Rejecting on device
+// drift hard-failed every scoped mutation with ADAPTER_FAILED after routine
+// reboots on btrfs, while the sibling state store and transition journal
+// (which already accept inode-only) kept working. Device remains recorded in
+// markers as forensic metadata. Inode plus the sibling root/name markers
+// still pin the file on its filesystem, and any same-path replacement (copy,
+// restore, fresh create) allocates a new inode and is still rejected.
+// Live comparisons between two current lstat results stay strict
+// (sameFileIdentity): their device cannot drift within one mount epoch.
+function samePersistedFileIdentity(left: FileIdentity, right: FileIdentity): boolean {
+  return left.inode === right.inode;
+}
+
 function regularFileIdentity(path: string): FileIdentity {
   const stats = lstatSync(path);
   if (stats.isSymbolicLink() || !stats.isFile()) throw new Error("scope lock identity path is not a regular file");
@@ -334,6 +350,9 @@ function sameDatabaseMarker(left: DatabaseIdentityMarker, right: DatabaseIdentit
   if (left.state === "initializing" && right.state === "initializing") {
     return left.owner.pid === right.owner.pid && left.owner.startTime === right.owner.startTime;
   }
+  // Marker-to-marker comparison stays strict: both snapshots record the
+  // device captured at publication, so drift cannot occur between them and
+  // any device-only rewrite is tamper evidence.
   return left.state === "ready" && right.state === "ready" &&
     left.identity.device === right.identity.device && left.identity.inode === right.identity.inode;
 }
@@ -412,7 +431,7 @@ function validateDatabaseIdentity(
     throw new Error("scope lock root identity marker changed");
   }
   const identity = regularFileIdentity(path);
-  if (marker.identity === undefined || !sameFileIdentity(identity, marker.identity)) throw new Error("scope lock database path was replaced");
+  if (marker.identity === undefined || !samePersistedFileIdentity(identity, marker.identity)) throw new Error("scope lock database path was replaced");
   return identity;
 }
 
