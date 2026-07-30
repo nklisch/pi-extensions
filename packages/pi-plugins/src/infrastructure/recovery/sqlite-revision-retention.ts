@@ -3,7 +3,7 @@ import { RetainedArtifactRefSchema, type RetainedArtifactRef } from "../../appli
 import { RevisionRetentionSnapshotSchema, type RevisionRetentionStore, type RevisionRetentionSnapshot } from "../../application/ports/revision-retention-store.js";
 import { EpochMillisecondsSchema } from "../../application/ports/lifecycle-clock.js";
 import { ensurePrivateLockRoot, verifyLocalFilesystemCapability } from "../state/local-lock-filesystem.js";
-import { openIdentityBoundSqliteDatabase } from "../state/identity-bound-sqlite.js";
+import { openSqliteDatabase } from "../state/sqlite-open.js";
 
 function key(ref: RetainedArtifactRef): string { return JSON.stringify(ref); }
 function abort(signal: AbortSignal): void { if (signal.aborted) throw signal.reason; }
@@ -12,12 +12,14 @@ export async function createSqliteRevisionRetention(options: Readonly<{ hostRoot
   const root = await ensurePrivateLockRoot(join(options.hostRoot, "recovery", "retention", "v1"));
   await (options.verifyLocalFilesystem ?? verifyLocalFilesystemCapability)(root);
   const path = join(root, "retention.sqlite");
-  const handle = await openIdentityBoundSqliteDatabase({
-    root,
+  const handle = await openSqliteDatabase({
     path,
     signal: new AbortController().signal,
+    configure(database) {
+      database.exec("PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA trusted_schema = OFF;");
+    },
     initialize(database) {
-      database.exec("PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA trusted_schema = OFF; CREATE TABLE retention_marks (reference TEXT PRIMARY KEY NOT NULL, first_unreferenced_at INTEGER NOT NULL) STRICT;");
+      database.exec("CREATE TABLE retention_marks (reference TEXT PRIMARY KEY NOT NULL, first_unreferenced_at INTEGER NOT NULL) STRICT;");
     },
     validate(database) {
       const rows = database.prepare("SELECT name, type FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string; type: string }>;
@@ -28,7 +30,6 @@ export async function createSqliteRevisionRetention(options: Readonly<{ hostRoot
   const store: RevisionRetentionStore = {
     async reconcile(request, signal): Promise<RevisionRetentionSnapshot> {
       abort(signal);
-      handle.assertIdentity();
       const at = EpochMillisecondsSchema.parse(request.completeScanAt);
       const referenced = new Set(request.referenced.map((ref) => key(RetainedArtifactRefSchema.parse(ref))));
       const observed = new Map(request.observed.map((ref) => [key(RetainedArtifactRefSchema.parse(ref)), RetainedArtifactRefSchema.parse(ref)]));
@@ -44,7 +45,6 @@ export async function createSqliteRevisionRetention(options: Readonly<{ hostRoot
     },
     async markRemoved(reference, _at, signal): Promise<void> {
       abort(signal);
-      handle.assertIdentity();
       database.prepare("DELETE FROM retention_marks WHERE reference = ?").run(key(RetainedArtifactRefSchema.parse(reference)));
     },
   };

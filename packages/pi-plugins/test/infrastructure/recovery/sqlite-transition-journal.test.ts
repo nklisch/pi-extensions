@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CompatibilityReportSchema } from "../../../src/domain/compatibility.js";
@@ -55,17 +55,15 @@ describe("SQLite transition journal", () => {
     } finally { await rm(fixture.root, { recursive: true, force: true }); }
   });
 
-  it("accepts device drift in the database identity marker across remounts", async () => {
+  it("ignores stale identity-marker debris from older host versions", async () => {
     const fixture = await journalRoot();
     try {
       const value = record("00000000-0000-4000-8000-000000000006");
       await fixture.journal.prepare({ record: value, preparedAt: 10 }, signal);
-      // btrfs assigns anonymous st_dev per mount; a reboot changes device while
-      // the journal file (inode) is unchanged. That must not fail recovery.
+      // Pre-removal hosts wrote .identity markers next to each journal
+      // database. They are inert debris now and must not affect operation.
       const markerPath = `${fixture.filesystem.journalDatabasePath({ kind: "user" })}.identity`;
-      const marker = JSON.parse(await readFile(markerPath, "utf8")) as { device: string };
-      marker.device = "previous-mount-epoch";
-      await writeFile(markerPath, `${JSON.stringify(marker)}\n`);
+      await writeFile(markerPath, `${JSON.stringify({ protocol: "pi-plugin-host-recovery-journal-database", device: "previous-mount-epoch" })}\n`);
       expect((await fixture.journal.read({ scope: { kind: "user" }, reference: value.reference }, signal)).kind).toBe("found");
     } finally { await rm(fixture.root, { recursive: true, force: true }); }
   });

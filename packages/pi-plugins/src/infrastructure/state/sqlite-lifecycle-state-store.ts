@@ -18,7 +18,7 @@ import { createScopeContext, ScopeContextSchema, toScopeReference, type ScopeCon
 import type { Sha256 } from "../../domain/source.js";
 import { createLifecycleStateDefaultDocuments } from "./lifecycle-state-defaults.js";
 import { ensurePrivateLockRoot, verifyLocalFilesystemCapability } from "./local-lock-filesystem.js";
-import { openIdentityBoundSqliteDatabase, type IdentityBoundSqliteDatabase } from "./identity-bound-sqlite.js";
+import { openSqliteDatabase, type OpenSqliteDatabase } from "./sqlite-open.js";
 
 const PROTOCOL = "pi-plugin-host-lifecycle-state";
 const VERSION = 1;
@@ -29,7 +29,7 @@ const MAX_BUSY_RETRIES = 24;
 
 type OpenScopeDatabase = {
   readonly database: DatabaseSync;
-  readonly handle: IdentityBoundSqliteDatabase;
+  readonly handle: OpenSqliteDatabase;
   readonly path: string;
   readonly scope: ScopeContext;
   closed: boolean;
@@ -75,10 +75,8 @@ function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function assertFileIdentity(handle: OpenScopeDatabase): void {
+function assertFileUsable(handle: OpenScopeDatabase): void {
   if (handle.closed) throw new LifecycleStateAdapterError("STATE_ADAPTER_FAILED", "lifecycle state adapter is closed");
-  try { handle.handle.assertIdentity(); }
-  catch (cause) { throw new LifecycleStateAdapterError("STATE_ADAPTER_FAILED", "lifecycle state database identity changed", cause); }
 }
 
 function begin(database: DatabaseSync): void {
@@ -105,10 +103,6 @@ async function waitForBusy(signal: AbortSignal, attempt: number): Promise<void> 
 
 function initializeSchema(database: DatabaseSync): void {
   database.exec(`
-    PRAGMA journal_mode = DELETE;
-    PRAGMA synchronous = FULL;
-    PRAGMA foreign_keys = ON;
-    PRAGMA busy_timeout = 0;
     CREATE TABLE IF NOT EXISTS protocol (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
       protocol TEXT NOT NULL,
@@ -135,7 +129,6 @@ function initializeSchema(database: DatabaseSync): void {
 }
 
 function validateSchema(database: DatabaseSync): void {
-  database.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 0;");
   const rows = database.prepare("SELECT name, type FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string; type: string }>;
   const expected = ["current_pointer", "generation_pointers", "protocol", "state_blobs"];
   if (rows.length !== expected.length || rows.some((row, index) => row.name !== expected[index] || row.type !== "table")) {
@@ -350,14 +343,16 @@ class SqliteLifecycleStateAdapter implements LifecycleStateStore {
     const path = this.paths.stateDatabase(toScopeReference(scope));
     const existing = this.#handles.get(path);
     if (existing !== undefined) {
-      assertFileIdentity(existing);
+      assertFileUsable(existing);
       if (!sameJson(existing.scope, scope)) throw new LifecycleStateAdapterError("STATE_CORRUPT", "lifecycle state scope alias detected");
       return existing;
     }
-    const bound = await openIdentityBoundSqliteDatabase({
-      root: this.paths.stateRoot,
+    const bound = await openSqliteDatabase({
       path,
       signal,
+      configure: (database) => {
+        database.exec("PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 0;");
+      },
       initialize: (database) => {
         initializeSchema(database);
         initializeScope(database, scope, this.sha256);
@@ -383,7 +378,7 @@ class SqliteLifecycleStateAdapter implements LifecycleStateStore {
     signal.throwIfAborted();
     const handle = await this.open(scope, signal);
     for (let attempt = 0; ; attempt += 1) {
-      assertFileIdentity(handle);
+      assertFileUsable(handle);
       try {
         handle.database.exec("BEGIN");
         signal.throwIfAborted();
@@ -405,7 +400,7 @@ class SqliteLifecycleStateAdapter implements LifecycleStateStore {
     if (!isVerifiedStateMutation(mutation)) throw new TypeError("lifecycle state commit requires a verified mutation");
     const handle = await this.open(mutation.scope, signal);
     for (let attempt = 0; ; attempt += 1) {
-      assertFileIdentity(handle);
+      assertFileUsable(handle);
       try {
         begin(handle.database);
         signal.throwIfAborted();

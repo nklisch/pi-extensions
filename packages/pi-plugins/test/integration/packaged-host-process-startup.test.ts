@@ -35,7 +35,7 @@ function child(agentDir: string, projectRoot: string, sessionId: string): Promis
 }
 
 describe("packaged host process startup", () => {
-  it("opens two clean hosts concurrently through identity-bound state, lease, and retention initialization", async () => {
+  it("opens two clean hosts concurrently through shared state, lease, and retention first use", async () => {
     const root = await mkdtemp(join(tmpdir(), "pi-host-dual-startup-"));
     const agentDir = join(root, "agent");
     const project = join(root, "project");

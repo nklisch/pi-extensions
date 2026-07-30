@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-### Fixes
+### Removed
 
-- Complete the inode-based identity work for the scope lock store, the one adapter v0.2.3 missed. Its marker check still compared `st_dev`, so after any reboot or remount on btrfs/overlayfs every scoped mutation failed persistently with `ADAPTER_FAILED` ("scope lock database path was replaced") — including `update all`, where the failure surfaced as `unavailable · retry` and stranded a prepared lifecycle transition per attempt. Device remains recorded in markers as forensic metadata; acceptance is inode-only, matching the state store and transition journal.
+- Removed the sqlite file-identity machinery from every plugin-host adapter (scope lock, lifecycle state, transition journal, revision leases, revision retention): `.identity` database markers, `.initializing` claims, root identity markers, device/inode validation, hard-link handle aliases, and per-transaction root re-verification. The guards false-positive-broke normal operation after every routine reboot on btrfs/overlayfs (v0.2.3 state store and project keys, then the scope lock again) while never catching a real replacement. Schema first use now serializes inside one exclusive SQLite transaction, and the scope lock is simply the held `BEGIN IMMEDIATE` transaction — a killed holder is released by the OS. Private directory modes, symlink rejection, the local-filesystem capability gate, schema/protocol validation, busy retry, and journal row digests are unchanged. Marker files left by older versions are inert debris and require no cleanup.
 
 ## v0.2.3
 

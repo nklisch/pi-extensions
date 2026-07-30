@@ -1,6 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, lstatSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { z } from "zod";
 import { BoundaryError, DomainContractError, ErrorCodeRegistry } from "../../domain/errors.js";
@@ -28,14 +27,12 @@ import { classifyProcessIdentity, readLinuxProcessStartToken } from "../process/
 
 const PROTOCOL = "pi-plugin-host-recovery-journal";
 const VERSION = 2;
-const MODE = 0o600;
 const BUSY = 5;
 // Loaded hosts serialize many processes on one scope database; keep the
 // busy budget in the same ~5s class as initialization waits.
 const MAX_BUSY_RETRIES = 24;
 
 type SqliteRow = Record<string, unknown>;
-type FileIdentity = Readonly<{ device: string; inode: string }>;
 type Owner = Readonly<{ pid: number; startToken: string; nonce: string }>;
 export type OwnerStatus = "live" | "dead" | "unknown" | "released";
 
@@ -61,7 +58,6 @@ async function waitForBusyRetry(signal: AbortSignal, attempt: number): Promise<v
     signal.addEventListener("abort", onAbort, { once: true });
   });
 }
-function identity(path: string): FileIdentity { const value = lstatSync(path); if (!value.isFile() || value.isSymbolicLink()) throw new Error("recovery journal database is not a regular file"); return { device: String(value.dev), inode: String(value.ino) }; }
 function dbError(operation: string, cause: unknown): BoundaryError { return new BoundaryError({ code: "ADAPTER_FAILED", operation, message: "recovery journal adapter failed", details: { operation }, cause }); }
 function corruptError(operation: string): DomainContractError { return new DomainContractError({ code: ErrorCodeRegistry.transitionJournalCorrupt, operation, message: "transition journal evidence is corrupt", details: { operation } }); }
 function conflictError(operation: string): DomainContractError { return new DomainContractError({ code: ErrorCodeRegistry.recoveryConflict, operation, message: "transition journal status or evidence conflicts", details: { operation } }); }
@@ -157,53 +153,25 @@ function createSchema(database: DatabaseSync): void {
   validateSchema(database);
 }
 
-function markerPath(path: string): string { return `${path}.identity`; }
-function ensureDatabaseMarker(path: string, rootIdentity: string, databaseName: string, allowCreate: boolean): FileIdentity {
-  const pathIdentity = identity(path);
-  const marker = markerPath(path);
-  let existing: unknown;
-  try { existing = JSON.parse(readFileSync(marker, "utf8")); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  if (existing === undefined && !allowCreate) throw new Error("recovery journal database identity marker is missing");
-  if (existing !== undefined) {
-    const value = existing as Record<string, unknown>;
-    // Device is compared nowhere: st_dev is reassigned per mount on btrfs and
-    // similar filesystems, so a reboot legitimately changes it while the file
-    // (inode) is unchanged. The inode, root identity, and database name still
-    // pin the exact file; recorded device is forensic metadata only.
-    if (value.protocol !== "pi-plugin-host-recovery-journal-database" || value.version !== 1 || value.rootIdentity !== rootIdentity || value.database !== databaseName || value.inode !== pathIdentity.inode) throw new Error("recovery journal database identity changed");
-    return pathIdentity;
-  }
-  const value = { protocol: "pi-plugin-host-recovery-journal-database", version: 1, rootIdentity, database: databaseName, device: pathIdentity.device, inode: pathIdentity.inode };
-  const temp = `${marker}.${randomUUID()}.tmp`;
-  writeFileSync(temp, `${JSON.stringify(value)}\n`, { flag: "wx", mode: MODE });
-  try { renameSync(temp, marker); } catch (error) { try { unlinkSync(temp); } catch { /* preserve first failure */ } throw error; }
-  chmodSync(marker, MODE);
-  return pathIdentity;
-}
-
 async function openDatabase(filesystem: RecoveryFilesystem, scope: ScopeReference): Promise<Readonly<{ database: DatabaseSync; path: string; close(): void }>> {
-  await filesystem.verify();
   const path = filesystem.journalDatabasePath(scope);
-  const databaseName = path.slice(path.lastIndexOf("/") + 1);
   const database = new DatabaseSync(path, { allowExtension: false, defensive: true, enableDoubleQuotedStringLiterals: false, enableForeignKeyConstraints: true, readOnly: false, timeout: 0 });
   try {
     database.exec("PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA trusted_schema = OFF;");
-    // File existence is not creation authority: two processes can both observe
-    // ENOENT before SQLite creates the same file. Serialize schema inspection,
-    // initialization, and identity-marker publication under one exclusive
-    // database transaction so no contender can validate a partial schema.
+    // Two processes can both observe an empty database before SQLite creates
+    // it. Serialize schema inspection, initialization, and migration under
+    // one exclusive database transaction so no contender validates a partial
+    // schema.
     database.exec("BEGIN EXCLUSIVE");
     try {
       const objects = database.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
       const initialize = objects.length === 0;
       if (initialize) createSchema(database); else { migrateSchema(database); validateSchema(database); }
-      ensureDatabaseMarker(path, filesystem.rootIdentity, databaseName, initialize);
       database.exec("COMMIT");
     } catch (error) {
       try { if (database.isTransaction) database.exec("ROLLBACK"); } catch { /* preserve primary failure */ }
       throw error;
     }
-    await filesystem.verify();
     return { database, path, close: () => database.close() };
   } catch (error) { try { database.close(); } catch { /* preserve first failure */ } throw error; }
 }
@@ -218,7 +186,6 @@ async function transaction<T>(filesystem: RecoveryFilesystem, scope: ScopeRefere
       const value = fn(handle.database);
       throwIfAborted(signal);
       handle.database.exec("COMMIT");
-      await filesystem.verify();
       return value;
     } catch (error) {
       try { if (handle?.database.isTransaction) handle.database.exec("ROLLBACK"); } catch { /* preserve primary failure */ }

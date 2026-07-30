@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { ensurePrivateLockRoot, verifyLocalFilesystemCapability } from "../state/local-lock-filesystem.js";
-import { openIdentityBoundSqliteDatabase } from "../state/identity-bound-sqlite.js";
+import { openSqliteDatabase } from "../state/sqlite-open.js";
 import { RevisionLeaseCollectionSchema, RevisionLeaseSchema, type RevisionLease, type RevisionLeaseCollection, type RevisionLeaseStore } from "../../application/ports/revision-lease-store.js";
 import { RetainedArtifactRefSchema } from "../../application/ports/revision-artifact-store.js";
 import { classifyProcessIdentity, readLinuxProcessStartToken } from "../process/process-identity.js";
@@ -12,15 +12,17 @@ function abort(signal: AbortSignal): void { if (signal.aborted) throw signal.rea
 export async function createProcessRevisionLeaseStore(options: Readonly<{ hostRoot: string; verifyLocalFilesystem?: (root: string) => Promise<void> }>): Promise<RevisionLeaseStore & Readonly<{ close(): Promise<void> }>> {
   const root = await ensurePrivateLockRoot(join(options.hostRoot, "recovery", "leases", "v1"));
   await (options.verifyLocalFilesystem ?? verifyLocalFilesystemCapability)(root);
-  const handle = await openIdentityBoundSqliteDatabase({
-    root,
+  const handle = await openSqliteDatabase({
     path: join(root, "leases.sqlite"),
     signal: new AbortController().signal,
     // Multiple Pi sessions legitimately acquire/release leases in this shared
     // database; bounded waiting is required for those ordinary write windows.
     busyTimeoutMs: 30_000,
+    configure(database) {
+      database.exec("PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA trusted_schema = OFF;");
+    },
     initialize(database) {
-      database.exec("PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA trusted_schema = OFF; CREATE TABLE revision_leases (lease_id TEXT PRIMARY KEY NOT NULL, session_id TEXT NOT NULL, artifacts_json TEXT NOT NULL, acquired_at INTEGER NOT NULL, owner_pid INTEGER NOT NULL, owner_start_token TEXT NOT NULL, owner_nonce TEXT NOT NULL) STRICT;");
+      database.exec("CREATE TABLE revision_leases (lease_id TEXT PRIMARY KEY NOT NULL, session_id TEXT NOT NULL, artifacts_json TEXT NOT NULL, acquired_at INTEGER NOT NULL, owner_pid INTEGER NOT NULL, owner_start_token TEXT NOT NULL, owner_nonce TEXT NOT NULL) STRICT;");
     },
     validate(database) {
       const rows = database.prepare("SELECT name, type FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string; type: string }>;
@@ -37,7 +39,6 @@ export async function createProcessRevisionLeaseStore(options: Readonly<{ hostRo
   const store: RevisionLeaseStore = {
     async acquire(request, signal) {
       abort(signal);
-      handle.assertIdentity();
       const token = readLinuxProcessStartToken(process.pid); if (token === undefined) throw new Error("revision lease process identity unavailable");
       const leaseId = randomUUID();
       const artifacts = request.artifacts.map((ref) => RetainedArtifactRefSchema.parse(ref));
@@ -46,7 +47,6 @@ export async function createProcessRevisionLeaseStore(options: Readonly<{ hostRo
     },
     async replace(lease, artifacts, at, signal) {
       abort(signal);
-      handle.assertIdentity();
       const owner = owned.get(lease); if (owner === undefined) throw new Error("revision lease capability is not owned");
       const value = RevisionLeaseSchema.parse(lease);
       const parsed = artifacts.map((ref) => RetainedArtifactRefSchema.parse(ref));
@@ -55,14 +55,12 @@ export async function createProcessRevisionLeaseStore(options: Readonly<{ hostRo
     },
     async release(lease, _at, signal) {
       abort(signal);
-      handle.assertIdentity();
       if (owned.get(lease) === undefined) throw new Error("revision lease capability is not owned");
       const value = RevisionLeaseSchema.parse(lease);
       database.prepare("DELETE FROM revision_leases WHERE lease_id = ?").run(value.leaseId);
     },
     async list(signal): Promise<RevisionLeaseCollection> {
       abort(signal);
-      handle.assertIdentity();
       const rows = database.prepare("SELECT * FROM revision_leases ORDER BY lease_id").all() as Array<{ lease_id: string; session_id: string; artifacts_json: string; acquired_at: number; owner_pid: number; owner_start_token: string }>;
       const leases: RevisionLease[] = [];
       const owners: Array<{ leaseId: string; status: "live" | "dead" | "unknown" | "released" }> = [];
