@@ -85,6 +85,21 @@ import type { SkillResourceDiscoveryPort } from "../runtime/skills/resource-disc
 
 const sha256 = (bytes: Uint8Array): Uint8Array => new Uint8Array(createHash("sha256").update(bytes).digest());
 
+/** Render a compact `A <- B <- C` description of thrown values and their cause chains. */
+function describeErrorChain(errors: readonly unknown[]): string {
+  const parts: string[] = [];
+  const visit = (value: unknown): void => {
+    if (value instanceof Error) {
+      parts.push(value.message);
+      if (value.cause !== undefined) visit(value.cause);
+      return;
+    }
+    parts.push(String(value));
+  };
+  for (const error of errors) visit(error);
+  return parts.join(" <- ");
+}
+
 type Cleanup = () => Promise<void>;
 type PiApplicationOperationFrame = {
   readonly context: ExtensionContext;
@@ -725,8 +740,10 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         for (const dispose of [...cleanup].reverse()) {
           try { await dispose(); } catch (cleanupError) { errors.push(cleanupError); }
         }
-        if (errors.length > 1) throw new AggregateError(errors, "packaged plugin host startup failed");
-        throw new PackagedPluginHostError(PackagedPluginHostErrorCode.startupFailed, "packaged plugin host startup failed", error);
+        // Host surfaces (Pi extension runner) print only Error.message, so the
+        // cause chain must be inlined or the real startup reason is invisible.
+        if (errors.length > 1) throw new AggregateError(errors, `packaged plugin host startup failed: ${describeErrorChain(errors)}`);
+        throw new PackagedPluginHostError(PackagedPluginHostErrorCode.startupFailed, `packaged plugin host startup failed: ${describeErrorChain([error])}`, error);
       }
     })();
     return startPromise;

@@ -44,8 +44,16 @@ function identity(path: string): Identity {
   return { device: String(value.dev), inode: String(value.ino) };
 }
 
+// Acceptance is inode-only. st_dev is not a stable filesystem identifier:
+// btrfs, overlayfs, and similar filesystems assign anonymous device numbers
+// per mount, so a reboot or remount changes device while the file (and its
+// inode) is genuinely unchanged. Rejecting on device drift hard-failed host
+// startup after routine reboots on btrfs. Device remains recorded in markers
+// as forensic metadata; inode plus the sibling root/name markers still pin
+// the exact file, and any real replacement (copy, restore, fresh create)
+// allocates a new inode and is still rejected.
 function sameIdentity(left: Identity, right: Identity): boolean {
-  return left.device === right.device && left.inode === right.inode;
+  return left.inode === right.inode;
 }
 
 function removeRegular(path: string): void {

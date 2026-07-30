@@ -60,8 +60,15 @@ export async function resolveNodeProjectIdentity(input: Readonly<{
   }
   const stats = await lstat(common);
   if (!stats.isDirectory() || stats.isSymbolicLink()) throw new Error("Git common directory identity is invalid");
+  // v2 drops st_dev from the preimage: btrfs and similar filesystems assign
+  // anonymous device numbers per mount, so v1 fingerprints (and therefore
+  // project keys and their scoped state databases) rotated on every reboot.
+  // The inode pins the repository on its filesystem, and the canonical root
+  // in the project-key preimage already distinguishes same-inode collisions
+  // across filesystems. The one-time v1→v2 key rotation is accepted: v1 keys
+  // were already unstable per mount epoch, so no durable key could be kept.
   const preimage = new TextEncoder().encode(
-    `git-common-directory-v1\0device:${String(stats.dev)}\0inode:${String(stats.ino)}`,
+    `git-common-directory-v2\0inode:${String(stats.ino)}`,
   );
   return ProjectIdentitySchema.parse({
     kind: "repository",

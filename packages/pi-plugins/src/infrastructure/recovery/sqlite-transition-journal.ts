@@ -166,7 +166,11 @@ function ensureDatabaseMarker(path: string, rootIdentity: string, databaseName: 
   if (existing === undefined && !allowCreate) throw new Error("recovery journal database identity marker is missing");
   if (existing !== undefined) {
     const value = existing as Record<string, unknown>;
-    if (value.protocol !== "pi-plugin-host-recovery-journal-database" || value.version !== 1 || value.rootIdentity !== rootIdentity || value.database !== databaseName || value.device !== pathIdentity.device || value.inode !== pathIdentity.inode) throw new Error("recovery journal database identity changed");
+    // Device is compared nowhere: st_dev is reassigned per mount on btrfs and
+    // similar filesystems, so a reboot legitimately changes it while the file
+    // (inode) is unchanged. The inode, root identity, and database name still
+    // pin the exact file; recorded device is forensic metadata only.
+    if (value.protocol !== "pi-plugin-host-recovery-journal-database" || value.version !== 1 || value.rootIdentity !== rootIdentity || value.database !== databaseName || value.inode !== pathIdentity.inode) throw new Error("recovery journal database identity changed");
     return pathIdentity;
   }
   const value = { protocol: "pi-plugin-host-recovery-journal-database", version: 1, rootIdentity, database: databaseName, device: pathIdentity.device, inode: pathIdentity.inode };
