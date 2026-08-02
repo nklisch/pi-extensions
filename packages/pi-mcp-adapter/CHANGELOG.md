@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.0-nklisch.7] - 2026-08-02
+
+### Fixed
+
+- Programmatic gateway (`mcp`/`mcp_sources`) servers now answer to their display name as well as their opaque `mcp-server-v1:…` key. Status output shows `nativeKey · key` (e.g. `krometrail · mcp-server-v1:c7d3…`), but only the key resolved, so agents calling by name got an unhelpful `SOURCE_INVALID`. Resolution is phased: an exact key match wins globally, a key-shaped token never falls back to names (a stale key still matches nothing), and otherwise a unique nativeKey match resolves. The `server` parameter description and failure text now name the accepted tokens.
+- Programmatic gateway `call` results now pass through the MCP output guard like the proxy and direct-tool paths. Previously the entire `CallToolResult` was stringified into one unbounded text block — base64 image blocks (screenshots) included — and the raw result was placed on `details`. Text output is now capped with a temp-file spill, image blocks pass through as native image content, tool errors surface as `Error: …` text, and `details.mcpResult` is bounded to the details budget or replaced with a summary plus spill path.
+
+### Changed
+
+- Programmatic gateway `call` result details shape: was the raw `CallToolResult`; now `{ mode, server, tool, ...guardedMcpDetails }` with the raw result (when small enough) on `details.mcpResult`, matching the proxy/direct-tool contract.
+
 ## [2.11.0-nklisch.6] - 2026-07-26
 
 ### Changed
