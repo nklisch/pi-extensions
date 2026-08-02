@@ -297,7 +297,7 @@ function discoveredNotifications(
       publication: "pending",
       unread: true,
       discoveredAt,
-      ...(record.applicationOverride === "automatic" ? { automatic: { state: "pending", reason: "awaiting-host-context" } } : {}),
+      ...(record.applicationOverride === "automatic" ? { automatic: { state: "pending" } } : {}),
     }));
     created.add(probe.candidate);
   }

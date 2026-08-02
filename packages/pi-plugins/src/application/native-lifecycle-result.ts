@@ -93,6 +93,9 @@ export function projectPluginLifecycleResult(input: Readonly<{
   if (result.kind === "recovery-required") {
     return NativeLifecycleOperationResultSchema.parse({ kind: "recovery-required", ...base, code: "PENDING_TRANSITION", transition: result.transition, ...(result.committed === undefined ? {} : { committed: result.committed }), action: "run-recovery", effects: effects(result.committed === undefined ? "unknown" : "changed", result.committed) });
   }
+  if (result.kind === "staged") {
+    return NativeLifecycleOperationResultSchema.parse({ kind: "staged", ...base, operation: "update", transition: result.transition, committed: result.snapshot.generation, effects: effects("changed", result.snapshot.generation) });
+  }
   if (result.code === "ABORTED") {
     return NativeLifecycleOperationResultSchema.parse({ kind: "cancelled", ...base, phase: input.cancellationPhase ?? "lifecycle-transaction", effects: effects("unchanged") });
   }

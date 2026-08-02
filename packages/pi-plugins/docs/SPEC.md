@@ -468,7 +468,7 @@ trailing `...` is repeatable.
 | `updates.policy.set` | `/plugins updates policy set --kind application\|cadence --target global\|scope\|marketplace\|plugin [--scope user\|project\|all-current] [--marketplace-id <value>] [--plugin <value>] [--mode inherit\|manual\|automatic] [--cadence paused\|conservative\|balanced\|frequent] [--preview-id <value>] [--consent-id <value>]` | `mutation` | `decision` | Set update policy through preview |
 | `updates.notices.list` | `/plugins updates notices list [--scope user\|project\|all-current] [--plugin <value>] [--after <value>] [--limit <integer>]` | `local-read` | `none` | List update notices |
 | `updates.notices.acknowledge` | `/plugins updates notices acknowledge <notice-id>...` | `mutation` | `none` | Acknowledge update notices |
-| `updates.automatic.run` | `/plugins updates automatic run [--notice-id <value>]... [--limit <integer>] [--explicit]` | `mutation` | `none` | Run admitted plugin updates |
+| `updates.automatic.run` | `/plugins updates automatic run [--notice-id <value>]... [--limit <integer>] [--explicit] [--mode stage\|apply]` | `mutation` | `none` | Run admitted plugin updates |
 | `config.host-precedence` | `/plugins config host-precedence <order>` | `mutation` | `none` | Set dual-host declaration precedence |
 | `config.hook-visibility` | `/plugins config hook-visibility [<visibility>]` | `mutation` | `none` | Show or set hook context visibility |
 | `status` | `/plugins status` | `local-read` | `none` | Show plugin host status |
@@ -616,6 +616,14 @@ third-party sources. Enabling automatic updates authorizes Pi to acquire,
 validate, and activate compatible new revisions from the same trusted
 marketplace and plugin source, including revisions that change hook or MCP
 execution definitions. Source-identity changes still require explicit approval.
+
+Automatic and sync-now updates are staged: the new revision is committed in
+the background and activates on the next Pi start or reload, so update runs
+never require a reload-capable command context and one run can stage every
+eligible plugin. The foreground update-all gesture stages all eligible
+updates, reports one plain-language per-plugin summary, and offers a single
+optional reload to activate immediately. Foreground single-plugin updates
+activate immediately.
 
 Because exact trust grants do not carry across revisions, automatic trust
 continuity records the exact grant for the newly activated revision itself

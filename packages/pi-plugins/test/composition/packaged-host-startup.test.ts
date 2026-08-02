@@ -9,7 +9,7 @@ const capabilities = {
 };
 
 describe("explicit packaged host startup", () => {
-  it("is construction inert and orders recovery before local reconciliation and background", async () => {
+  it("is construction inert and orders local reconciliation before recovery and background", async () => {
     const calls: string[] = [];
     const startup = createPackagedHostStartup({
       async open() { calls.push("open"); },
@@ -22,7 +22,7 @@ describe("explicit packaged host startup", () => {
     });
     expect(calls).toEqual([]);
     await expect(startup.start(new AbortController().signal)).resolves.toMatchObject({ status: "ready" });
-    expect(calls).toEqual(["open", "capabilities", "recovery", "reconcile", "status", "background"]);
+    expect(calls).toEqual(["open", "capabilities", "reconcile", "recovery", "status", "background"]);
     await startup.close();
   });
 

@@ -11,7 +11,6 @@ export const AutomaticUpdateEligibilityReasonRegistry = Object.freeze({
   configurationRequired: "configuration-required",
   secretUnavailable: "secret-unavailable",
   capabilityUnavailable: "capability-unavailable",
-  awaitingHostContext: "awaiting-host-context",
   retryable: "retryable",
 } as const);
 

@@ -237,7 +237,7 @@ function normalizeRequest(id: NativeControlCommandId, options: ParsedOptionValue
     case "updates.policy.set": return { change: policyChange(options), ...(stringValue(options, "previewId") === undefined ? {} : { previewId: stringValue(options, "previewId") }), ...(stringValue(options, "consentId") === undefined ? {} : { consentId: stringValue(options, "consentId") }) };
     case "updates.notices.list": return { scope: stringValue(options, "scope") ?? "all-current", ...(stringValue(options, "plugin") === undefined ? {} : { plugin: stringValue(options, "plugin") }), ...(stringValue(options, "after") === undefined ? {} : { after: stringValue(options, "after") }), limit: numberValue(options, "limit") ?? 50 };
     case "updates.notices.acknowledge": return { ids: positionals };
-    case "updates.automatic.run": return { ...(stringsValue(options, "noticeIds") === undefined ? {} : { noticeIds: stringsValue(options, "noticeIds") }), limit: numberValue(options, "limit") ?? 20 };
+    case "updates.automatic.run": return { ...(stringsValue(options, "noticeIds") === undefined ? {} : { noticeIds: stringsValue(options, "noticeIds") }), limit: numberValue(options, "limit") ?? 20, ...(boolValue(options, "explicit") ? { explicit: true } : {}), ...(stringValue(options, "mode") === undefined ? {} : { mode: stringValue(options, "mode") }) };
     case "config.host-precedence": return { order: positionals[0] };
     case "config.hook-visibility": return { ...(positionals[0] === undefined ? {} : { visibility: positionals[0] }) };
     case "status": return {};

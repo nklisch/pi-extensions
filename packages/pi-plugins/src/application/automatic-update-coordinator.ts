@@ -12,7 +12,6 @@ import type { AutomaticUpdateLifecyclePort, AutomaticUpdateLifecycleResult } fro
 import type { LifecycleClock } from "./ports/lifecycle-clock.js";
 import type { LifecycleStateInventoryPort } from "./ports/lifecycle-state-inventory.js";
 import type { LifecycleStateStore } from "./ports/lifecycle-state-store.js";
-import type { UpdateActivationContextPort } from "./ports/update-activation-context.js";
 import type { UpdatePolicyAuthorityPort } from "./ports/update-policy-authority.js";
 import type { GenerationSnapshot } from "./state-contract.js";
 import { authorizeCurrentScope, type CurrentScopeAuthorityDependencies } from "./current-scope-authority.js";
@@ -31,7 +30,6 @@ export type AutomaticUpdateCoordinatorDependencies = Readonly<{
   mutations: GenerationMutationCoordinator;
   policy: UpdatePolicyAuthorityPort;
   lifecycle: AutomaticUpdateLifecyclePort;
-  activation: UpdateActivationContextPort;
   continuity: AutomaticTrustContinuity;
   clock: LifecycleClock;
   sha256: Sha256;
@@ -89,9 +87,6 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
         return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "retryable", retryAt: notice.automatic.retryAt });
       }
     }
-    // Without a live reload-capable context, defer before candidate materialization
-    // or lifecycle inspection. Every authority is reread on the admitted call.
-    if (dependencies.activation.availability() !== "available") return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "awaiting-host-context" });
     const authority = await dependencies.lifecycle.inspect(notice, signal);
     if (authority.source === "changed") return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "approval-required" });
     if (authority.candidate === "stale" || authority.target === "stale") return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "stale" });
@@ -100,7 +95,6 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
     if (authority.configuration === "required") return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "configuration-required" });
     if (authority.secrets === "unavailable") return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "secret-unavailable" });
     if (authority.capability === "unavailable") return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "capability-unavailable" });
-    if (dependencies.activation.availability() !== "available") return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "awaiting-host-context" });
     return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "eligible" });
   }
 
@@ -153,7 +147,6 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
         case "eligible": return notice;
         case "manual": return UpdateNoticeSchema.parse({ ...notice, disposition: "manual-required", automatic: undefined });
         case "approval-required": return UpdateNoticeSchema.parse({ ...notice, disposition: "approval-required", automatic: { state: "blocked", reason: "approval-required", attemptedAt } });
-        case "awaiting-host-context": return UpdateNoticeSchema.parse({ ...notice, disposition: "automatic-pending", automatic: { state: "pending", reason: "awaiting-host-context", attemptedAt } });
         case "configuration-required": return UpdateNoticeSchema.parse({ ...notice, disposition: "configuration-blocked", automatic: { state: "blocked", reason: "configuration-required", attemptedAt } });
         case "secret-unavailable": return UpdateNoticeSchema.parse({ ...notice, disposition: "configuration-blocked", automatic: { state: "blocked", reason: "secret-unavailable", attemptedAt } });
         case "capability-unavailable": return UpdateNoticeSchema.parse({ ...notice, disposition: "capability-blocked", automatic: { state: "blocked", reason: "capability-unavailable", attemptedAt } });
@@ -179,13 +172,17 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
       kind: result.kind === "changed" ? "applied" : "current",
       notice: UpdateNoticeSchema.parse({ ...notice, disposition: "automatic-applied", automatic: { state: "applied", attemptedAt }, resolution: { kind: "installed", at: attemptedAt } }),
     };
+    if (result.kind === "staged") return {
+      kind: "staged",
+      notice: UpdateNoticeSchema.parse({ ...notice, disposition: "automatic-applied", automatic: { state: "applied", attemptedAt }, resolution: { kind: "installed", at: attemptedAt } }),
+    };
     if (result.kind === "recovery-required") return {
       kind: "recovery-required",
       reason: "recovery-required",
       notice: UpdateNoticeSchema.parse({ ...notice, disposition: "recovery-required", automatic: { state: "recovery-required", reason: "recovery-required", attemptedAt } }),
     };
     if (result.kind === "stale") return { kind: "stale", reason: "stale", notice: eligibilityUpdate(notice, AutomaticUpdateEligibilitySchema.parse({ noticeId: notice.id, kind: "stale" })) };
-    if (result.kind === "cancelled-before-commit") return { kind: "pending", reason: "cancelled-before-commit", notice: UpdateNoticeSchema.parse({ ...notice, disposition: "automatic-pending", automatic: { state: "pending", reason: "awaiting-host-context", attemptedAt } }) };
+    if (result.kind === "cancelled-before-commit") return { kind: "pending", reason: "cancelled-before-commit", notice: UpdateNoticeSchema.parse({ ...notice, disposition: "automatic-pending", automatic: { state: "pending", attemptedAt } }) };
     const retryAt = attemptedAt + AUTOMATIC_RETRY_BASE_MS;
     if (result.kind === "rolled-back") {
       return { kind: "retryable", reason: "rolled-back", notice: eligibilityUpdate(notice, AutomaticUpdateEligibilitySchema.parse({ noticeId: notice.id, kind: "retryable", retryAt })) };
@@ -223,24 +220,20 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
       const eligibility = await evaluate({ noticeId: candidate.notice.id }, signal, parsed.explicit === true);
       if (eligibility.kind !== "eligible") {
         await updateNotice(candidate.context, candidate.notice.id, (notice) => eligibilityUpdate(notice, eligibility), signal);
-        outcomes.push({ noticeId: candidate.notice.id, kind: eligibility.kind === "awaiting-host-context" ? "pending" : eligibility.kind === "retryable" ? "retryable" : eligibility.kind === "recovery-required" ? "recovery-required" : eligibility.kind === "stale" ? "stale" : "blocked", reason: eligibility.kind });
+        outcomes.push({ noticeId: candidate.notice.id, plugin: candidate.notice.plugin, display: candidate.notice.display, kind: eligibility.kind === "retryable" ? "retryable" : eligibility.kind === "recovery-required" ? "recovery-required" : eligibility.kind === "stale" ? "stale" : "blocked", reason: eligibility.kind });
         continue;
       }
       const latest = await locate(candidate.notice.id, signal);
       if (latest === undefined || latest.notice.resolution !== undefined) {
-        outcomes.push({ noticeId: candidate.notice.id, kind: "stale", reason: "notice-stale" });
+        outcomes.push({ noticeId: candidate.notice.id, plugin: candidate.notice.plugin, display: candidate.notice.display, kind: "stale", reason: "notice-stale" });
         continue;
       }
-      if (dependencies.activation.availability() !== "available") {
-        const pending = AutomaticUpdateEligibilitySchema.parse({ noticeId: latest.notice.id, kind: "awaiting-host-context" });
-        await updateNotice(latest.context, latest.notice.id, (notice) => eligibilityUpdate(notice, pending), signal);
-        outcomes.push({ noticeId: latest.notice.id, kind: "pending", reason: "awaiting-host-context" });
-        continue;
-      }
-      const result = await dependencies.lifecycle.apply(latest.notice, signal);
-      if (result.kind === "changed") {
-        // Chain the exact trust grant for the just-activated revision within
-        // this run so its hooks and MCP servers launch without re-consent.
+      const result = parsed.mode === "stage"
+        ? await dependencies.lifecycle.stage(latest.notice, signal)
+        : await dependencies.lifecycle.apply(latest.notice, signal);
+      if (result.kind === "changed" || result.kind === "staged") {
+        // Chain the exact trust grant for the just-committed revision within
+        // this run so its hooks and MCP servers activate without re-consent.
         // Like ledger settlement, this local write outranks caller
         // cancellation once the update has committed.
         try {
@@ -252,7 +245,7 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
       // caller's cancellation. Settle the durable ledger with fresh authority.
       const settlementSignal = new AbortController().signal;
       await updateNotice(latest.context, latest.notice.id, (notice) => lifecycleOutcome(notice, result).notice, settlementSignal);
-      outcomes.push({ noticeId: latest.notice.id, kind: projected.kind, ...(projected.reason === undefined ? {} : { reason: projected.reason }) });
+      outcomes.push({ noticeId: latest.notice.id, plugin: latest.notice.plugin, display: latest.notice.display, kind: projected.kind, ...(projected.reason === undefined ? {} : { reason: projected.reason }) });
     }
     return NativeAutomaticUpdateRunResultSchema.parse({ outcomes });
   }

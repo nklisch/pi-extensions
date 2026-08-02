@@ -109,7 +109,14 @@ export type InstallPluginRequest = Readonly<{
   expectedRevision?: import("../domain/content-manifest.js").ContentDigest;
   automaticAuthorization?: AutomaticUpdateAuthorizationEvidence;
 }>;
-export type UpdatePluginRequest = InstallPluginRequest & ExpectedLifecycleTarget;
+export type UpdatePluginRequest = InstallPluginRequest & ExpectedLifecycleTarget & Readonly<{
+  /**
+   * "deferred" commits the update and deliberately leaves activation to the
+   * next start/reload (staged update). Default "immediate" drives a reload
+   * and observes activation before settling.
+   */
+  activation?: "immediate" | "deferred";
+}>;
 type PreparedInstallPluginRequest = InstallPluginRequest & Readonly<{
   candidateLease: CandidateContentLease;
   expectedBinding: PreparedLifecycleCandidateBinding;
@@ -139,6 +146,7 @@ export type UninstallPluginRequest = Readonly<{
 
 export type LifecycleActivationFailure =
   | Readonly<{ kind: "reload-rejected"; code: "RELOAD_REJECTED" }>
+  | Readonly<{ kind: "activation-unavailable"; code: "PI_RELOAD_CONTEXT_UNAVAILABLE" }>
   | Readonly<{ kind: "observation-mismatch"; code: "OBSERVATION_MISMATCH" }>
   | Readonly<{ kind: "adapter-error"; code: "ADAPTER_FAILED" | "ABORTED" }>;
 
@@ -171,6 +179,17 @@ export type PluginLifecycleResult =
       operation: LifecycleOperation;
       transition: import("../domain/state/references.js").PendingTransitionRef;
       committed?: Generation;
+    }>
+  | Readonly<{
+      /**
+       * Committed with activation deliberately deferred: the durable
+       * transition stays pending and the next start/reload activates and
+       * settles it through the normal recovery path.
+       */
+      kind: "staged";
+      operation: LifecycleOperation;
+      transition: import("../domain/state/references.js").PendingTransitionRef;
+      snapshot: GenerationSnapshot;
     }>;
 
 export interface PluginLifecycleService {
@@ -427,7 +446,15 @@ async function reloadAndObserve(
 ): Promise<Readonly<{ ok: true; observation: ActivationObservation }> | Readonly<{ ok: false; failure: LifecycleActivationFailure }>> {
   try {
     const reloadResult = LifecycleReloadResultSchema.parse(await dependencies.reload.reload({ scope: toScopeReference(scope), transition }, signal));
-    if (reloadResult.kind === "failed") return { ok: false, failure: { kind: "reload-rejected", code: "RELOAD_REJECTED" } };
+    if (reloadResult.kind === "failed") {
+      // Missing reload authority (no reload-capable pi context) is reported
+      // distinctly from a genuine reload failure: updates settle staged
+      // instead of rolling back when activation simply cannot be driven here.
+      if (reloadResult.code === "PI_RELOAD_CONTEXT_UNAVAILABLE") {
+        return { ok: false, failure: { kind: "activation-unavailable", code: "PI_RELOAD_CONTEXT_UNAVAILABLE" } };
+      }
+      return { ok: false, failure: { kind: "reload-rejected", code: "RELOAD_REJECTED" } };
+    }
     const observation = ActivationObservationSchema.parse(await dependencies.reload.observe({ scope: toScopeReference(scope), plugin }, signal));
     if (!observationMatches(observation, expectation, plugin)) {
       return { ok: false, failure: { kind: "observation-mismatch", code: "OBSERVATION_MISMATCH" } };
@@ -867,6 +894,12 @@ function createPluginLifecycleImplementation(
     if (first.kind === "recovery") return recovery(operation, reference, first.committed);
 
     const committed = first.snapshot;
+    if (operation === "update" && (request as UpdatePluginRequest).activation === "deferred") {
+      // Staged update: the candidate is committed and the durable transition
+      // stays pending on purpose. The next start/reload activates the new
+      // revision and settles the journal through the normal recovery path.
+      return { kind: "staged", operation, transition: reference, snapshot: committed };
+    }
     const beforeReloadConfiguration = await exactConfigurationState(prepared, expectedConfigurationRevision);
     let activation: Awaited<ReturnType<typeof reloadAndObserve>>;
     if (beforeReloadConfiguration === "stale") {
@@ -883,6 +916,12 @@ function createPluginLifecycleImplementation(
             : { ok: false, failure: { kind: "adapter-error", code: "ADAPTER_FAILED" } };
         }
       }
+    }
+    if (operation === "update" && !activation.ok && activation.failure.kind === "activation-unavailable") {
+      // No reload-capable context (for example an RPC caller): settle the
+      // committed update as staged rather than rolling it back. Genuine
+      // activation failures keep the rollback path.
+      return { kind: "staged", operation, transition: reference, snapshot: committed };
     }
     const reconciled = await reconciler.completeCommittedTransition({
       operation,
@@ -970,7 +1009,7 @@ export function createPluginLifecycleService(
 }
 
 export const PluginLifecycleResultSchema = z.object({
-  kind: z.enum(["changed", "unchanged", "rejected", "stale", "rolled-back", "recovery-required"]),
+  kind: z.enum(["changed", "unchanged", "rejected", "stale", "rolled-back", "recovery-required", "staged"]),
 }).passthrough().readonly();
 
 export type {

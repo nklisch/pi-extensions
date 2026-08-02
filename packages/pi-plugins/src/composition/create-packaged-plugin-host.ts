@@ -402,10 +402,6 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         });
         const marketplace = marketplaceComposition.application;
 
-        const recoveryResult = await recovery.recover({
-          requiredScopes: [{ kind: "user" }, project.scope],
-          ...(successor === undefined ? {} : { reservedTransitions: [successor.transition] }),
-        }, startupSignal);
         const runtimeStartupBlocked: HostBlockedPlugin[] = [];
         if (successor === undefined) {
           try {
@@ -431,6 +427,17 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
             });
           }
         }
+        // Recovery runs after runtime reconstruction so activation
+        // observations exist when pending transitions are classified: a
+        // committed candidate whose projection now runs finalizes as
+        // completed. Before this ordering, the sweep ran with an empty
+        // observation map and compensated (rolled back) every interrupted
+        // transition on every start. If reconstruction failed, observations
+        // are absent and recovery keeps the conservative compensate path.
+        const recoveryResult = await recovery.recover({
+          requiredScopes: [{ kind: "user" }, project.scope],
+          ...(successor === undefined ? {} : { reservedTransitions: [successor.transition] }),
+        }, startupSignal);
         const unresolvedRecovery: HostBlockedPlugin[] = successor === undefined
           ? recoveryResult.results
               .filter((result) => result.kind === "blocked" || result.kind === "deferred")
@@ -497,9 +504,6 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           scheduler: marketplaceComposition.updates.scheduler,
           schedulerStatus: marketplaceComposition.updates.schedulerStatus,
           lifecycle: automaticLifecycle,
-          // A Pi command frame can fund exactly one reload. Once lifecycle
-          // consumes that context, remaining automatic candidates stay pending.
-          activation: { availability: () => operationContexts.getStore()?.reloadContext === undefined ? "unavailable" : "available" },
           installed: content.installed,
           currentProject: project.scope,
           projectTrust: project.trust,

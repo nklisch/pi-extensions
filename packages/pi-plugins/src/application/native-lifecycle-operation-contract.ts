@@ -253,7 +253,8 @@ export const NativeLifecycleOperationResultSchema = z.discriminatedUnion("kind",
   z.object({ kind: z.literal("stale"), ...ResultBase, reason: z.enum(["session", "inspection", "target", "candidate", "configuration", "consent", "project", "file", "capability"]) }).strict().readonly(),
   z.object({ kind: z.literal("conflict"), ...ResultBase, reason: z.enum(["operation-in-progress", "pending-transition", "target-changed", "state-generation-changed", "file-changed", "unresolved-merge", "concurrent-mutation"]) }).strict().readonly(),
   z.object({ kind: z.literal("rejected"), ...ResultBase, code: NativeLifecycleStableCodeSchema }).strict().readonly(),
-  z.object({ kind: z.literal("rolled-back"), ...ResultBase, operation: z.enum(["enable", "disable", "update", "uninstall"]), failure: z.enum(["reload-rejected", "observation-mismatch", "adapter-error"]), restored: NativeLifecycleTargetBindingSchema }).strict().readonly(),
+  z.object({ kind: z.literal("rolled-back"), ...ResultBase, operation: z.enum(["enable", "disable", "update", "uninstall"]), failure: z.enum(["reload-rejected", "activation-unavailable", "observation-mismatch", "adapter-error"]), restored: NativeLifecycleTargetBindingSchema }).strict().readonly(),
+  z.object({ kind: z.literal("staged"), ...ResultBase, operation: z.literal("update"), transition: PendingTransitionRefSchema, committed: GenerationSchema.optional() }).strict().readonly(),
   z.object({ kind: z.literal("recovery-required"), ...ResultBase, code: NativeLifecycleStableCodeSchema, transition: PendingTransitionRefSchema.optional(), committed: GenerationSchema.optional(), action: z.literal("run-recovery") }).strict().readonly(),
   z.object({ kind: z.literal("failed"), ...ResultBase, code: z.enum(["ADAPTER_FAILED", "PROGRESS_DELIVERY_FAILED", "PROJECT_INTENT_WRITE_FAILED", "CLEANUP_FAILED", "DISPOSED"]) }).strict().readonly(),
   z.object({ kind: z.literal("expired") }).strict().readonly(),
@@ -274,7 +275,7 @@ export const NativeLifecycleOperationResultSchema = z.discriminatedUnion("kind",
   }
 });
 
-export const NativeLifecycleOperationSessionStateSchema = z.enum(["previewed", "applying", "succeeded", "current-state", "needs-action", "cancelled", "stale", "conflict", "rejected", "rolled-back", "recovery-required", "failed", "expired", "disposed"]);
+export const NativeLifecycleOperationSessionStateSchema = z.enum(["previewed", "applying", "succeeded", "current-state", "needs-action", "cancelled", "stale", "conflict", "rejected", "rolled-back", "recovery-required", "staged", "failed", "expired", "disposed"]);
 
 export const NativeLifecycleOperationSessionViewSchema = z.object({
   token: NativeLifecycleOperationTokenSchema,

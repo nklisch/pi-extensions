@@ -192,7 +192,9 @@ function destination(intent: PluginManagerActionIntent): PluginManagerDestinatio
 }
 
 function activating(intent: PluginManagerActionIntent): boolean {
-  return ["enable", "disable", "update", "update-all", "uninstall-delete", "install-run", "install-apply", "install-recover", "project-sync"].includes(intent.action);
+  // Sync-now stages updates and never consumes a reload context, so it opens
+  // no reload handoff; the optional reload offer lives after the run settles.
+  return ["enable", "disable", "update", "uninstall-delete", "install-run", "install-apply", "install-recover", "project-sync"].includes(intent.action);
 }
 
 /** One foreground facade mutation with fresh confirmation, exact frame, abort, and reload semantics. */

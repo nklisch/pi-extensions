@@ -185,6 +185,8 @@ export type MarketplaceRefreshMemory = z.infer<typeof MarketplaceRefreshMemorySc
 export const AutomaticUpdateReasonSchema = z.enum([
   "manual", "approval-required", "stale", "project-untrusted", "recovery-required",
   "configuration-required", "secret-unavailable", "capability-unavailable",
+  // Legacy read compatibility: pre-staging durable notices may carry this
+  // reason. It is never produced anymore.
   "awaiting-host-context", "retryable",
 ]);
 export type AutomaticUpdateReason = z.infer<typeof AutomaticUpdateReasonSchema>;

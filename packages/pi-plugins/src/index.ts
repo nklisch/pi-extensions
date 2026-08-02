@@ -583,7 +583,6 @@ export type {
   AutomaticUpdateLifecycleResult,
   AutomaticUpdateLifecyclePort,
 } from "./application/ports/automatic-update-lifecycle.js";
-export type { UpdateActivationContextPort } from "./application/ports/update-activation-context.js";
 
 export { authorizeTrustCandidate } from "./application/trust-service.js";
 export type { TrustAuthorizationResult } from "./application/trust-service.js";

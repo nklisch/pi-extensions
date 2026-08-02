@@ -22,7 +22,8 @@ describe("plugin operation view", () => {
     const lines = view.render(38);
     expect(lines.length).toBeLessThanOrEqual(12);
     expect(lines.every((line) => visibleWidth(line) <= 38)).toBe(true);
-    expect(lines.join("\n")).toContain("status: ✓ ok · done");
+    expect(lines.join("\n")).toContain("✓ ok · done");
+    expect(lines.join("\n")).not.toContain("status:");
     expect(lines[0]).toContain("earlier lines omitted");
     // Arrow keys are inert: the view always shows the live tail.
     view.handleInput("\u001b[A");
@@ -75,7 +76,7 @@ describe("plugin operation view", () => {
     view.finish(createNativeControlEnvelope({ executionId, command: "install.run", status: "ok", data: trustedInstallFlowFixture.activationResult as never }));
     const output = view.render(80).join("\n");
     expect(output).toContain("Activation result");
-    expect(output).toContain("1 skills discoverable");
+    expect(output).toContain("is ready to use — 1 skill");
     expect(output).toContain("activation-observation completed");
     expect(output).not.toContain("{\"");
   });

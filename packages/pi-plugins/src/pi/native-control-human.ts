@@ -82,7 +82,7 @@ export function nativeControlHumanLines(envelope: NativeControlEnvelope): readon
   if (lifecycle !== undefined) return lifecycle;
   // Never dump raw result JSON: the envelope's safe human fields and
   // diagnostics are the presentation contract, and anything else reduces to
-  // one status line.
+  // one plain status line. Command ids and paths stay in machine output.
   const summary = NativeControlCommandRegistry[envelope.command.id].summary.text;
   const human = envelope.human
     .map((field) => field.text)
@@ -91,5 +91,5 @@ export function nativeControlHumanLines(envelope: NativeControlEnvelope): readon
   const lines = [...human, ...diagnostics];
   return Object.freeze(lines.length > 0
     ? lines
-    : [`${envelope.command.path.join(" ") || "plugin"}: ${envelope.status}`]);
+    : [`${summary} — ${envelope.status === "ok" ? "done" : envelope.status === "no-change" ? "already up to date" : envelope.status === "partial" ? "partly done" : envelope.status === "recovery-required" ? "needs recovery" : envelope.status}`]);
 }

@@ -191,7 +191,7 @@ export const TrustedInstallActivationResultSchema = z.discriminatedUnion("kind",
   z.object({ kind: z.literal("stale"), reason: TrustedInstallStaleReasonSchema, progress: SafeProgressSchema, retained: RetainedSchema }).strict().readonly(),
   z.object({ kind: z.literal("conflict"), reason: TrustedInstallConflictReasonSchema, progress: SafeProgressSchema, retained: RetainedSchema }).strict().readonly(),
   z.object({ kind: z.literal("rejected"), code: z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/), diagnostics: z.array(NativeDiagnosticSchema).readonly(), progress: SafeProgressSchema, retained: RetainedSchema }).strict().readonly(),
-  z.object({ kind: z.literal("rolled-back"), failure: z.enum(["reload-rejected", "observation-mismatch", "adapter-error"]), restored: z.boolean(), progress: SafeProgressSchema, retained: RetainedSchema }).strict().readonly(),
+  z.object({ kind: z.literal("rolled-back"), failure: z.enum(["reload-rejected", "activation-unavailable", "observation-mismatch", "adapter-error"]), restored: z.boolean(), progress: SafeProgressSchema, retained: RetainedSchema }).strict().readonly(),
   z.object({
     kind: z.literal("recovery-required"),
     transition: z.string().regex(/^pending-transition-v1:sha256:[0-9a-f]{64}$/).optional(),

@@ -24,10 +24,11 @@ export function createPackagedHostStartup(dependencies: Readonly<{
         signal.throwIfAborted();
         await dependencies.open(signal);
         const capabilities = await dependencies.capabilities(signal);
-        const recovery = await dependencies.recover(signal);
-        // Recovery settlement is authoritative before any local projection is
-        // rebuilt or observed.
+        // Runtime reconstruction comes first so activation observations exist
+        // when recovery classifies pending transitions: committed candidates
+        // finalize as completed instead of being rolled back unobserved.
         const runtime = await dependencies.reconcile(signal);
+        const recovery = await dependencies.recover(signal);
         const blocked = [...recovery.blocked, ...runtime.blocked];
         const result = HostStartupResultSchema.parse({
           status: blocked.length === 0 ? "ready" : "degraded",

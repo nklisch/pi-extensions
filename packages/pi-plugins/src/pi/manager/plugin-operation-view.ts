@@ -95,16 +95,21 @@ export class PluginOperationView implements Component {
       lines.push(this.theme.fg("warning", "Cancelling — waiting for the plugin host to confirm."));
     }
     if (this.envelope !== undefined) {
-      // The same tone-styled status line the manager's result screen renders;
-      // exit class/code stay in machine output, not the terminal read-out.
+      // Plain status only: command ids and exit classes stay in machine
+      // output, never in the terminal read-out.
       lines.push(this.theme.fg("accent", "Result"));
-      lines.push(`${safe(this.envelope.command.id)}: ${styledNativeControlStatusLine(this.theme, this.envelope.status)}`);
+      lines.push(styledNativeControlStatusLine(this.theme, this.envelope.status));
       const install = TrustedInstallActivationResultSchema.safeParse(this.envelope.data);
       if (install.success) {
-        lines.push(this.theme.fg("accent", "Activation result"), safe(install.data.kind));
+        lines.push(this.theme.fg("accent", "Activation result"));
         if (install.data.kind === "succeeded") {
-          lines.push(`${safe(install.data.plugin)} · ${safe(install.data.scope.kind)} · ${safe(install.data.revision)}`);
-          lines.push(`${install.data.components.skills} skills discoverable · ${install.data.components.hooks} hooks registered · ${install.data.components.mcpServers} MCP servers ready`);
+          const components = install.data.components;
+          const inventory = [
+            `${components.skills} skill${components.skills === 1 ? "" : "s"}`,
+            `${components.hooks} hook${components.hooks === 1 ? "" : "s"}`,
+            `${components.mcpServers} MCP server${components.mcpServers === 1 ? "" : "s"}`,
+          ].join(", ");
+          lines.push(`${safe(install.data.plugin)} is ready to use — ${inventory}`);
         } else if (install.data.kind === "recovery-required") lines.push("setup didn't finish — restart pi and it finishes automatically (/plugins doctor shows what's pending)");
         else if (install.data.kind === "rolled-back") lines.push(`couldn't finish — ${plainLifecycleFailure(install.data.failure)} · ${install.data.restored ? "the change was undone" : "check /plugins → Health"}`);
         else if (install.data.kind === "stale" || install.data.kind === "conflict") lines.push("things changed — refresh and try again");

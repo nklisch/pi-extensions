@@ -104,6 +104,15 @@ export function createAutomaticUpdateLifecycleAdapter(dependencies: Readonly<{
       return { candidate: "current", source, target: "current", project, recovery, configuration, secrets, capability };
     },
     async apply(notice, signal): Promise<AutomaticUpdateLifecycleResult> {
+      return run(notice, "immediate", signal);
+    },
+    async stage(notice, signal): Promise<AutomaticUpdateLifecycleResult> {
+      return run(notice, "deferred", signal);
+    },
+  };
+  return Object.freeze(port);
+
+  async function run(notice: UpdateNotice, activation: "immediate" | "deferred", signal: AbortSignal): Promise<AutomaticUpdateLifecycleResult> {
       const [resolved, current] = await Promise.all([resolve(notice, signal), target(notice, signal)]);
       if (resolved.kind !== "resolved" || current === undefined) return { kind: "stale" };
       if ("unauthorized" in current) return { kind: "rejected", code: "UNTRUSTED" };
@@ -164,6 +173,7 @@ export function createAutomaticUpdateLifecycleAdapter(dependencies: Readonly<{
         expectedRevision: notice.available.immutableRevision,
         expectedTarget,
         configurationPathContext,
+        activation,
       }, signal);
       switch (result.kind) {
         case "changed":
@@ -171,6 +181,7 @@ export function createAutomaticUpdateLifecycleAdapter(dependencies: Readonly<{
         case "stale":
         case "rolled-back":
         case "recovery-required":
+        case "staged":
           return { kind: result.kind };
         case "rejected": {
           const code = result.code === "INCOMPATIBLE" || result.code === "UNTRUSTED" || result.code === "UNCONFIGURED" || result.code === "AVAILABLE_REVISION_CHANGED" || result.code === "CONFIGURATION_STALE" || result.code === "PROJECTION_FAILED" || result.code === "PROMOTION_FAILED" || result.code === "ABORTED"
@@ -178,7 +189,5 @@ export function createAutomaticUpdateLifecycleAdapter(dependencies: Readonly<{
           return { kind: "rejected", code };
         }
       }
-    },
-  };
-  return Object.freeze(port);
+  }
 }

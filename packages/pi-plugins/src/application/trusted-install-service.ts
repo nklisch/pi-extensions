@@ -267,6 +267,9 @@ export function createTrustedInstallationService(dependencies: TrustedInstallati
     if (result.kind === "stale") return finish(entry, conflict(entry, "concurrent-mutation"));
     if (result.kind === "rolled-back") return finish(entry, { kind: "rolled-back", failure: result.failure.kind, restored: true, progress: entry.progress, retained: safeRetained(entry) });
     if (result.kind === "recovery-required") return finish(entry, { kind: "recovery-required", transition: result.transition, ...(result.committed === undefined ? {} : { committed: result.committed }), action: "run-recovery", progress: entry.progress, retained: safeRetained(entry) });
+    // Installs never stage (staging is update-only); keep the facade contract
+    // coherent if that ever changes by surfacing the pending transition.
+    if (result.kind === "staged") return finish(entry, { kind: "recovery-required", transition: result.transition, committed: result.snapshot.generation, action: "run-recovery", progress: entry.progress, retained: safeRetained(entry) });
     if (result.code === "ABORTED") return finish(entry, cancelled(entry, "activation-transaction"));
     if (result.code === "AVAILABLE_REVISION_CHANGED") return finish(entry, stale(entry, "candidate"));
     if (result.code === "CONFIGURATION_STALE") return finish(entry, stale(entry, "configuration"));

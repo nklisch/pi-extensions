@@ -13,6 +13,7 @@ export type AutomaticUpdateAuthoritySnapshot = Readonly<{
 
 export type AutomaticUpdateLifecycleResult =
   | Readonly<{ kind: "changed" | "unchanged" }>
+  | Readonly<{ kind: "staged" }>
   | Readonly<{ kind: "stale" | "rolled-back" | "cancelled-before-commit" }>
   | Readonly<{ kind: "recovery-required" }>
   | Readonly<{ kind: "rejected"; code: "INCOMPATIBLE" | "UNTRUSTED" | "UNCONFIGURED" | "CAPABILITY_UNAVAILABLE" | "AVAILABLE_REVISION_CHANGED" | "CONFIGURATION_STALE" | "PROJECTION_FAILED" | "PROMOTION_FAILED" | "ABORTED" }>;
@@ -25,4 +26,6 @@ export type AutomaticUpdateLifecycleResult =
 export interface AutomaticUpdateLifecyclePort {
   inspect(notice: UpdateNotice, signal: AbortSignal): Promise<AutomaticUpdateAuthoritySnapshot>;
   apply(notice: UpdateNotice, signal: AbortSignal): Promise<AutomaticUpdateLifecycleResult>;
+  /** Commit the update with activation deferred to the next start/reload. */
+  stage(notice: UpdateNotice, signal: AbortSignal): Promise<AutomaticUpdateLifecycleResult>;
 }

@@ -2,6 +2,7 @@ import { NativeControlCommandRegistry, type NativeControlCommand } from "./nativ
 import type { NativeControlApplicationDependencies, NativeControlDispatchContext } from "./ports/native-control-applications.js";
 import type { NativeControlDispatchResult } from "./native-control-projection.js";
 import { presentRecoveryRequired } from "./native-failure-presenter.js";
+import { automaticRunHumanLines, automaticRunStatus } from "./native-automatic-run-presenter.js";
 import { humanForSelectionFailure, projectNativeControlFailure, projectNativeControlResponse } from "./native-control-projection.js";
 import { toSafeDisplayField } from "./native-inspection-display.js";
 import { currentProjectFailure } from "./native-control-read-dispatch.js";
@@ -271,8 +272,10 @@ export function createNativeControlMutationDispatcher(dependencies: NativeContro
         }
         case "updates.automatic.run": {
           const result = await dependencies.updates.runAutomatic(request, signal);
-          const status = result.outcomes.some((entry) => entry.kind === "recovery-required") ? "recovery-required" : result.outcomes.some((entry) => ["pending", "blocked", "retryable", "stale"].includes(entry.kind)) ? "partial" : "ok";
-          return projectNativeControlResponse(command.command, result, { status });
+          return projectNativeControlResponse(command.command, result, {
+            status: automaticRunStatus(result.outcomes),
+            human: automaticRunHumanLines(result.outcomes).map((line) => toSafeDisplayField(line, { maxScalars: 256 })),
+          });
         }
         default:
           return undefined;

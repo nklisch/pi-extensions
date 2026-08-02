@@ -32,7 +32,7 @@ function environment(noticeCount = 1, application: "automatic" | "manual" = "aut
       publication: "pending" as const,
       unread: true,
       discoveredAt: index + 1,
-      automatic: { state: "pending" as const, reason: "awaiting-host-context" as const },
+      automatic: { state: "pending" as const },
     };
   });
   const ids = notices.map((notice) => notice.id);
@@ -43,9 +43,9 @@ function environment(noticeCount = 1, application: "automatic" | "manual" = "aut
   });
   const snapshot = () => ({ scope, generation, config: { schemaVersion: 4, generation, global: { application: "manual", cadence: "balanced" }, scope: {}, records: [record] }, installed: { schemaVersion: 2, generation, marketplaces: [], plugins: [] }, trust: { schemaVersion: 1, generation, records: [] }, pointers: { schemaVersion: 1, scope, generation, documents: [] }, corruptions: [] }) as any;
   let authority: any = { candidate: "current", source: "stable", target: "current", project: "trusted", recovery: "clear", configuration: "valid", secrets: "available", capability: "available" };
-  let context: "available" | "unavailable" = "unavailable";
-  let lifecycleResult: any = { kind: "changed" };
+  let lifecycleResult: any = { kind: "staged" };
   let applyCalls = 0;
+  let stageCalls = 0;
   let onApply: (() => void) | undefined;
   const mutationSignals: AbortSignal[] = [];
   const ensureCalls: string[] = [];
@@ -56,37 +56,38 @@ function environment(noticeCount = 1, application: "automatic" | "manual" = "aut
     inventory: { async discover() { return { scopes: [scope], complete: true }; } },
     mutations: { async runPreparedMutation(_request: any, prepare: any, mutationSignal: AbortSignal) { mutationSignals.push(mutationSignal); const prepared = await prepare({ snapshot: snapshot(), assertOwned: async () => undefined }); record = prepared.mutation.replace.config.records[0]; generation += 1; return { kind: "committed", value: prepared.value, snapshot: snapshot() }; } },
     policy: { async resolve() { return { application, winningLevel: "marketplace" as const, sourceGuard: "none" as const }; } },
-    lifecycle: { async inspect() { return authority; }, async apply() { applyCalls += 1; onApply?.(); return lifecycleResult; } },
-    activation: { availability: () => context },
+    lifecycle: {
+      async inspect() { return authority; },
+      async apply() { applyCalls += 1; onApply?.(); return lifecycleResult; },
+      async stage() { stageCalls += 1; onApply?.(); return lifecycleResult; },
+    },
     continuity: { async ensure(ensureScope: any, ensureSignal?: AbortSignal) { ensureCalls.push(ensureScope.kind === "user" ? "user" : ensureScope.projectKey); ensureSignals.push(ensureSignal); onEnsure?.(); return { kind: "ensured" as const, granted: [] }; } },
     clock: { nowEpochMilliseconds: () => 100, monotonicMilliseconds: () => 100 }, sha256,
   } as any;
   return {
     id, service: createAutomaticUpdateCoordinator(dependencies),
     setAuthority(value: Partial<typeof authority>) { authority = { ...authority, ...value }; },
-    setContext(value: typeof context) { context = value; },
     setResult(value: any) { lifecycleResult = value; },
     ids,
     setRetryAt(retryAt: number) { record = { ...record, notices: record.notices.map((notice: any, index: number) => index === 0 ? { ...notice, disposition: "automatic-retryable", automatic: { state: "retryable", reason: "retryable", attemptedAt: 50, retryAt } } : notice) }; },
     acknowledgeDuringApply() { onApply = () => { record = { ...record, notices: record.notices.map((notice: any, index: number) => index === 0 ? { ...notice, unread: false, acknowledgedAt: 99 } : notice) }; }; },
-    consumeContextDuringApply() { onApply = () => { context = "unavailable"; }; },
     onApply(hook: () => void) { onApply = hook; },
     onEnsure(hook: () => void) { onEnsure = hook; },
     ensureCalls,
     ensureSignals,
     mutationSignals,
-    notice: () => record.notices[0], applyCalls: () => applyCalls,
+    notice: () => record.notices[0], applyCalls: () => applyCalls, stageCalls: () => stageCalls,
   };
 }
 
 describe("automatic update coordinator", () => {
-  it("records pending without a live reload context and makes zero lifecycle calls", async () => {
+  it("stages without any reload-capable context and resolves the notice", async () => {
     const env = environment();
-    await expect(env.service.evaluate({ noticeId: env.id }, signal)).resolves.toMatchObject({ kind: "awaiting-host-context" });
-    await expect(env.service.run({ noticeIds: [env.id], limit: 1 }, signal)).resolves.toMatchObject({ outcomes: [{ kind: "pending" }] });
+    await expect(env.service.evaluate({ noticeId: env.id }, signal)).resolves.toMatchObject({ kind: "eligible" });
+    await expect(env.service.run({ noticeIds: [env.id], limit: 1 }, signal)).resolves.toMatchObject({ outcomes: [{ kind: "staged", plugin: "demo@community" }] });
+    expect(env.stageCalls()).toBe(1);
     expect(env.applyCalls()).toBe(0);
-    expect(env.notice()).toMatchObject({ disposition: "automatic-pending" });
-    expect(env.notice().resolution).toBeUndefined();
+    expect(env.notice()).toMatchObject({ disposition: "automatic-applied", resolution: { kind: "installed" } });
   });
 
   it.each([
@@ -100,67 +101,62 @@ describe("automatic update coordinator", () => {
     [{ capability: "unavailable" }, "capability-unavailable"],
   ] as const)("rechecks trust/root/configuration/capability drift %j", async (drift, expected) => {
     const env = environment();
-    env.setContext("available");
     env.setAuthority(drift);
     await expect(env.service.evaluate({ noticeId: env.id }, signal)).resolves.toMatchObject({ kind: expected });
+    expect(env.stageCalls()).toBe(0);
     expect(env.applyCalls()).toBe(0);
   });
 
   it("honors persisted retry backoff before inspecting or applying lifecycle", async () => {
     const env = environment();
-    env.setContext("available");
     env.setRetryAt(200);
     await expect(env.service.run({ noticeIds: [env.id], limit: 1 }, signal)).resolves.toMatchObject({ outcomes: [{ kind: "retryable" }] });
-    expect(env.applyCalls()).toBe(0);
+    expect(env.stageCalls()).toBe(0);
     expect(env.notice()).toMatchObject({ automatic: { retryAt: 200 } });
   });
 
   it("lets explicit foreground Update All bypass manual policy while retaining lifecycle safety", async () => {
     const env = environment(1, "manual");
-    env.setContext("available");
     await expect(env.service.run({ noticeIds: [env.id], limit: 1 }, signal)).resolves.toMatchObject({ outcomes: [{ kind: "blocked", reason: "manual" }] });
-    expect(env.applyCalls()).toBe(0);
+    expect(env.stageCalls()).toBe(0);
 
     const explicit = environment(1, "manual");
-    explicit.setContext("available");
-    await expect(explicit.service.run({ noticeIds: [explicit.id], limit: 1, explicit: true }, signal)).resolves.toMatchObject({ outcomes: [{ kind: "applied" }] });
-    expect(explicit.applyCalls()).toBe(1);
+    await expect(explicit.service.run({ noticeIds: [explicit.id], limit: 1, explicit: true }, signal)).resolves.toMatchObject({ outcomes: [{ kind: "staged" }] });
+    expect(explicit.stageCalls()).toBe(1);
   });
 
-  it("applies through lifecycle only in admitted context and resolves without acknowledging", async () => {
-    const env = environment();
-    env.setContext("available");
-    await expect(env.service.run({ noticeIds: [env.id], limit: 1 }, signal)).resolves.toMatchObject({ outcomes: [{ kind: "applied" }] });
-    expect(env.applyCalls()).toBe(1);
-    expect(env.notice()).toMatchObject({ disposition: "automatic-applied", unread: true, resolution: { kind: "installed" } });
-  });
-
-  it("spends one reload-capable context and leaves later candidates pending", async () => {
+  it("stages every eligible candidate in one run without spending reload authority", async () => {
     const env = environment(2);
-    env.setContext("available");
-    env.consumeContextDuringApply();
     await expect(env.service.run({ noticeIds: env.ids, limit: 2 }, signal)).resolves.toMatchObject({
-      outcomes: [{ kind: "applied" }, { kind: "pending" }],
+      outcomes: [{ kind: "staged" }, { kind: "staged" }],
     });
+    expect(env.stageCalls()).toBe(2);
+    expect(env.applyCalls()).toBe(0);
+  });
+
+  it("apply mode drives immediate activation through the lifecycle authority", async () => {
+    const env = environment();
+    env.setResult({ kind: "changed" });
+    await expect(env.service.run({ noticeIds: [env.id], limit: 1, mode: "apply" }, signal)).resolves.toMatchObject({ outcomes: [{ kind: "applied" }] });
     expect(env.applyCalls()).toBe(1);
+    expect(env.stageCalls()).toBe(0);
+    expect(env.notice()).toMatchObject({ disposition: "automatic-applied", unread: true, resolution: { kind: "installed" } });
   });
 
   it("does not revert a concurrent acknowledgment when lifecycle completion commits", async () => {
     const env = environment();
-    env.setContext("available");
     env.acknowledgeDuringApply();
     await env.service.run({ noticeIds: [env.id], limit: 1 }, signal);
     expect(env.notice()).toMatchObject({ unread: false, acknowledgedAt: 99, resolution: { kind: "installed" } });
   });
 
   it.each([
-    [{ kind: "changed" }, "applied", "automatic-applied"],
+    [{ kind: "staged" }, "staged", "automatic-applied"],
     [{ kind: "rolled-back" }, "retryable", "automatic-retryable"],
     [{ kind: "recovery-required" }, "recovery-required", "recovery-required"],
   ] as const)("settles lifecycle %s truth with a fresh signal after caller abort", async (result, outcome, disposition) => {
     const env = environment();
     const controller = new AbortController();
-    env.setContext("available");
     env.setResult(result);
     env.onApply(() => controller.abort(new Error("caller stopped after possible commit")));
     await expect(env.service.run({ noticeIds: [env.id], limit: 1 }, controller.signal)).resolves.toMatchObject({ outcomes: [{ kind: outcome }] });
@@ -184,7 +180,6 @@ describe("automatic update coordinator", () => {
       } },
       inventory: { async discover() { return { scopes: [scope, projectA, projectB], complete: true }; } },
       mutations: {} as never, policy: {} as never, lifecycle: {} as never,
-      activation: { availability: () => "unavailable" },
       clock: { nowEpochMilliseconds: () => 1, monotonicMilliseconds: () => 1 }, sha256,
       currentProject: projectB,
       projectTrust: { async assess(key) { return { kind: key === projectB.projectKey ? "trusted" as const : "untrusted" as const }; } },
@@ -196,13 +191,11 @@ describe("automatic update coordinator", () => {
 
   it("preserves unresolved state on concurrent stale/rollback and reports recovery authority", async () => {
     const env = environment();
-    env.setContext("available");
     env.setResult({ kind: "stale" });
     await expect(env.service.run({ noticeIds: [env.id], limit: 1 }, signal)).resolves.toMatchObject({ outcomes: [{ kind: "stale" }] });
     expect(env.notice().resolution).toBeUndefined();
 
     const recovery = environment();
-    recovery.setContext("available");
     recovery.setResult({ kind: "recovery-required" });
     await recovery.service.run({ noticeIds: [recovery.id], limit: 1 }, signal);
     expect(recovery.notice()).toMatchObject({ disposition: "recovery-required" });
@@ -215,25 +208,22 @@ describe("automatic update coordinator", () => {
     expect(env.ensureCalls).toEqual(["user"]);
   });
 
-  it("chains trust continuity after a committed apply but not after stale or rejected outcomes", async () => {
-    const applied = environment();
-    applied.setContext("available");
-    await applied.service.run({ noticeIds: [applied.id], limit: 1 }, signal);
-    expect(applied.ensureCalls).toEqual(["user", "user"]);
-    // The post-apply chain must not inherit caller cancellation: the update
+  it("chains trust continuity after a committed stage but not after stale or rejected outcomes", async () => {
+    const staged = environment();
+    await staged.service.run({ noticeIds: [staged.id], limit: 1 }, signal);
+    expect(staged.ensureCalls).toEqual(["user", "user"]);
+    // The post-commit chain must not inherit caller cancellation: the update
     // has already committed, so continuity settles with a fresh signal.
-    expect(applied.ensureSignals[0]).toBe(signal);
-    expect(applied.ensureSignals[1]).not.toBe(signal);
-    expect(applied.ensureSignals[1]?.aborted).toBe(false);
+    expect(staged.ensureSignals[0]).toBe(signal);
+    expect(staged.ensureSignals[1]).not.toBe(signal);
+    expect(staged.ensureSignals[1]?.aborted).toBe(false);
 
     const stale = environment();
-    stale.setContext("available");
     stale.setResult({ kind: "stale" });
     await stale.service.run({ noticeIds: [stale.id], limit: 1 }, signal);
     expect(stale.ensureCalls).toEqual(["user"]);
 
     const rejected = environment();
-    rejected.setContext("available");
     rejected.setResult({ kind: "rejected", code: "UNTRUSTED" });
     await rejected.service.run({ noticeIds: [rejected.id], limit: 1 }, signal);
     expect(rejected.ensureCalls).toEqual(["user"]);
@@ -241,11 +231,10 @@ describe("automatic update coordinator", () => {
 
   it("continues notice processing when trust continuity fails", async () => {
     const env = environment();
-    env.setContext("available");
     let calls = 0;
     env.onEnsure(() => { calls += 1; throw new Error("continuity unavailable"); });
-    await expect(env.service.run({ noticeIds: [env.id], limit: 1 }, signal)).resolves.toMatchObject({ outcomes: [{ kind: "applied" }] });
+    await expect(env.service.run({ noticeIds: [env.id], limit: 1 }, signal)).resolves.toMatchObject({ outcomes: [{ kind: "staged" }] });
     expect(calls).toBe(2);
-    expect(env.applyCalls()).toBe(1);
+    expect(env.stageCalls()).toBe(1);
   });
 });

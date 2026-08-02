@@ -52,7 +52,9 @@ describe("native control human projection", () => {
     expect(text.length).toBeLessThan(1_000);
     expect(text).not.toContain("\u001b");
     expect(text).not.toContain('"value"');
-    expect(text).toContain("status: ok");
+    // Plain status, never the command id or path.
+    expect(text).toContain("done");
+    expect(text).not.toContain("status: ok");
   });
 
   it("renders lifecycle uninstall results as concise lines instead of JSON", () => {

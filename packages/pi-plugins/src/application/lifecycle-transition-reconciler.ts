@@ -28,6 +28,7 @@ import type { LifecycleOperation } from "./plugin-lifecycle-contract.js";
 
 export type LifecycleActivationFailure =
   | Readonly<{ kind: "reload-rejected"; code: "RELOAD_REJECTED" }>
+  | Readonly<{ kind: "activation-unavailable"; code: "PI_RELOAD_CONTEXT_UNAVAILABLE" }>
   | Readonly<{ kind: "observation-mismatch"; code: "OBSERVATION_MISMATCH" }>
   | Readonly<{ kind: "adapter-error"; code: "ADAPTER_FAILED" | "ABORTED" }>;
 

@@ -30,12 +30,19 @@ describe("native installed inspection", () => {
     expect(detail.mcpHealth?.servers[0]?.nativeKey.escaped).toBe(true);
   });
 
-  it("marks old MCP health stale during recovery and does not compile it as current health", async () => {
+  it("marks old MCP health stale while a staged update waits for next start", async () => {
     const { detail } = await inspect({ enabled: true, remote: "failed", pending: true });
     expect(detail.activation?.state).toBe("pending");
-    expect(detail.summary.condition).toBe("blocked");
+    expect(detail.summary.condition).toBe("ready");
     expect(detail.mcpHealth?.servers[0]?.authority).toBe("stale");
-    expect(detail.diagnostics.map((item) => item.code)).toEqual(["TRANSITION_PENDING"]);
+    expect(detail.diagnostics.map((item) => item.code)).toEqual(["UPDATE_STAGED"]);
+  });
+
+  it("treats a pending transition the startup sweep could not settle as needing recovery, not staged", async () => {
+    const { detail } = await inspect({ enabled: true, remote: "failed", pending: true, recoveryBlocked: true });
+    expect(detail.activation?.state).toBe("recovery-required");
+    expect(detail.summary.condition).toBe("blocked");
+    expect(detail.diagnostics.map((item) => item.code)).toEqual(["RECOVERY_REQUIRED"]);
   });
 
   it("marks otherwise exact runtime health stale when project trust is not authoritative", async () => {

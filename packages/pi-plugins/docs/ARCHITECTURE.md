@@ -547,6 +547,32 @@ On successful reload, the new extension instance verifies the projections and
 marks the transition active. On failed or interrupted activation, recovery
 restores the previous revision.
 
+### Staged updates
+
+An update may also commit with activation deliberately deferred (lifecycle
+result `staged`): the candidate is committed and the durable transition stays
+pending on purpose, and the next start or reload activates the new revision
+and settles the journal through the normal recovery path. This is how
+background automatic updates and sync-now ("update all") apply: they never
+need a reload-capable command context, and one run can stage any number of
+plugins. A committed update that cannot drive activation at all (no reload
+authority, for example an RPC caller) also settles `staged` rather than
+rolling back; genuine activation failures still roll back. Foreground
+single-plugin updates keep immediate activation. To keep staged and stuck
+transitions distinguishable, a pending transition with a clean startup
+recovery sweep reads as "update staged — live next start"; one the sweep
+could not settle reads as recovery-required.
+
+Startup order is load-bearing for staging: runtime reconstruction
+(`reconcileCurrent`/`acceptSuccessor`) runs before the recovery sweep, and
+reconstruction builds the runtime from committed candidates whose transitions
+are still pending, so activation observations exist when pending transitions
+are classified. A committed candidate whose projection now runs finalizes as
+completed; without observations, classification conservatively compensates
+(rolls back). Staged finalization assumes a pi reload is a full host restart
+(session_shutdown → session_start), which the reload broker already relies
+on; a future warm-reload pi would need a finalization hook on that path.
+
 ## Revision retention and recovery
 
 Updating does not immediately delete the prior revision. Existing Pi sessions

@@ -35,7 +35,7 @@ describe("native inspection runtime health acceptance", () => {
     const recovery = await inspectThroughService({ enabled: true, remote: "failed", pending: true });
     expect(recovery.detail.activation?.state).toBe("pending");
     expect(recovery.detail.mcpHealth?.servers[0]?.authority).toBe("stale");
-    expect(recovery.detail.diagnostics.map((item) => item.code)).toEqual(["TRANSITION_PENDING"]);
+    expect(recovery.detail.diagnostics.map((item) => item.code)).toEqual(["UPDATE_STAGED"]);
 
     const untrusted = await inspectThroughService({ enabled: true, remote: "connected", projectUntrusted: true });
     expect(untrusted.detail.activation?.state).toBe("blocked");

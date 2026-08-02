@@ -32,6 +32,8 @@ export type NativeInstalledHarnessOptions = Readonly<{
   updateFailed?: boolean;
   updatePending?: boolean;
   updateClockRegressed?: boolean;
+  /** Startup recovery sweep already failed to settle the pending transition. */
+  recoveryBlocked?: boolean;
 }>;
 
 export function createNativeInstalledHarness(options: NativeInstalledHarnessOptions = {}) {
@@ -121,7 +123,7 @@ export function createNativeInstalledHarness(options: NativeInstalledHarnessOpti
     binding: { capturedAt: 1, scopes: [{ scope: scopeReference, generation: 0, status: "ready", corruptionCodes: [] }], currentProject: { projectKey, trust: { kind: options.projectUntrusted ? "untrusted" : "trusted" }, epoch: `sha256:${"66".repeat(32)}` }, catalogs: [], capability: { status: "ready", digest: `sha256:${"88".repeat(32)}`, capturedBy: "fixture" }, runtimeEpoch: `sha256:${"99".repeat(32)}`, recoveryDigest: `sha256:${"aa".repeat(32)}`, updateDigest: `sha256:${"bb".repeat(32)}` },
     states: [{ ok: true, snapshot: stateSnapshot }],
     currentProject: { identity: projectIdentity, projectKey, trust: { kind: options.projectUntrusted ? "untrusted" : "trusted" } },
-    capabilities: capabilities(), runtime: options.noRuntime ? [] : [runtime], recovery: { results: [], deferred: false, processed: 0 },
+    capabilities: capabilities(), runtime: options.noRuntime ? [] : [runtime], recovery: { results: options.recoveryBlocked ? [{ kind: "blocked", scope: scopeReference, plugin: plugin.identity.key, reference: `pending-transition-v1:sha256:${"77".repeat(32)}`, code: "RECOVERY_CONFLICT" }] : [], deferred: false, processed: 0 },
     startup: { status: "ready", blocked: [], capabilities: { mcp: { status: "available", explanation: "ready" }, subagents: { status: "unavailable", explanation: "none" }, piReload: { status: "available", explanation: "ready" }, secrets: { status: "available", explanation: "ready" } } },
     ...(options.updatePending ? { hostStatus: { status: "ready", local: { recovery: "settled", runtime: "reconciled" }, update: { state: "running", unreadCount: 1, unresolvedCount: 1, scopes: [] }, blocked: [], capabilities: { mcp: { status: "available", explanation: "ready" }, subagents: { status: "unavailable", explanation: "none" }, piReload: { status: "available", explanation: "ready" }, secrets: { status: "available", explanation: "ready" } } } } : {}),
   } as any;

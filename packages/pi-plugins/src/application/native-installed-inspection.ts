@@ -295,10 +295,15 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
       const activeExpected = authority.record.activation === "enabled";
       const skillsStatus = participantStatus({ evidence: runtime, participant: "skills-hooks", expectedSkills, expectedHooks, selectedRevision: subject.selectedRevision, activeExpected });
       const mcpStatus = participantStatus({ evidence: runtime, participant: "mcp", expectedMcp, selectedRevision: subject.selectedRevision, activeExpected });
-      const transition = authority.record.pendingTransition !== undefined ? "pending" as const : recoveryTransition(subject, snapshot);
+      const recovery = recoveryTransition(subject, snapshot);
+      // A pending transition is deliberately staged (live next start) unless
+      // the startup sweep already failed to settle it — then it is stuck.
+      const transition = authority.record.pendingTransition !== undefined
+        ? (recovery === "none" ? "pending" as const : recovery)
+        : recovery;
       const update = updateState(subject, snapshot, authority.revision, dependencies.sha256);
       const findings: NativeDiagnosticInput["findings"][number][] = [];
-      if (transition === "pending") findings.push(finding("transitionPending", detailId));
+      if (transition === "pending") findings.push(finding("updateStaged", detailId));
       else if (transition === "deferred") findings.push(finding("recoveryDeferred", detailId));
       else if (transition === "blocked" || transition === "recovery-required") findings.push(finding("recoveryRequired", detailId));
       if (trust === "project-untrusted") findings.push(finding("projectUntrusted", detailId));

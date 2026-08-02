@@ -84,12 +84,33 @@ describe("native control mutation dispatch", () => {
     const { dispatcher, dependencies } = fixture();
     const noticeId = `update-notice-v1:sha256:${"a".repeat(64)}`;
     dependencies.updates.runAutomatic.mockResolvedValue({
-      outcomes: [{ noticeId, kind: "pending", reason: "awaiting-host-context" }],
+      outcomes: [{ noticeId, plugin: "demo@community", display: { installed: "1.0.0", available: "1.1.0" }, kind: "pending", reason: "cancelled-before-commit" }],
     });
     const result = await dispatcher.dispatch(parsed(["updates", "automatic", "run", "--notice-id", noticeId]), context, signal);
     expect(result).toMatchObject({
       status: "partial",
-      data: { outcomes: [{ noticeId, kind: "pending", reason: "awaiting-host-context" }] },
+      data: { outcomes: [{ noticeId, kind: "pending" }] },
     });
+    expect(result.human.map((field) => field.text).join("\n")).toContain("demo@community");
+    expect(result.human.map((field) => field.text).join("\n")).not.toContain("updates.automatic.run");
+  });
+
+  it("presents staged updates in plain language with plugin names and next steps", async () => {
+    const { dispatcher, dependencies } = fixture();
+    const stagedId = `update-notice-v1:sha256:${"b".repeat(64)}`;
+    const blockedId = `update-notice-v1:sha256:${"c".repeat(64)}`;
+    dependencies.updates.runAutomatic.mockResolvedValue({
+      outcomes: [
+        { noticeId: stagedId, plugin: "workbench@nklisch-skills", display: { installed: "1.0.0", available: "1.1.0" }, kind: "staged" },
+        { noticeId: blockedId, plugin: "krometrail@nklisch-skills", display: { installed: "1.4.0", available: "1.6.2" }, kind: "blocked", reason: "approval-required" },
+      ],
+    });
+    const result = await dispatcher.dispatch(parsed(["updates", "automatic", "run", "--explicit", "--limit", "100"]), context, signal);
+    expect(result.status).toBe("partial");
+    const text = result.human.map((field) => field.text).join("\n");
+    expect(text).toContain("1 update installed — live on next start");
+    expect(text).toContain("workbench@nklisch-skills 1.0.0 → 1.1.0 — updated; live on next start");
+    expect(text).toContain("krometrail@nklisch-skills 1.4.0 → 1.6.2 — needs your approval");
+    expect(dependencies.updates.runAutomatic).toHaveBeenCalledWith(expect.objectContaining({ explicit: true, limit: 100 }), signal);
   });
 });

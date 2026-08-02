@@ -58,7 +58,10 @@ describe("runtime desired state", () => {
     expect(result.skillHook.currentProject.trust.kind).toBe("untrusted");
   });
 
-  it("excludes unresolved pending records from startup publication", async () => {
+  it("builds the runtime from committed pending candidates so recovery settles with observations", async () => {
+    // A pending transition is a committed candidate awaiting activation:
+    // reconstruction must activate it (recording an observation), not exclude
+    // it — exclusion forced a conservative rollback on every start.
     const pending = {
       plugin: "bundle@community",
       activation: "enabled",
@@ -91,9 +94,10 @@ describe("runtime desired state", () => {
       userBaseDirectory: "/workspace",
       sha256,
     }, new AbortController().signal);
+    // The candidate is attempted: only its missing revision evidence blocks.
     expect(installed.load).not.toHaveBeenCalled();
     expect(result.selections).toEqual([]);
-    expect(result.blocked).toEqual([{ plugin: "bundle@community", code: "RECOVERY_REQUIRED", explanation: "pending lifecycle state is excluded until recovery settles" }]);
+    expect(result.blocked).toEqual([{ plugin: "bundle@community", code: "REVISION_UNAVAILABLE", explanation: "selected installed revision is unavailable" }]);
   });
 
   it("re-assesses with the install-time marketplace policy so unchanged runtimes match install-time digests", async () => {
@@ -157,6 +161,64 @@ describe("runtime desired state", () => {
       sha256,
     }, new AbortController().signal);
     expect(assess).toHaveBeenCalledWith({ plugin, marketplacePolicy: installationPolicy }, expect.any(AbortSignal));
+    expect(result.selections.map((selection: { plugin: string }) => selection.plugin)).toEqual([plugin.identity.key]);
+    expect(result.blocked).toEqual([]);
+  });
+
+  it("activates a staged candidate on next start: pending records with valid revisions enter selections", async () => {
+    const source = createResolvedPluginSource({ kind: "marketplace-path", marketplaceRevision: "a".repeat(40), path: "./plugin" }, sha256);
+    const plugin = NormalizedPluginSchema.parse({
+      identity: { key: "fixture@community", marketplaceName: "community", marketplaceEntryName: "fixture" },
+      source,
+      configuration: { options: [] },
+      components: { skills: [], hooks: [], mcpServers: [], foreign: [] },
+      metadata: [],
+    });
+    const compatibility = CompatibilityReportSchema.parse({ plugin: plugin.identity, activatable: true, components: [], requirements: [], diagnostics: [] });
+    const content = createContentManifest([], sha256);
+    const revision = createInstalledRevisionRecord({ plugin, compatibility, content, scope: { kind: "user" } }, sha256);
+    const loaded = {
+      plugin,
+      compatibility,
+      marketplaceSource: createResolvedMarketplaceSource({ declared: { kind: "github", repository: "example/plugins" }, revision: "a".repeat(40) }, sha256),
+      content,
+      binding: revision.revision,
+    };
+    const record = {
+      plugin: plugin.identity.key,
+      activation: "enabled",
+      selectedRevision: revision.revision,
+      revisions: [revision],
+      pendingTransition: `pending-transition-v1:sha256:${"b".repeat(64)}`,
+    };
+    const state = {
+      async read() {
+        return {
+          ok: true as const,
+          snapshot: {
+            scope: { kind: "user" as const }, generation: 1 as never, pointers: pointers(),
+            config: { schemaVersion: 2 as const, generation: 1 as never, records: [] },
+            installed: { schemaVersion: 2 as const, generation: 1 as never, marketplaces: [], plugins: [record] },
+            trust: { schemaVersion: 1 as const, generation: 1 as never, records: [] },
+            corruptions: [],
+          },
+        };
+      },
+    };
+    const projectionValue = { digest: `sha256:${"c".repeat(64)}` };
+    const currentProject = { identity, projectKey, trust: { kind: "untrusted" as const } };
+    const result = await buildRuntimeDesiredState({
+      installed: { load: vi.fn(async () => loaded) } as never,
+      compatibility: { assess: vi.fn(async () => compatibility) } as never,
+      projections: {
+        prepare: vi.fn(async (expectation: unknown) => expectation),
+        read: vi.fn(async () => ({ kind: "ready" as const, value: projectionValue })),
+      } as never,
+      project: { scope: projectScope, current: () => currentProject, revalidate: async () => currentProject } as never,
+      state: state as never,
+      userBaseDirectory: "/workspace",
+      sha256,
+    }, new AbortController().signal);
     expect(result.selections.map((selection: { plugin: string }) => selection.plugin)).toEqual([plugin.identity.key]);
     expect(result.blocked).toEqual([]);
   });

@@ -6,6 +6,7 @@ import type {
 import { Key, matchesKey, type Component } from "@earendil-works/pi-tui";
 import { NativeInspectionDetailResultSchema } from "../../application/native-inspection-contract.js";
 import {
+  NativeAutomaticUpdateRunResultSchema,
   NativeUpdatePolicyApplyResultSchema,
   NativeUpdatePolicyPreviewResultSchema,
   NativeUpdateStatusSchema,
@@ -62,6 +63,30 @@ function selectedRow(state: PluginManagerState): PluginManagerRow | undefined {
   const rows = pluginManagerVisibleRows(state);
   if (state.focus.row === undefined) return rows[0];
   return rows.find((row) => rowKeyIdentity(row.key) === rowKeyIdentity(state.focus.row!)) ?? rows[0];
+}
+
+const automaticRunResult = (envelope: NativeControlEnvelope) => NativeAutomaticUpdateRunResultSchema.safeParse(envelope.data);
+
+/**
+ * Sync-now stages updates without activating them. When anything staged,
+ * offer exactly one reload so the user can use the new versions immediately;
+ * declining leaves activation to the next start. The offer lives only in this
+ * foreground gesture — never in durable state, never from the background.
+ */
+async function offerStagedReload(
+  context: ExtensionCommandContext,
+  envelope: NativeControlEnvelope,
+  confirm: (title: string, lines: readonly string[]) => Promise<boolean>,
+): Promise<void> {
+  const parsed = automaticRunResult(envelope);
+  if (!parsed.success) return;
+  const staged = parsed.data.outcomes.filter((outcome) => outcome.kind === "staged").length;
+  if (staged === 0) return;
+  const confirmed = await confirm(
+    `${staged} update${staged === 1 ? "" : "s"} installed — reload now to use ${staged === 1 ? "it" : "them"}?`,
+    ["The updates are already installed. Reloading activates them now; otherwise they go live on the next start."],
+  );
+  if (confirmed) await context.reload();
 }
 
 function actionIntent(action: string, state: PluginManagerState): PluginManagerActionIntent {
@@ -441,7 +466,13 @@ export function createPluginManagerSession(input: Readonly<{
           }
           result = Object.freeze({ kind: "handled", presentation: "local" });
           if (activation.data.kind === "succeeded") {
-            context.ui.notify(`Added ${activation.data.plugin} · ${activation.data.components.skills} skills · ${activation.data.components.hooks} hooks · ${activation.data.components.mcpServers} MCP servers`, "info");
+            const components = activation.data.components;
+            const inventory = [
+              `${components.skills} skill${components.skills === 1 ? "" : "s"}`,
+              `${components.hooks} hook${components.hooks === 1 ? "" : "s"}`,
+              `${components.mcpServers} MCP server${components.mcpServers === 1 ? "" : "s"}`,
+            ].join(", ");
+            context.ui.notify(`Added ${activation.data.plugin} — ${inventory} ready to use`, "info");
             if (candidateDetail.compatibility.components.foreign.some((component) => component.nativeKind.text === "pi-extension")) {
               context.ui.notify(`Heads up: ${activation.data.plugin} also ships a Pi extension (tools/commands), which this host doesn't run — those won't register. Install it pi-natively to use them.`, "warning");
             }
@@ -549,7 +580,13 @@ export function createPluginManagerSession(input: Readonly<{
             if (!presentationDetached) controller.observe({ type: "frame", frame });
           },
         });
-        try { return await runner.run(resolvedIntent); }
+        try {
+          const result = await runner.run(resolvedIntent);
+          if (resolvedIntent.action === "update-all" && result.kind === "completed") {
+            await offerStagedReload(context, result.envelope, (title, lines) => confirmInline(context, title, lines));
+          }
+          return result;
+        }
         finally {
           port.dispose();
           runner.close(closingReason ?? "quit");
@@ -675,19 +712,22 @@ export function createPluginManagerSession(input: Readonly<{
     async presentHandoff(context, destination, envelope): Promise<void> {
       const current = bound;
       if (current === undefined || current.sessionId !== context.sessionManager.getSessionId() || current.cwd !== context.cwd) return;
-      // Success across a reload is one notification, not a result screen: the
-      // reload itself is the visible effect, and the next /plugins open shows
-      // authoritative state. Failures keep the inspectable operation view.
+      // A handoff across a reload is always one plain notification, never a
+      // result screen: the reload itself is the visible effect, and /plugins
+      // shows authoritative state and any needed action.
+      if (context.mode !== "tui" || closed) return;
       if (envelope.status === "ok" || envelope.status === "no-change") {
-        if (context.mode === "tui" && !closed) {
-          const line = destination === "install-result"
-            ? handoffInstallSummary(envelope)
-            : `✓ ${nativeControlHumanLines(envelope)[0] ?? "Plugin operation completed"}`;
-          context.ui.notify(line, "info");
-        }
+        const line = destination === "install-result"
+          ? handoffInstallSummary(envelope)
+          : `✓ ${nativeControlHumanLines(envelope)[0] ?? "Plugin operation completed"}`;
+        context.ui.notify(line, "info");
         return;
       }
-      await presentStaticOperation(context, envelope, Object.freeze([]), destination === "install-result" ? "Activation result" : "Plugin operation · successor result");
+      const summary = nativeControlHumanLines(envelope)[0];
+      context.ui.notify(
+        `Plugin operation needs attention${summary === undefined ? "" : ` — ${summary}`} · open /plugins for details`,
+        "warning",
+      );
     },
     dynamicCompletions(): readonly NativeControlDynamicCandidate[] {
       return activeController?.dynamicCompletions() ?? completions;
