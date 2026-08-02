@@ -18,7 +18,7 @@ import {
 } from "../support/pi-mcp-adapter-fixture.js";
 
 const EXPECTED_PACKAGE = "@nklisch/pi-mcp-adapter";
-const EXPECTED_VERSION = "2.11.0-nklisch.6";
+const EXPECTED_VERSION = "2.11.0-nklisch.7";
 const EXPECTED_LICENSE_SHA256 = "2d20dfacd9742706e564470dc77438608a1e54b0ed46959f080709389209093c";
 const fixtureServer = fileURLToPath(new URL("../fixtures/mcp/stdio-server.mjs", import.meta.url));
 const roots: string[] = [];
@@ -99,8 +99,10 @@ async function call(
 }
 
 function calledText(result: Awaited<ReturnType<typeof call>>): string | undefined {
-  const details = result.details as { content?: Array<{ type?: string; text?: string }> };
-  return details.content?.find((entry) => entry.type === "text")?.text;
+  // The programmatic gateway routes call results through the MCP output
+  // guard: the raw result (when small enough) lives on details.mcpResult.
+  const details = result.details as { mcpResult?: { content?: Array<{ type?: string; text?: string }> } };
+  return details.mcpResult?.content?.find((entry) => entry.type === "text")?.text;
 }
 
 async function inventory(root: string): Promise<readonly string[]> {

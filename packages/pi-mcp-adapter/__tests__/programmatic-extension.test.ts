@@ -6,6 +6,23 @@ const spies = vi.hoisted(() => ({
   loadCache: vi.fn(() => null),
 }));
 
+const managerSpies = vi.hoisted(() => ({
+  connect: vi.fn(),
+  close: vi.fn().mockResolvedValue(undefined),
+  closeAll: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../server-manager.ts", () => ({
+  McpServerManager: class {
+    setSamplingConfig() {}
+    setElicitationConfig() {}
+    getConnection() { return undefined; }
+    connect(...args: unknown[]) { return managerSpies.connect(...args); }
+    close(...args: unknown[]) { return managerSpies.close(...args); }
+    closeAll(...args: unknown[]) { return managerSpies.closeAll(...args); }
+  },
+}));
+
 vi.mock("../config.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../config.ts")>();
   return { ...actual, loadMcpConfig: spies.loadConfig };
@@ -83,6 +100,10 @@ beforeEach(() => {
   spies.loadCache.mockClear();
   spies.loadConfig.mockReturnValue({ mcpServers: {} });
   spies.loadCache.mockReturnValue(null);
+  managerSpies.connect.mockReset();
+  managerSpies.connect.mockRejectedValue(new Error("spawn failed"));
+  managerSpies.close.mockClear();
+  managerSpies.closeAll.mockClear();
 });
 
 describe("programmatic adapter construction", () => {
@@ -157,6 +178,77 @@ describe("programmatic adapter construction", () => {
     expect(search.content[0]!.text).toContain("No tools matching");
     expect(search.content[0]!.text).toContain("couldn't be searched: qualified");
     expect(search.content[0]!.text.split("\n").length).toBeLessThanOrEqual(3);
+  });
+
+  it("guards call output: truncates text, passes images through, bounds details", async () => {
+    const initial = initialSource();
+    const adapter = createMcpAdapter({ fileDiscovery: "disabled", initialSources: [initial] });
+    const pi = createPi();
+    adapter.extension(pi.api);
+    await pi.handlers.get("session_start")?.({}, { cwd: process.cwd(), hasUI: false });
+    const tool = pi.tools[0] as {
+      execute: (id: string, params: Record<string, unknown>, signal?: AbortSignal) => Promise<{
+        content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+        details: any;
+      }>;
+    };
+    const signal = new AbortController().signal;
+
+    // Addressed by display name (nativeKey), not the opaque mcp-server-v1 key.
+    managerSpies.connect.mockResolvedValue({
+      status: "connected",
+      tools: [{ name: "shot" }],
+      resources: [],
+      client: {
+        callTool: vi.fn().mockResolvedValue({
+          content: [
+            { type: "text", text: `capture ok\n${"x".repeat(200 * 1024)}` },
+            { type: "image", data: "a".repeat(5000), mimeType: "image/png" },
+          ],
+        }),
+      },
+    });
+    const big = await tool.execute("c1", { action: "call", server: "native", tool: "shot", args: "{}" }, signal);
+    const text = big.content.find((block) => block.type === "text");
+    const image = big.content.find((block) => block.type === "image");
+    expect(text?.text).toContain("capture ok");
+    expect(text?.text).toContain("[MCP text output truncated");
+    expect(text?.text).toContain("Full text saved to:");
+    expect(text?.text?.length).toBeLessThan(60 * 1024);
+    expect(image?.data).toBe("a".repeat(5000));
+    expect(image?.mimeType).toBe("image/png");
+    expect(big.details.outputGuard?.truncated).toBe(true);
+    // The raw result exceeds the details budget, so it is summarized with a
+    // spill path instead of dumped into the session.
+    expect(big.details.mcpResult?.omitted).toBe(true);
+    expect(big.details.mcpResult?.fullResultPath).toBeTruthy();
+
+    // Small results pass through unguarded in shape, with raw details kept.
+    managerSpies.connect.mockResolvedValue({
+      status: "connected",
+      tools: [{ name: "echo" }],
+      resources: [],
+      client: { callTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "ok" }] }) },
+    });
+    const small = await tool.execute("c2", { action: "call", server: "native", tool: "echo", args: "{}" }, signal);
+    expect(small.content).toEqual([{ type: "text", text: "ok" }]);
+    expect(small.details.mcpResult).toEqual({ content: [{ type: "text", text: "ok" }] });
+
+    // Tool failures surface as an Error-prefixed result, not raw JSON.
+    managerSpies.connect.mockResolvedValue({
+      status: "connected",
+      tools: [{ name: "echo" }],
+      resources: [],
+      client: { callTool: vi.fn().mockResolvedValue({ isError: true, content: [{ type: "text", text: "boom" }] }) },
+    });
+    const failed = await tool.execute("c3", { action: "call", server: "native", tool: "echo", args: "{}" }, signal);
+    expect(failed.content[0]).toEqual({ type: "text", text: "Error: boom" });
+    expect(failed.details.error).toBe("tool_error");
+
+    // Unknown server names fail with guidance toward the accepted tokens.
+    const unknown = await tool.execute("c4", { action: "call", server: "nope", tool: "echo", args: "{}" }, signal);
+    expect(unknown.content[0]?.text).toContain("display name");
+    expect(unknown.content[0]?.text).toContain("mcp-server-v1:");
   });
 
   it("rejects malformed initial sources before any Pi tool can be registered", () => {

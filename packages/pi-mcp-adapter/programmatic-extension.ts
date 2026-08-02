@@ -1,7 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { guardMcpOutput, guardedMcpDetails, resolveMcpOutputGuardOptions } from "./mcp-output-guard.ts";
 import type { McpSourceIdentity, McpSourceStatus } from "./programmatic-types.ts";
 import { ProgrammaticMcpRuntime } from "./programmatic-runtime.ts";
+import { resolveMcpResultContent } from "./tool-registrar.ts";
 
 /**
  * Tool results are read by people in the transcript, not just by the model:
@@ -90,7 +92,7 @@ function safeFailure(error: unknown, signal?: AbortSignal) {
       ? error.code
       : "ADAPTER_FAILED";
   const text = code === "SOURCE_INVALID"
-    ? "That MCP server isn't registered (it may have been replaced or removed)."
+    ? "That MCP server isn't registered (or the name is ambiguous). Use the server's display name or its mcp-server-v1:… key from the status or search action."
     : code === "SEARCH_INVALID"
       ? "That search query isn't usable — keep it under 256 characters (and a valid regex)."
       : code === "MCP_LAUNCH_CANCELLED"
@@ -146,7 +148,9 @@ export function registerProgrammaticExtension(
       source: Type.Optional(Type.String({
         description: "Exact McpSourceIdentity encoded as JSON",
       })),
-      server: Type.Optional(Type.String({ description: "Source-local server key" })),
+      server: Type.Optional(Type.String({
+        description: "Server to use: its display name (e.g. 'krometrail', shown first in status output) or its source-local mcp-server-v1:… key",
+      })),
       tool: Type.Optional(Type.String({ description: "Native MCP tool name" })),
       args: Type.Optional(Type.String({ description: "Tool arguments encoded as a JSON object" })),
       query: Type.Optional(Type.String({ description: "Search text for tool names/descriptions" })),
@@ -207,9 +211,29 @@ export function registerProgrammaticExtension(
           args = parsed as Record<string, unknown>;
         }
         const result = await runtime.callTool(identity, params.server, params.tool, args, operationSignal);
+        // Route through the same output guard as the proxy/direct-tool paths:
+        // text is capped and spilled to a temp file, image blocks pass through
+        // as native image content instead of base64-in-JSON, and details stay
+        // bounded. Programmatic mode has no settings object, so defaults apply
+        // (the MCP_OUTPUT_GUARD env kill switch is still honored).
+        const outputContent = resolveMcpResultContent(result as Record<string, unknown>);
+        const guarded = await guardMcpOutput(
+          outputContent.length > 0 ? outputContent : [{ type: "text" as const, text: "(empty result)" }],
+          {
+            ...resolveMcpOutputGuardOptions(),
+            ...(result.isError === true ? { prefix: "Error: ", emptyTextFallback: "Tool execution failed" } : {}),
+            rawMcpResult: result,
+          },
+        );
         return {
-          content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result, null, 2) }],
-          details: result,
+          content: guarded.content,
+          details: {
+            mode: "call",
+            server: params.server,
+            tool: params.tool,
+            ...(result.isError === true ? { error: "tool_error" } : {}),
+            ...guardedMcpDetails(guarded),
+          },
         };
       } catch (error) {
         return safeFailure(error, operationSignal);

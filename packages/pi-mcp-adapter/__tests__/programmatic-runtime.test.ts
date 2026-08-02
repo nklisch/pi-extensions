@@ -48,14 +48,14 @@ function identity(token: string, plugin = `plugin-${token}@community`): McpSourc
   };
 }
 
-function registration(sourceIdentity: McpSourceIdentity, key = serverKey("a")): McpSourceRegistration {
+function registration(sourceIdentity: McpSourceIdentity, key = serverKey("a"), nativeKey = "shared"): McpSourceRegistration {
   const source: McpConfigSource = {
     schemaVersion: 1,
     identity: sourceIdentity,
     servers: {
       [key]: {
         componentId: `component-v1:mcp-server:${key.slice("mcp-server-v1:".length)}`,
-        nativeKey: "shared",
+        nativeKey,
         transport: "stdio",
         options: { schemaVersion: 1, auth: { kind: "none" }, toolTimeoutMs: 500 },
         projection: { schemaVersion: 1, componentId: `component-v1:mcp-server:${key.slice("mcp-server-v1:".length)}` },
@@ -189,6 +189,81 @@ describe("programmatic source lifecycle", () => {
     const called = await subject.callTool(undefined, serverKey("a"), "echo", {}, signal);
     expect(called).toMatchObject({ content: [{ type: "text", text: "ok" }] });
     await expect(subject.listTools(undefined, "mcp-server-v1:missing", signal)).rejects.toMatchObject({ code: "SOURCE_INVALID" });
+  });
+
+  it("resolves servers by native key when unique and rejects ambiguous matches", async () => {
+    const subject = runtime();
+    const signal = new AbortController().signal;
+    subject.installInitialSources([{ registration: registration(identity("c")), ...providers() }]);
+    await subject.attachSession({ cwd: process.cwd(), hasUI: false } as any);
+
+    // Agents read `nativeKey · key` from status output and naturally call with
+    // the display name; a unique native key resolves to its source-local key.
+    const tools = await subject.listTools(undefined, "shared", signal);
+    expect(tools.map((tool) => tool.name)).toEqual(["echo"]);
+    const called = await subject.callTool(undefined, "shared", "echo", {}, signal);
+    expect(called).toMatchObject({ content: [{ type: "text", text: "ok" }] });
+
+    // A second source with the same native key makes bare-name resolution
+    // ambiguous; identity scoping or the opaque key still resolves exactly.
+    const second = registration(identity("d"), serverKey("b"));
+    subject.installInitialSources([{ registration: second, ...providers() }]);
+    await expect(subject.listTools(undefined, "shared", signal)).rejects.toMatchObject({ code: "SOURCE_INVALID" });
+    await expect(subject.callTool(undefined, "shared", "echo", {}, signal)).rejects.toMatchObject({ code: "SOURCE_INVALID" });
+    const scoped = await subject.listTools(identity("d"), "shared", signal);
+    expect(scoped.map((tool) => tool.name)).toEqual(["echo"]);
+    const byKey = await subject.listTools(undefined, serverKey("b"), signal);
+    expect(byKey.map((tool) => tool.name)).toEqual(["echo"]);
+
+    await subject.detachSession();
+  });
+
+  it("keeps exact keys authoritative against colliding or key-shaped native keys", async () => {
+    const subject = runtime();
+    const signal = new AbortController().signal;
+    // Source A owns the plain (non-key-shaped) exact key "plain-name";
+    // source B names one of its servers "plain-name" natively. Exact keys
+    // win globally: the token reaches A, and B's launch values stay sealed.
+    const alphaProviders = providers();
+    const betaProviders = providers();
+    subject.installInitialSources([
+      { registration: registration(identity("1"), "plain-name", "alpha"), ...alphaProviders },
+      { registration: registration(identity("2"), serverKey("b"), "plain-name"), ...betaProviders },
+    ]);
+    await subject.attachSession({ cwd: process.cwd(), hasUI: false } as any);
+
+    const called = await subject.callTool(undefined, "plain-name", "echo", {}, signal);
+    expect(called).toMatchObject({ content: [{ type: "text", text: "ok" }] });
+    expect(alphaProviders.counters.resolved).toBe(1);
+    expect(betaProviders.counters.resolved).toBe(0);
+
+    // A key-shaped token that matches nothing exactly is a stale key, not a
+    // display name — it must not be captured by B's key-shaped nativeKey.
+    const stale = serverKey("9");
+    const hijack = providers();
+    const hijackSource = registration(identity("3"), serverKey("c"), stale);
+    subject.installInitialSources([{ registration: hijackSource, ...hijack }]);
+    await expect(subject.listTools(undefined, stale, signal)).rejects.toMatchObject({ code: "SOURCE_INVALID" });
+    await expect(subject.callTool(undefined, stale, "echo", {}, signal)).rejects.toMatchObject({ code: "SOURCE_INVALID" });
+    expect(hijack.counters.resolved).toBe(0);
+
+    await subject.detachSession();
+  });
+
+  it("resolves native keys that collide with inherited Object properties", async () => {
+    const subject = runtime();
+    const signal = new AbortController().signal;
+    subject.installInitialSources([
+      { registration: registration(identity("1"), serverKey("a"), "constructor"), ...providers() },
+    ]);
+    await subject.attachSession({ cwd: process.cwd(), hasUI: false } as any);
+
+    const tools = await subject.listTools(undefined, "constructor", signal);
+    expect(tools.map((tool) => tool.name)).toEqual(["echo"]);
+    const called = await subject.callTool(undefined, "constructor", "echo", {}, signal);
+    expect(called).toMatchObject({ content: [{ type: "text", text: "ok" }] });
+
+    await subject.detachSession();
   });
 
   it("installs initial sources synchronously and keeps colliding native keys isolated", async () => {

@@ -268,6 +268,16 @@ function qualifiedServerKey(identity: McpSourceIdentity, serverKey: string): str
     .digest("hex")}`;
 }
 
+/**
+ * Source-local keys registered by pi-plugins carry this prefix. A caller
+ * token with the prefix is therefore treated as a key attempt, never a
+ * display name: it resolves only as an exact key, so a stale key matches
+ * nothing instead of being captured by another server's nativeKey.
+ */
+function isKeyShapedToken(token: string): boolean {
+  return token.startsWith("mcp-server-v1:");
+}
+
 function copyIdentity(identity: McpSourceIdentity): McpSourceIdentity {
   return cloneJson(identity);
 }
@@ -608,16 +618,50 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
    * Resolve a record by one of its source-local server keys. Server keys
    * are derived from the exact source identity, so a key match is as exact
    * as passing the identity JSON — a stale key simply matches nothing.
+   *
+   * Agents read the human-readable native key from status output
+   * (`nativeKey · key`) and naturally call with it, but native keys are not
+   * source-local keys — pi-plugins derives opaque `mcp-server-v1:<digest>`
+   * keys. Resolution is therefore phased: an exact own-property key match
+   * wins globally; a key-shaped token (`mcp-server-v1:` prefix) never falls
+   * back to names, so a stale key cannot be captured by another server's
+   * nativeKey; otherwise a unique exact nativeKey match selects the record.
+   * Native keys are plugin-local names and may repeat across sources — any
+   * ambiguity rejects.
    */
   private recordForServerKey(serverKey: string): SourceRecord {
     if (typeof serverKey !== "string" || serverKey.length === 0) throw new ProgrammaticMcpError(INVALID_SOURCE);
-    const matches = [...this.records.values()].filter((record) => record.registration.source.servers[serverKey] !== undefined);
+    const records = [...this.records.values()];
+    const byKey = records.filter((record) => Object.hasOwn(record.registration.source.servers, serverKey));
+    if (byKey.length === 1) return byKey[0]!;
+    if (byKey.length > 1 || isKeyShapedToken(serverKey)) throw new ProgrammaticMcpError(INVALID_SOURCE);
+    const byName = records.filter((record) =>
+      Object.values(record.registration.source.servers).some((server) => server.nativeKey === serverKey));
+    if (byName.length !== 1) throw new ProgrammaticMcpError(INVALID_SOURCE);
+    return byName[0]!;
+  }
+
+  /**
+   * Map a caller-supplied server token to the record's source-local key,
+   * under the same phased rules as recordForServerKey: exact own-property
+   * keys win, key-shaped tokens never resolve via names, and a nativeKey
+   * match must be unique within the record.
+   */
+  private resolveServerKey(record: SourceRecord, serverKey: string): string {
+    const servers = record.registration.source.servers;
+    if (Object.hasOwn(servers, serverKey)) return serverKey;
+    if (isKeyShapedToken(serverKey)) throw new ProgrammaticMcpError(INVALID_SOURCE);
+    const matches = Object.keys(servers).filter((key) => servers[key]!.nativeKey === serverKey);
     if (matches.length !== 1) throw new ProgrammaticMcpError(INVALID_SOURCE);
     return matches[0]!;
   }
 
-  private recordForCall(identity: McpSourceIdentity | undefined, serverKey: string): SourceRecord {
-    return identity === undefined ? this.recordForServerKey(serverKey) : this.recordFor(identity);
+  private recordForCall(
+    identity: McpSourceIdentity | undefined,
+    serverKey: string,
+  ): { record: SourceRecord; serverKey: string } {
+    const record = identity === undefined ? this.recordForServerKey(serverKey) : this.recordFor(identity);
+    return { record, serverKey: this.resolveServerKey(record, serverKey) };
   }
 
   private bindingFor(record: SourceRecord, serverKey: string): McpRuntimeServerBinding {
@@ -639,21 +683,21 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
   ): Promise<ProgrammaticExecution> {
     throwIfAborted(signal);
     const record = this.recordFor(identity);
-    const server = record.registration.source.servers[serverKey];
-    if (server === undefined) throw new ProgrammaticMcpError(INVALID_SOURCE);
-    const binding = this.bindingFor(record, serverKey);
+    const resolvedKey = this.resolveServerKey(record, serverKey);
+    const server = record.registration.source.servers[resolvedKey]!;
+    const binding = this.bindingFor(record, resolvedKey);
     let lease: McpRuntimeLease | undefined;
     let values: McpLaunchValues | undefined;
     let connection: ProgrammaticConnection | undefined;
     let primaryFailure: unknown;
-    record.serverStatus.set(serverKey, { state: "connecting" });
+    record.serverStatus.set(resolvedKey, { state: "connecting" });
 
     try {
       lease = await record.runtimeLeases.acquire(binding, signal);
       throwIfAborted(signal);
       const manager = this.manager;
       if (manager === undefined) throw new ProgrammaticMcpError(ADAPTER_FAILED);
-      const internalKey = qualifiedServerKey(identity, serverKey);
+      const internalKey = qualifiedServerKey(identity, resolvedKey);
       const existing = manager.getConnection(internalKey) as ProgrammaticConnection | undefined;
       if (existing?.status === "connected") {
         connection = existing;
@@ -696,9 +740,9 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
 
     if (primaryFailure !== undefined) {
       if (connection !== undefined && this.manager !== undefined) {
-        await this.manager.close(qualifiedServerKey(identity, serverKey));
+        await this.manager.close(qualifiedServerKey(identity, resolvedKey));
       }
-      record.serverStatus.set(serverKey, {
+      record.serverStatus.set(resolvedKey, {
         state: "failed",
         errorCode: signal.aborted ? CANCELLED : primaryFailure instanceof ProgrammaticMcpError
           ? primaryFailure.code
@@ -711,7 +755,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
     if (lease === undefined || connection === undefined) throw new ProgrammaticMcpError(CLEANUP_FAILED);
     if (connection.status === "needs-auth") {
       await record.runtimeLeases.release(lease, new AbortController().signal);
-      record.serverStatus.set(serverKey, { state: "needs-auth" });
+      record.serverStatus.set(resolvedKey, { state: "needs-auth" });
       throw new ProgrammaticMcpError(ADAPTER_FAILED);
     }
 
@@ -726,7 +770,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
       finish,
     };
     record.executions.add(execution);
-    record.serverStatus.set(serverKey, {
+    record.serverStatus.set(resolvedKey, {
       state: "connected",
       toolCount: connection.tools.length,
     });
@@ -751,9 +795,8 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
     args: Record<string, unknown>,
     signal: AbortSignal,
   ): Promise<CallToolResult> {
-    const record = this.recordForCall(identity, serverKey);
-    const server = record.registration.source.servers[serverKey];
-    if (server === undefined) throw new ProgrammaticMcpError(INVALID_SOURCE);
+    const { record, serverKey: resolvedKey } = this.recordForCall(identity, serverKey);
+    const server = record.registration.source.servers[resolvedKey]!;
     const options = server.options as Record<string, unknown>;
     const allowed = Array.isArray(options.allowedTools)
       ? new Set(options.allowedTools.filter((value): value is string => typeof value === "string"))
@@ -764,7 +807,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
     if ((allowed !== undefined && !allowed.has(tool)) || denied?.has(tool)) {
       throw new ProgrammaticMcpError(INVALID_SOURCE);
     }
-    const execution = await this.openExecution(record.registration.source.identity, serverKey, signal);
+    const execution = await this.openExecution(record.registration.source.identity, resolvedKey, signal);
     try {
       return await execution.connection.client.callTool(
         { name: tool, arguments: args },
@@ -781,10 +824,9 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
     serverKey: string,
     signal: AbortSignal,
   ): Promise<readonly { identity: string; name: string; description?: string; inputSchema?: unknown }[]> {
-    const record = this.recordForCall(identity, serverKey);
-    const server = record.registration.source.servers[serverKey];
-    if (server === undefined) throw new ProgrammaticMcpError(INVALID_SOURCE);
-    const execution = await this.openExecution(record.registration.source.identity, serverKey, signal);
+    const { record, serverKey: resolvedKey } = this.recordForCall(identity, serverKey);
+    const server = record.registration.source.servers[resolvedKey]!;
+    const execution = await this.openExecution(record.registration.source.identity, resolvedKey, signal);
     try {
       const options = server.options as Record<string, unknown>;
       const allowed = new Set(Array.isArray(options.allowedTools)
@@ -793,7 +835,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
       const denied = new Set(Array.isArray(options.deniedTools)
         ? options.deniedTools.filter((value): value is string => typeof value === "string")
         : []);
-      const qualifier = qualifiedServerKey(record.registration.source.identity, serverKey);
+      const qualifier = qualifiedServerKey(record.registration.source.identity, resolvedKey);
       return execution.connection.tools
         .filter((tool) => (allowed.size === 0 || allowed.has(tool.name)) && !denied.has(tool.name))
         .map((tool) => ({
