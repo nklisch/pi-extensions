@@ -38,6 +38,13 @@ Not yet recorded.
 
 ## Project-specific guidance
 
+- Inter-package dependency ranges are major-only (`^0`, `^2`) — never exact
+  pins and never patch-floor carets (`^0.1.18` on a 0.x package means
+  `>=0.1.18 <0.2.0`, which silently strands consumers on an old minor line;
+  pi-enhanced bundled registry pi-plugins@0.1.23 while the repo shipped 0.2.5).
+  Exception: pi-plugins' sibling pins on pi-mcp-adapter and pi-subagents stay
+  exact by design — the three are released together and the load-time
+  provenance receipt plus sync-invariant test bind the exact versions.
 - Packages are independently versioned; publishing is manual via the
   **Publish Pi extension** GitHub Actions workflow (npm trusted publishing).
 - New packages come from `npm run create:extension -- <name> [description]`,
