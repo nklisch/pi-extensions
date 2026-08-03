@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.0-nklisch.8] - 2026-08-02
+
+### Added
+- Programmatic gateway discovery: fresh connects warm a persisted tool inventory (`mcp-programmatic-cache.json` in the agent directory, keyed by qualified server key), and a `before_agent_start` hook renders each server's tool names into the system prompt without launching servers at session start (collapse past 50 tools per server, 300-name global budget).
+- Batched `schema` gateway action: raw JSON input schemas for one or more tools in a single call, with per-tool missing reports.
+- Failed tool calls now append the tool's exact input schema from session memory, so argument-validation failures self-correct.
+- The gateway tool carries explicit `promptGuidelines` for schema loading and description search; list/search output labels tools with their owning server's display name.
+
+### Fixed
+- Local argument-validation failures (missing server/tool, malformed JSON, batched tool passed to `call`) surface their actual guidance instead of the generic adapter failure.
+
 ## [2.11.0-nklisch.7] - 2026-08-02
 
 ### Fixed

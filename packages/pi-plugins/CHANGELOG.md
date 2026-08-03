@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.0
+
+### Changed
+
+- Bump the pinned `@nklisch/pi-mcp-adapter` sibling to `2.11.0-nklisch.8`: the programmatic MCP gateway gains cache-warmed system-prompt tool discovery, a batched `schema` action with raw JSON input schemas, and schema-on-error enrichment for failed calls. Plugin-contributed MCP servers (for example Krometrail) now surface their tool names in the system prompt and let agents load exact argument schemas instead of learning them from validation errors.
+
 ## v0.2.4
 
 ### Removed
