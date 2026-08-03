@@ -4,6 +4,7 @@ import { guardMcpOutput, guardedMcpDetails, resolveMcpOutputGuardOptions } from 
 import type { McpSourceIdentity, McpSourceStatus } from "./programmatic-types.ts";
 import { ProgrammaticMcpRuntime } from "./programmatic-runtime.ts";
 import { resolveMcpResultContent } from "./tool-registrar.ts";
+import { renderMcpProxyToolCall, renderMcpToolResult } from "./tool-result-renderer.ts";
 
 /**
  * Tool results are read by people in the transcript, not just by the model:
@@ -243,6 +244,8 @@ export function registerProgrammaticExtension(
     label: toolName === "mcp" ? "MCP" : "MCP Sources",
     description: "Source-qualified MCP gateway for programmatic configuration sources — discover servers (status/list/search), load exact input schemas (schema), and call tools (call)",
     promptSnippet: "MCP gateway for isolated programmatic sources",
+    renderCall: renderMcpProxyToolCall,
+    renderResult: renderMcpToolResult,
     promptGuidelines: [
       `Before calling an unfamiliar MCP tool through ${toolName}, load its exact input schema with ${toolName}({action:"schema",server:"<server>",tool:["<name>",...]}) — batch several tool names in one call.`,
       `Use ${toolName}({action:"search",query:"..."}) to find MCP tools by description when the tool name is not obvious.`,
@@ -384,6 +387,7 @@ export function registerProgrammaticExtension(
             server: params.server,
             tool: params.tool,
             ...(result.isError === true ? { error: "tool_error" } : {}),
+            ...(errorSuffix === undefined ? {} : { schemaAppended: true }),
             ...guardedMcpDetails(guarded),
           },
         };

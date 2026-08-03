@@ -10,11 +10,12 @@ interface RenderTheme {
 }
 
 export interface McpProxyToolCallInput {
-  tool?: string;
+  tool?: string | string[];
   args?: string;
   connect?: string;
   describe?: string;
   search?: string;
+  query?: string;
   regex?: boolean;
   includeSchemas?: boolean;
   server?: string;
@@ -63,8 +64,14 @@ export function formatMcpProxyToolCallLines(
 ): string[] {
   if (args.action === "ui-messages") return [`mcp ${args.action}`];
 
+  if (args.action === "schema") {
+    const names = Array.isArray(args.tool) ? args.tool.join(", ") : (args.tool ?? "");
+    return [`mcp schema ${names}${args.server ? ` @ ${args.server}` : ""}`];
+  }
+
   if (args.tool) {
-    const target = args.server ? `${args.tool} @ ${args.server}` : args.tool;
+    const name = Array.isArray(args.tool) ? args.tool.join(", ") : args.tool;
+    const target = args.server ? `${name} @ ${args.server}` : name;
     const lines = [`mcp call ${target}`];
     if (args.args) lines.push(formatJsonish(args.args, maxInputChars));
     return lines;
@@ -73,8 +80,9 @@ export function formatMcpProxyToolCallLines(
   if (args.connect) return [`mcp connect ${args.connect}`];
   if (args.describe) return [`mcp describe ${args.describe}`];
 
-  if (args.search) {
-    let line = `mcp search ${args.search}`;
+  const search = args.search ?? args.query;
+  if (search) {
+    let line = `mcp search ${search}`;
     if (args.server) line += ` @ ${args.server}`;
     if (args.regex === true) line += " (regex)";
     if (args.includeSchemas === false) line += " (schemas hidden)";
@@ -149,7 +157,13 @@ export function renderMcpToolResult(
   }
 
   const hasErrorDetails = Boolean(result.details.error);
-  const display = formatMcpToolResultLines(result, options.expanded || context?.isError === true || hasErrorDetails);
+  // A failed call with an appended input schema stays collapsed too: the
+  // error line is visible, the schema wall sits behind Ctrl+O. Only an
+  // explicit user expansion always wins.
+  const schemaAppended = result.details.schemaAppended === true;
+  const expand = options.expanded === true ||
+    ((context?.isError === true || hasErrorDetails) && !schemaAppended);
+  const display = formatMcpToolResultLines(result, expand);
   const output = display.lines
     .map((line) => line === "…" ? theme.fg("muted", line) : theme.fg("toolOutput", line))
     .join("\n");

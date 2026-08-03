@@ -144,4 +144,53 @@ describe("MCP tool result renderer", () => {
     expect(output).not.toContain("Ctrl+O to expand");
     expect(output).not.toContain("…");
   });
+
+  it("keeps a failed call with an appended schema collapsed behind Ctrl+O", () => {
+    const output = renderMcpToolResult(
+      result(
+        [{ type: "text", text: "Error: missing field `locator`\n\nInput schema for click:\nline 3\nline 4\nline 5" }],
+        { error: "tool_error", schemaAppended: true },
+      ),
+      collapsedOptions,
+      plainTheme,
+      { isError: true },
+    ).render(80).join("\n");
+
+    expect(output).toContain("Error: missing field `locator`");
+    expect(output).not.toContain("line 5");
+    expect(output).toContain("…");
+    expect(output).toContain("Ctrl+O to expand");
+  });
+
+  it("still expands a schema-appended error when the user explicitly expands", () => {
+    const output = renderMcpToolResult(
+      result(
+        [{ type: "text", text: "Error: failed\nline 2\nline 3\nline 4\nline 5" }],
+        { error: "tool_error", schemaAppended: true },
+      ),
+      { expanded: true, isPartial: false },
+      plainTheme,
+      { isError: true },
+    ).render(80).join("\n");
+
+    expect(output).toContain("line 5");
+  });
+});
+
+describe("MCP gateway schema action call rendering", () => {
+  it("renders the schema action with batched tool names", () => {
+    expect(formatMcpProxyToolCallLines({
+      action: "schema",
+      server: "krometrail",
+      tool: ["click", "query_page"],
+    })).toEqual(["mcp schema click, query_page @ krometrail"]);
+  });
+
+  it("renders programmatic search via its query parameter", () => {
+    expect(formatMcpProxyToolCallLines({
+      action: "search",
+      query: "screenshot",
+      server: "krometrail",
+    })).toEqual(["mcp search screenshot @ krometrail"]);
+  });
 });

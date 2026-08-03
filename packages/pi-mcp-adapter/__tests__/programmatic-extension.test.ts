@@ -318,6 +318,9 @@ describe("programmatic gateway discovery", () => {
     expect(definition.promptGuidelines).toHaveLength(2);
     expect(definition.promptGuidelines![0]).toContain('mcp({action:"schema"');
     expect(definition.promptGuidelines![1]).toContain('mcp({action:"search"');
+    const renderers = pi.tools[0] as { renderCall?: unknown; renderResult?: unknown };
+    expect(typeof renderers.renderCall).toBe("function");
+    expect(typeof renderers.renderResult).toBe("function");
   });
 
   it("serves batched raw schemas in one call and reports missing tools", async () => {
