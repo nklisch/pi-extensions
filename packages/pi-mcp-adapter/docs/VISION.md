@@ -15,6 +15,10 @@ MCP plumbing.
   fork's public API for other extensions: source-qualified process, tool,
   cache, and status identity; callback-scoped launch values; cancellation;
   runtime leases.
+- The programmatic gateway owns agent discovery: a system-prompt inventory of
+  server tool names warmed from a persisted cache (never by launching servers
+  at session start), a batched `schema` action serving raw JSON input
+  schemas, and schema-on-error enrichment so failed calls self-correct.
 - pi-plugins is the primary downstream consumer; both exports are pinned by
   its provenance tests.
 

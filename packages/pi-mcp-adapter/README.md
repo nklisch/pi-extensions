@@ -147,6 +147,12 @@ await adapter.runtime.replaceSource({
 - Programmatic HTTP means exact Streamable HTTP. It never silently falls back to
   legacy SSE. Capability reporting names every supported lifecycle, transport,
   OAuth, and feature fact, including explicit `false` values.
+- Agent discovery is cache-warmed, never launch-warmed: visible tool
+  names/descriptions persist to `mcp-programmatic-cache.json` in the agent
+  directory on every fresh connect (keyed by qualified server key, so a source
+  identity change orphans old entries), the system-prompt inventory renders
+  from that cache without launching servers, and input schemas are served live
+  in batches via the gateway's `schema` action.
 
 `McpServerManager` and all transport/authentication implementation modules remain
 private package internals. The standalone default export and CLI continue to use

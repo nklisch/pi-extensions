@@ -3,6 +3,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { CallToolResult, ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import { McpServerManager } from "./server-manager.ts";
+import { loadProgrammaticCache, saveProgrammaticCache, type ProgrammaticCachedTool } from "./programmatic-cache.ts";
 import type { ServerDefinition } from "./types.ts";
 import type {
   JsonValue,
@@ -287,6 +288,7 @@ function throwIfAborted(signal: AbortSignal): void {
 }
 
 function statusFor(record: SourceRecord): McpSourceStatus {
+
   return {
     identity: copyIdentity(record.registration.source.identity),
     registrationDigest: record.registration.digest,
@@ -351,6 +353,20 @@ function retainedDefinition(server: McpSourceServer): ServerDefinition {
 }
 
 /**
+ * Shared allowed/denied visibility filter for a server's tools. An absent or
+ * empty allowedTools means everything is visible; deniedTools always wins.
+ */
+function toolVisibilityFilter(options: Record<string, unknown>): (name: string) => boolean {
+  const allowed = new Set(Array.isArray(options.allowedTools)
+    ? options.allowedTools.filter((value): value is string => typeof value === "string")
+    : []);
+  const denied = new Set(Array.isArray(options.deniedTools)
+    ? options.deniedTools.filter((value): value is string => typeof value === "string")
+    : []);
+  return (name) => (allowed.size === 0 || allowed.has(name)) && !denied.has(name);
+}
+
+/**
  * Source authority used by the public factory and its Pi extension. The class
  * itself is package-internal; callers receive the narrow lifecycle interface.
  */
@@ -359,6 +375,16 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
   private manager: McpServerManager | undefined;
   private context: ExtensionContext | undefined;
   private operationTail: Promise<void> = Promise.resolve();
+  /**
+   * Discovery inventory: visible tool names/descriptions per qualified server
+   * key, persisted across sessions so the gateway can render the system-prompt
+   * discovery block without launching servers. Schemas stay in
+   * `schemaMemory` (session-scoped) — they are fetched fresh via
+   * `getToolSchemas` and only reused to enrich same-session tool errors.
+   */
+  private inventory = new Map<string, { tools: ProgrammaticCachedTool[]; cachedAt: number }>();
+  private schemaMemory = new Map<string, Map<string, unknown>>();
+  private inventoryLoaded = false;
 
   constructor(readonly options: Required<Pick<McpAdapterOptions, "fileDiscovery">>) {
     // Initial registration is deliberately synchronous. The returned extension
@@ -395,6 +421,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
   async attachSession(context: ExtensionContext): Promise<void> {
     if (this.manager !== undefined) await this.detachSession();
     this.context = context;
+    this.schemaMemory.clear();
     const manager = new McpServerManager(context.cwd);
     manager.setSamplingConfig(context.hasUI ? {
       autoApprove: false,
@@ -717,6 +744,18 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
             values: "resolved",
           },
         ) as ProgrammaticConnection;
+        // Warm the discovery inventory on every fresh connect so any
+        // successful operation (list, call, schema) makes the server's tools
+        // visible in the system prompt from the next turn — and from the next
+        // session via the persisted cache. Discovery data is best-effort and
+        // must never fail the operation that produced it.
+        try {
+          const visible = connection.tools
+            .filter((tool) => toolVisibilityFilter(server.options as Record<string, unknown>)(tool.name));
+          this.warmInventory(internalKey, visible);
+        } catch {
+          // best-effort
+        }
       }
       throwIfAborted(signal);
     } catch (error) {
@@ -828,16 +867,10 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
     const server = record.registration.source.servers[resolvedKey]!;
     const execution = await this.openExecution(record.registration.source.identity, resolvedKey, signal);
     try {
-      const options = server.options as Record<string, unknown>;
-      const allowed = new Set(Array.isArray(options.allowedTools)
-        ? options.allowedTools.filter((value): value is string => typeof value === "string")
-        : []);
-      const denied = new Set(Array.isArray(options.deniedTools)
-        ? options.deniedTools.filter((value): value is string => typeof value === "string")
-        : []);
       const qualifier = qualifiedServerKey(record.registration.source.identity, resolvedKey);
+      const isVisible = toolVisibilityFilter(server.options as Record<string, unknown>);
       return execution.connection.tools
-        .filter((tool) => (allowed.size === 0 || allowed.has(tool.name)) && !denied.has(tool.name))
+        .filter((tool) => isVisible(tool.name))
         .map((tool) => ({
           identity: `${qualifier}:${tool.name}`,
           name: tool.name,
@@ -861,7 +894,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
     options: Readonly<{ regex?: boolean; limit?: number }>,
     signal: AbortSignal,
   ): Promise<Readonly<{
-    matches: readonly Readonly<{ server: string; name: string; description?: string }>[];
+    matches: readonly Readonly<{ server: string; nativeKey: string; name: string; description?: string }>[];
     unavailableServers: readonly string[];
   }>> {
     throwIfAborted(signal);
@@ -883,7 +916,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
       matcher = (text) => text.toLocaleLowerCase("en-US").includes(needle);
     }
     const limit = options.limit ?? SEARCH_DEFAULT_LIMIT;
-    const matches: { server: string; name: string; description?: string }[] = [];
+    const matches: { server: string; nativeKey: string; name: string; description?: string }[] = [];
     const unavailableServers: string[] = [];
     for (const record of records) {
       for (const key of Object.keys(record.registration.source.servers).sort(compareText)) {
@@ -897,12 +930,129 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
         }
         for (const tool of tools) {
           if (!matcher(tool.name) && !(tool.description !== undefined && matcher(tool.description))) continue;
-          matches.push({ server: key, name: tool.name, ...(tool.description === undefined ? {} : { description: tool.description }) });
+          matches.push({
+            server: key,
+            nativeKey: record.registration.source.servers[key]!.nativeKey,
+            name: tool.name,
+            ...(tool.description === undefined ? {} : { description: tool.description }),
+          });
           if (matches.length >= limit) return Object.freeze({ matches: Object.freeze(matches), unavailableServers: Object.freeze(unavailableServers) });
         }
       }
     }
     return Object.freeze({ matches: Object.freeze(matches), unavailableServers: Object.freeze(unavailableServers) });
+  }
+
+  private ensureInventoryLoaded(): void {
+    if (this.inventoryLoaded) return;
+    this.inventoryLoaded = true;
+    const cache = loadProgrammaticCache();
+    if (cache === null) return;
+    for (const [key, entry] of Object.entries(cache.servers)) {
+      this.inventory.set(key, { tools: entry.tools, cachedAt: entry.cachedAt });
+    }
+  }
+
+  private warmInventory(
+    qualifiedKey: string,
+    tools: readonly { name: string; description?: string; inputSchema?: unknown }[],
+  ): void {
+    this.ensureInventoryLoaded();
+    this.inventory.set(qualifiedKey, {
+      tools: tools.map((tool) => ({
+        name: tool.name,
+        ...(tool.description === undefined ? {} : { description: tool.description }),
+      })),
+      cachedAt: Date.now(),
+    });
+    const schemas = new Map<string, unknown>();
+    for (const tool of tools) {
+      if (tool.inputSchema !== undefined) schemas.set(tool.name, tool.inputSchema);
+    }
+    this.schemaMemory.set(qualifiedKey, schemas);
+    // Prune entries whose source is no longer registered, then persist. The
+    // save is a full replace so pruned keys actually disappear.
+    const live = new Set<string>();
+    for (const record of this.records.values()) {
+      for (const key of Object.keys(record.registration.source.servers)) {
+        live.add(qualifiedServerKey(record.registration.source.identity, key));
+      }
+    }
+    for (const key of [...this.inventory.keys()]) {
+      if (!live.has(key)) this.inventory.delete(key);
+    }
+    try {
+      saveProgrammaticCache({
+        version: 1,
+        servers: Object.fromEntries(this.inventory.entries()),
+      });
+    } catch {
+      // best-effort: a cache write failure must never fail an MCP operation
+    }
+  }
+
+  /**
+   * Cached visible tools for one server, or undefined when the server has
+   * never been reached (in this or a previous session). Class-internal
+   * gateway support — deliberately not on the McpProgrammaticRuntime
+   * package boundary.
+   */
+  cachedServerTools(
+    identity: McpSourceIdentity,
+    serverKey: string,
+  ): readonly ProgrammaticCachedTool[] | undefined {
+    this.ensureInventoryLoaded();
+    try {
+      const record = this.recordFor(identity);
+      const resolved = this.resolveServerKey(record, serverKey);
+      return this.inventory.get(qualifiedServerKey(record.registration.source.identity, resolved))?.tools;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Same-session schema lookup used to enrich tool errors — warm after any
+   * successful connect, so a failed call can append the exact input schema
+   * without another round-trip. Never launches a server.
+   */
+  cachedToolSchema(
+    identity: McpSourceIdentity | undefined,
+    serverKey: string,
+    tool: string,
+  ): unknown | undefined {
+    try {
+      const { record, serverKey: resolved } = this.recordForCall(identity, serverKey);
+      return this.schemaMemory.get(qualifiedServerKey(record.registration.source.identity, resolved))?.get(tool);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Batched schema fetch for the gateway's schema action: one server launch
+   * (via listTools, which also warms the inventory) serves any number of
+   * requested tools. Unknown names are reported, not thrown.
+   */
+  async getToolSchemas(
+    identity: McpSourceIdentity | undefined,
+    serverKey: string,
+    toolNames: readonly string[],
+    signal: AbortSignal,
+  ): Promise<{
+    schemas: readonly { name: string; description?: string; inputSchema?: unknown }[];
+    missing: readonly string[];
+  }> {
+    const tools = await this.listTools(identity, serverKey, signal);
+    const byName = new Map(tools.map((tool) => [tool.name, tool]));
+    const schemas: { name: string; description?: string; inputSchema?: unknown }[] = [];
+    const missing: string[] = [];
+    for (const name of toolNames) {
+      const found = byName.get(name);
+      if (found === undefined) missing.push(name);
+      else schemas.push(found);
+    }
+    return { schemas, missing };
   }
 
   private async closeExecutions(record: SourceRecord): Promise<void> {

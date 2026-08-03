@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const spies = vi.hoisted(() => ({
   loadConfig: vi.fn(() => ({ mcpServers: {} })),
@@ -95,7 +98,13 @@ function createPi() {
   return { api, handlers, tools };
 }
 
+let savedAgentDir: string | undefined;
+
 beforeEach(() => {
+  // The runtime's discovery inventory persists under the agent dir; keep
+  // every test's cache writes inside a throwaway dir.
+  savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-mcp-test-"));
   spies.loadConfig.mockClear();
   spies.loadCache.mockClear();
   spies.loadConfig.mockReturnValue({ mcpServers: {} });
@@ -104,6 +113,11 @@ beforeEach(() => {
   managerSpies.connect.mockRejectedValue(new Error("spawn failed"));
   managerSpies.close.mockClear();
   managerSpies.closeAll.mockClear();
+});
+
+afterEach(() => {
+  if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
 });
 
 describe("programmatic adapter construction", () => {
@@ -260,5 +274,150 @@ describe("programmatic adapter construction", () => {
         runtimeLeases: { acquire: vi.fn(), release: vi.fn(), drain: vi.fn() },
       } as any],
     })).toThrow("MCP programmatic runtime operation failed");
+  });
+});
+
+describe("programmatic gateway discovery", () => {
+  type ExecutedTool = {
+    execute: (id: string, params: Record<string, unknown>, signal?: AbortSignal) => Promise<{
+      content: Array<{ type: string; text?: string }>;
+      details: any;
+    }>;
+  };
+
+  function connectedWith(tools: unknown[], callToolImpl?: () => Promise<unknown>) {
+    managerSpies.connect.mockResolvedValue({
+      status: "connected",
+      tools,
+      resources: [],
+      client: {
+        callTool: callToolImpl ?? vi.fn().mockResolvedValue({ content: [{ type: "text", text: "ok" }] }),
+      },
+    });
+  }
+
+  async function startedAdapter(initial = initialSource()) {
+    const adapter = createMcpAdapter({ fileDiscovery: "disabled", initialSources: [initial] });
+    const pi = createPi();
+    adapter.extension(pi.api);
+    await pi.handlers.get("session_start")?.({}, { cwd: process.cwd(), hasUI: false });
+    return { adapter, pi, tool: pi.tools[0] as ExecutedTool };
+  }
+
+  const echoSchema = {
+    type: "object",
+    properties: { locator: { oneOf: [{ kind: { const: "element" } }, { kind: { const: "coordinate" } }] } },
+    required: ["locator"],
+  };
+
+  it("registers explicit discovery guidance naming the gateway tool", () => {
+    const adapter = createMcpAdapter({ fileDiscovery: "disabled", initialSources: [initialSource()] });
+    const pi = createPi();
+    adapter.extension(pi.api);
+    const definition = pi.tools[0] as { promptGuidelines?: string[] };
+    expect(definition.promptGuidelines).toHaveLength(2);
+    expect(definition.promptGuidelines![0]).toContain('mcp({action:"schema"');
+    expect(definition.promptGuidelines![1]).toContain('mcp({action:"search"');
+  });
+
+  it("serves batched raw schemas in one call and reports missing tools", async () => {
+    const { tool } = await startedAdapter();
+    connectedWith([
+      { name: "echo", description: "Echo back the input.", inputSchema: echoSchema },
+      { name: "shot", description: "Take a screenshot.", inputSchema: { type: "object", properties: {} } },
+    ]);
+    const signal = new AbortController().signal;
+    const result = await tool.execute("s1", { action: "schema", server: "native", tool: ["echo", "nope"] }, signal);
+    const text = result.content[0]!.text!;
+    expect(text).toContain("### echo (native)");
+    expect(text).toContain("Echo back the input.");
+    expect(text).toContain('"oneOf"');
+    expect(text).toContain('"const": "element"');
+    expect(text).toContain("Not found on native: nope");
+    expect(result.details.mode).toBe("schema");
+    expect(result.details.tools).toEqual(["echo"]);
+    expect(result.details.missing).toEqual(["nope"]);
+    // One server launch served the whole batch.
+    expect(managerSpies.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("appends the exact input schema to tool errors without another launch", async () => {
+    const { tool } = await startedAdapter();
+    connectedWith(
+      [{ name: "echo", description: "Echo.", inputSchema: echoSchema }],
+      vi.fn().mockResolvedValue({ isError: true, content: [{ type: "text", text: "missing field `locator`" }] }),
+    );
+    const signal = new AbortController().signal;
+    const result = await tool.execute("e1", { action: "call", server: "native", tool: "echo", args: "{}" }, signal);
+    const text = result.content[0]!.text!;
+    expect(text).toContain("Error: missing field `locator`");
+    expect(text).toContain("Input schema for echo:");
+    expect(text).toContain('"const": "element"');
+    expect(managerSpies.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects an array of tools for call — batching belongs to the schema action", async () => {
+    const { tool } = await startedAdapter();
+    const result = await tool.execute("e2", { action: "call", server: "native", tool: ["echo"] }, new AbortController().signal);
+    expect(result.content[0]!.text).toContain("single tool name");
+  });
+
+  it("renders the warmed tool-name inventory in the system prompt block", async () => {
+    const { pi, tool } = await startedAdapter();
+    connectedWith([
+      { name: "echo", description: "Echo." },
+      { name: "shot", description: "Screenshot." },
+    ]);
+    await tool.execute("l1", { action: "list", server: "native" }, new AbortController().signal);
+
+    const handler = pi.handlers.get("before_agent_start")!;
+    const result = await handler({ systemPrompt: "BASE" });
+    expect(result.systemPrompt).toContain("BASE");
+    expect(result.systemPrompt).toContain("## MCP servers available through the `mcp` tool");
+    expect(result.systemPrompt).toContain("native (2 tools): echo, shot");
+    expect(result.systemPrompt).toContain('mcp({action:"schema",server:"<server>",tool:["<name>",...]})');
+  });
+
+  it("marks never-reached servers as not yet enumerated instead of launching them", async () => {
+    const { pi } = await startedAdapter();
+    const handler = pi.handlers.get("before_agent_start")!;
+    const result = await handler({ systemPrompt: "BASE" });
+    expect(result.systemPrompt).toContain("native — tools not yet enumerated");
+    expect(result.systemPrompt).toContain('mcp({action:"list",server:"native"})');
+    expect(managerSpies.connect).not.toHaveBeenCalled();
+  });
+
+  it("serves the inventory from the persisted cache in a fresh runtime", async () => {
+    const initial = initialSource();
+    const first = await startedAdapter(initial);
+    connectedWith([{ name: "echo", description: "Echo." }]);
+    await first.tool.execute("l1", { action: "list", server: "native" }, new AbortController().signal);
+    const launchesDuringWarm = managerSpies.connect.mock.calls.length;
+
+    // A second runtime over the same source (new session) sees the names
+    // without any server launch — the cache is keyed by the exact identity.
+    const second = await startedAdapter(initial);
+    const result = await second.pi.handlers.get("before_agent_start")!({ systemPrompt: "BASE" });
+    expect(result.systemPrompt).toContain("native (1 tools): echo");
+    expect(managerSpies.connect.mock.calls.length).toBe(launchesDuringWarm);
+  });
+
+  it("collapses very large servers behind list instead of flooding the prompt", async () => {
+    const { pi, tool } = await startedAdapter();
+    const manyTools = Array.from({ length: 60 }, (_, index) => ({ name: `tool_${index}` }));
+    connectedWith(manyTools);
+    await tool.execute("l1", { action: "list", server: "native" }, new AbortController().signal);
+
+    const result = await pi.handlers.get("before_agent_start")!({ systemPrompt: "BASE" });
+    expect(result.systemPrompt).toContain("native — 60 tools; run mcp({action:\"list\",server:\"native\"}) to enumerate");
+    expect(result.systemPrompt).not.toContain("tool_59");
+  });
+
+  it("injects nothing when no sources are registered", async () => {
+    const adapter = createMcpAdapter({ fileDiscovery: "disabled" });
+    const pi = createPi();
+    adapter.extension(pi.api);
+    const result = await pi.handlers.get("before_agent_start")!({ systemPrompt: "BASE" });
+    expect(result).toBeUndefined();
   });
 });

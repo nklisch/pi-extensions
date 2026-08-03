@@ -68,6 +68,7 @@
     "programmatic-types.ts",
     "programmatic-runtime.ts",
     "programmatic-extension.ts",
+    "programmatic-cache.ts",
     "error-signal.ts",
     "state.ts",
     "utils.ts",
