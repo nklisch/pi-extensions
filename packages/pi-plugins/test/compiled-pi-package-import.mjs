@@ -14,7 +14,7 @@ const metadata = JSON.parse(await readFile(new URL("../package.json", import.met
 if (!metadata.keywords?.includes("pi-package") || JSON.stringify(metadata.pi?.extensions) !== JSON.stringify(["./dist/pi/production-subagents-extension.js", "./dist/pi/extension.js"])) {
   throw new Error("Pi package discovery metadata is invalid");
 }
-if (metadata.dependencies?.["@nklisch/pi-mcp-adapter"] !== "2.11.0-nklisch.8" || metadata.dependencies?.["@nklisch/pi-subagents"] !== "18.0.4-nklisch.1") {
+if (metadata.dependencies?.["@nklisch/pi-mcp-adapter"] !== "2.11.0-nklisch.9" || metadata.dependencies?.["@nklisch/pi-subagents"] !== "18.0.4-nklisch.1") {
   throw new Error("published runtime dependencies are not exact");
 }
 if (JSON.stringify(metadata.bundledDependencies) !== JSON.stringify(["@nklisch/pi-subagents"])) {

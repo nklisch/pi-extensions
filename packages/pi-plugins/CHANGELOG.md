@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.1
+
+### Fixes
+
+- Bump the pinned `@nklisch/pi-mcp-adapter` sibling to `2.11.0-nklisch.9`: gateway `schema` results and schema-on-error output render collapsed in the transcript (three lines, Ctrl+O to expand) instead of dumping raw JSON into the chat; the model still receives the full schema.
+
 ## v0.3.0
 
 ### Changed

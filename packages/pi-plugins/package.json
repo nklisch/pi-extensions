@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-plugins",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": false,
   "description": "Native marketplace and plugin lifecycle management for Pi, with Claude Code and Codex compatibility.",
   "license": "MIT",
@@ -67,7 +67,7 @@
     "@nklisch/pi-subagents"
   ],
   "dependencies": {
-    "@nklisch/pi-mcp-adapter": "2.11.0-nklisch.8",
+    "@nklisch/pi-mcp-adapter": "2.11.0-nklisch.9",
     "@nklisch/pi-subagents": "18.0.4-nklisch.1",
     "jiti": "2.7.0",
     "semver": "7.8.1",
