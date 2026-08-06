@@ -31,8 +31,8 @@ export interface AgentConfigLookup {
 export class AgentTypeRegistry implements AgentConfigLookup {
   private agents = new Map<string, AgentConfig>();
 
-  /** The three embedded default agent names. */
-  static readonly DEFAULT_AGENT_NAMES = ["general-purpose", "Explore", "Plan"] as const;
+  /** The two embedded default agent names. */
+  static readonly DEFAULT_AGENT_NAMES = ["general-purpose", "Explore"] as const;
 
   constructor(private loadUserAgents: () => Map<string, AgentConfig>) {
     this.reload();
@@ -83,6 +83,13 @@ export class AgentTypeRegistry implements AgentConfigLookup {
       .map(([name]) => name);
   }
 
+  /** Whether a non-exact case-insensitive lookup has more than one candidate. */
+  isCaseAmbiguous(type: string): boolean {
+    if (this.agents.has(type)) return false;
+    const lower = type.toLowerCase();
+    return [...this.agents.keys()].filter((key) => key.toLowerCase() === lower).length > 1;
+  }
+
   /** Check if a type is valid and enabled (case-insensitive). */
   isValidType(type: string): boolean {
     const key = this.resolveKey(type);
@@ -122,10 +129,8 @@ export class AgentTypeRegistry implements AgentConfigLookup {
   private resolveKey(name: string): string | undefined {
     if (this.agents.has(name)) return name;
     const lower = name.toLowerCase();
-    for (const key of this.agents.keys()) {
-      if (key.toLowerCase() === lower) return key;
-    }
-    return undefined;
+    const matches = [...this.agents.keys()].filter((key) => key.toLowerCase() === lower);
+    return matches.length === 1 ? matches[0] : undefined;
   }
 }
 

@@ -38,10 +38,9 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "#src/config/agent-types";
-import type { EvictedSubagent } from "#src/lifecycle/subagent-manager";
 import type { SessionMessage } from "#src/types";
-import { describeActivity, type Theme } from "#src/ui/display";
-import { fileSnapshotSource, listNavigableAgents, liveSource, type NavigableSubagent, type TranscriptSource } from "#src/ui/session-navigation";
+import { describeActivity, formatDuration, type Theme } from "#src/ui/display";
+import { fileSnapshotSource, listNavigableAgents, liveSource, type NavigableSubagent, type RunDisplayMetadata, type TranscriptSource } from "#src/ui/session-navigation";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -69,8 +68,6 @@ export interface SessionNavigatorUI {
 export interface SessionNavigatorParams {
   ui: SessionNavigatorUI;
   agents: readonly NavigableSubagent[];
-  /** Descriptors of agents evicted by the cleanup sweep, sourced from disk when picked. */
-  evicted: readonly EvictedSubagent[];
   registry: AgentConfigLookup;
   /** Working directory for tool-call rendering (relative path display). */
   cwd: string;
@@ -83,6 +80,7 @@ export interface TranscriptOverlayOptions {
   tui: TUI;
   theme: Theme;
   source: TranscriptSource;
+  run: RunDisplayMetadata;
   done: (result: undefined) => void;
   cwd: string;
   markdownTheme: MarkdownTheme;
@@ -96,8 +94,8 @@ export interface TranscriptOverlayOptions {
  * manager, so it stays a reactive consumer with no inbound call into the core.
  */
 export class SessionNavigatorHandler {
-  async handle({ ui, agents, evicted, registry, cwd, readFile }: SessionNavigatorParams): Promise<void> {
-    const entries = listNavigableAgents(agents, evicted, registry);
+  async handle({ ui, agents, registry, cwd, readFile }: SessionNavigatorParams): Promise<void> {
+    const entries = listNavigableAgents(agents, registry);
     if (entries.length === 0) {
       ui.notify("No subagent sessions to view.", "info");
       return;
@@ -120,7 +118,7 @@ export class SessionNavigatorHandler {
     const markdownTheme = getMarkdownTheme();
     await ui.custom<undefined>(
       (tui, theme, _keybindings, done) =>
-        new TranscriptOverlay({ tui, theme, source, done, cwd, markdownTheme }),
+        new TranscriptOverlay({ tui, theme, source, run: entry.run, done, cwd, markdownTheme }),
       {
         overlay: true,
         overlayOptions: { anchor: "center", width: "90%", maxHeight: `${VIEWPORT_HEIGHT_PCT}%` },
@@ -142,20 +140,23 @@ export class TranscriptOverlay implements Component {
   private scrollOffset = 0;
   private autoScroll = true;
   private unsubscribe: (() => void) | undefined;
+  private runtimeInterval: ReturnType<typeof setInterval> | undefined;
   private closed = false;
 
   private readonly tui: TUI;
   private readonly theme: Theme;
   private readonly source: TranscriptSource;
+  private readonly run: RunDisplayMetadata;
   private readonly done: (result: undefined) => void;
   private readonly cwd: string;
   private readonly markdownTheme: MarkdownTheme;
   private content: Container;
 
-  constructor({ tui, theme, source, done, cwd, markdownTheme }: TranscriptOverlayOptions) {
+  constructor({ tui, theme, source, run, done, cwd, markdownTheme }: TranscriptOverlayOptions) {
     this.tui = tui;
     this.theme = theme;
     this.source = source;
+    this.run = run;
     this.done = done;
     this.cwd = cwd;
     this.markdownTheme = markdownTheme;
@@ -165,11 +166,21 @@ export class TranscriptOverlay implements Component {
       this.content = this.rebuild();
       this.tui.requestRender();
     });
+    if (run.completedAt() === undefined) {
+      this.runtimeInterval = setInterval(() => {
+        if (this.closed || this.run.completedAt() !== undefined) {
+          this.clearRuntimeInterval();
+          return;
+        }
+        this.tui.requestRender();
+      }, 100);
+    }
   }
 
   handleInput(data: string): void {
     if (matchesKey(data, "escape") || matchesKey(data, "q")) {
       this.closed = true;
+      this.clearRuntimeInterval();
       this.done(undefined);
       return;
     }
@@ -213,7 +224,8 @@ export class TranscriptOverlay implements Component {
     const hrMid = row(th.fg("dim", "─".repeat(innerW)));
 
     lines.push(hrTop);
-    lines.push(row(th.bold("Subagent session")));
+    const runtime = formatDuration(this.run.startedAt, this.run.completedAt());
+    lines.push(row(th.bold(`Subagent session · ${this.run.modelLabel} · ${runtime}`)));
     lines.push(hrMid);
 
     const contentLines = this.buildContentLines(innerW);
@@ -249,9 +261,17 @@ export class TranscriptOverlay implements Component {
       this.unsubscribe();
       this.unsubscribe = undefined;
     }
+    this.clearRuntimeInterval();
   }
 
   // ---- Private ----
+
+  private clearRuntimeInterval(): void {
+    if (this.runtimeInterval) {
+      clearInterval(this.runtimeInterval);
+      this.runtimeInterval = undefined;
+    }
+  }
 
   private innerWidth(): number {
     return Math.max(0, this.tui.terminal.columns - 4);

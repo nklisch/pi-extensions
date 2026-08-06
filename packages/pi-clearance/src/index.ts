@@ -5,6 +5,10 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import { createAuditLogger } from "./audit/logger.ts";
+import {
+  CLEARANCE_ALLOW_REQUEST_CUSTOM_TYPE,
+  renderClearanceAllowRequest,
+} from "./runtime/allow-request-message.ts";
 import { requireNativeEngine } from "./native/loader.ts";
 import { createPackageRegistrationStore } from "./packs/package-registration.ts";
 import { createDefaultAnalyzerRegistry } from "./parse/registry.ts";
@@ -60,6 +64,21 @@ const piAutoApprove: ExtensionFactory = (pi: ExtensionAPI) => {
   // partially initialized clearance runtime in place.
   const nativeHealth = requireNativeEngine().health();
   const audit = createAuditLogger({ sink: createDefaultAuditSink() });
+  const registerMessageRenderer = (
+    pi as unknown as {
+      registerMessageRenderer?: (
+        customType: string,
+        renderer: typeof renderClearanceAllowRequest,
+      ) => void;
+    }
+  ).registerMessageRenderer;
+  if (typeof registerMessageRenderer === "function") {
+    registerMessageRenderer.call(
+      pi,
+      CLEARANCE_ALLOW_REQUEST_CUSTOM_TYPE,
+      renderClearanceAllowRequest,
+    );
+  }
   let invalidatePolicyCache: (cwd?: string) => void = () => {
     /* resolver not constructed yet */
   };
@@ -111,6 +130,7 @@ const piAutoApprove: ExtensionFactory = (pi: ExtensionAPI) => {
     audit,
     recentDecisionSource,
     analyzerRegistry,
+    toolMetadata: () => toolMetadata(pi),
   });
   registerProposalTools(
     pi,
@@ -179,13 +199,24 @@ const piAutoApprove: ExtensionFactory = (pi: ExtensionAPI) => {
 };
 
 function registeredToolNames(pi: ExtensionAPI): readonly string[] {
+  return toolMetadata(pi).allToolNames;
+}
+
+function toolMetadata(pi: ExtensionAPI): {
+  readonly activeToolNames: readonly string[];
+  readonly allToolNames: readonly string[];
+} {
   try {
-    return pi
+    const allToolNames = pi
       .getAllTools()
       .map((tool) => tool.name)
       .filter((name): name is string => typeof name === "string");
+    return {
+      activeToolNames: pi.getActiveTools(),
+      allToolNames,
+    };
   } catch {
-    return [];
+    return { activeToolNames: [], allToolNames: [] };
   }
 }
 

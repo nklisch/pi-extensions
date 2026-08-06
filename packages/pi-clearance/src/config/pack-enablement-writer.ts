@@ -113,6 +113,7 @@ export async function applyPackEnablementPlan(
   return await writeConfigTargetAndValidate({
     planId: plan.id,
     targetPath: plan.targetPath,
+    configKind: plan.request.scope,
     value: patched.value,
     hadExistingFile: readResult.exists,
     reloadConfig: dependencies.reloadConfig,

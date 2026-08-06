@@ -6,6 +6,8 @@
  */
 
 import type { Model } from "@earendil-works/pi-ai";
+import { resolveDispatchAgentType } from "#src/config/agent-type-resolution";
+import type { AgentTypeRegistry } from "#src/config/agent-types";
 import type {
   SubagentLifecycleInterceptor,
   SubagentLifecycleRegistration,
@@ -13,8 +15,10 @@ import type {
 import type { ParentSnapshot } from "#src/lifecycle/parent-snapshot";
 import type { WorkspaceProvider } from "#src/lifecycle/workspace";
 import type { SpawnOptions, SubagentRecord, SubagentsService } from "#src/service/service";
+import { formatModelLabel } from "#src/session/model-label";
 import type { ModelRegistry } from "#src/session/model-resolver";
-import type { SessionContext, Subagent } from "#src/types";
+import { resolveDefaultModel } from "#src/session/session-config";
+import type { AgentInvocation, SessionContext, Subagent } from "#src/types";
 
 /** Narrow interface for the SubagentManager — avoids coupling to the concrete class. */
 export interface SubagentManagerLike {
@@ -46,6 +50,8 @@ export class SubagentsServiceAdapter implements SubagentsService {
     private readonly manager: SubagentManagerLike,
     private readonly resolveModel: (input: string, registry: ModelRegistry) => Model<any> | string,
     private readonly runtime: ServiceRuntimeLike,
+    private readonly agentRegistry?: AgentTypeRegistry,
+    private readonly settings?: { readonly fallbackSubagent?: string | false },
   ) {}
 
   spawn(type: string, prompt: string, options?: SpawnOptions): string {
@@ -53,13 +59,28 @@ export class SubagentsServiceAdapter implements SubagentsService {
       throw new Error("No active session — cannot spawn agents outside a session.");
     }
 
-    const model = this.resolveModelOption(options?.model);
+    this.agentRegistry?.reload();
+    const resolution = this.agentRegistry
+      ? resolveDispatchAgentType(type, this.agentRegistry, this.settings?.fallbackSubagent)
+      : { type, requestedType: type, fellBack: false };
+    if ("error" in resolution) throw new Error(resolution.error);
+    const resolvedType = resolution.type;
+
+    const model = options?.model
+      ? this.resolveModelOption(options.model)
+      : this.resolveTypeDefaultModel(resolvedType);
     const description = options?.description ?? prompt.slice(0, 80);
     const isBackground = !(options?.foreground ?? false);
+    const invocation: AgentInvocation = {
+      modelName: formatModelLabel(model),
+      maxTurns: options?.maxTurns,
+      inheritContext: options?.inheritContext,
+      runInBackground: isBackground,
+    };
 
     const snapshot = this.runtime.buildSnapshot(options?.inheritContext ?? false);
     const parent = this.runtime.getSessionInfo();
-    return this.manager.spawn(snapshot, type, prompt, {
+    return this.manager.spawn(snapshot, resolvedType, prompt, {
       description,
       model,
       maxTurns: options?.maxTurns,
@@ -68,6 +89,7 @@ export class SubagentsServiceAdapter implements SubagentsService {
       bypassQueue: options?.bypassQueue,
       isBackground,
       origin: "service",
+      invocation,
       lifecycleParentSession: parent.parentSessionId
         ? {
             parentSessionFile: parent.parentSessionFile || undefined,
@@ -117,9 +139,8 @@ export class SubagentsServiceAdapter implements SubagentsService {
     return this.manager.registerLifecycleInterceptor(interceptor);
   }
 
-  /** Resolve an optional model-string override against the current session's registry. */
-  private resolveModelOption(modelInput: string | undefined): Model<any> | undefined {
-    if (!modelInput) return undefined;
+  /** Resolve a model-string override against the current session's registry. */
+  private resolveModelOption(modelInput: string): Model<any> {
     const registry = this.runtime.currentCtx?.modelRegistry;
     if (!registry) {
       throw new Error("No model registry available.");
@@ -129,6 +150,14 @@ export class SubagentsServiceAdapter implements SubagentsService {
       throw new Error(resolved);
     }
     return resolved;
+  }
+
+  /** Resolve the agent type's configured model with the same fallback used by session assembly. */
+  private resolveTypeDefaultModel(type: string): Model<any> {
+    const ctx = this.runtime.currentCtx!;
+    const configured = this.agentRegistry?.resolveAgentConfig(type).model;
+    if (!ctx.modelRegistry) return ctx.model as Model<any>;
+    return resolveDefaultModel(ctx.model, ctx.modelRegistry, configured) as Model<any>;
   }
 }
 

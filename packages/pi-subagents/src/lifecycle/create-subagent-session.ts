@@ -72,9 +72,13 @@ export interface CreateSessionOptions {
   agentDir: string;
   sessionManager: SessionManagerLike;
   settingsManager: SettingsManager;
+  /** Legacy Pi compatibility input; modern Pi consumes modelRuntime. */
   modelRegistry: unknown;
+  /** Parent model/auth runtime so child sessions preserve runtime registrations. */
+  modelRuntime?: unknown;
   model?: unknown;
-  tools: string[];
+  /** Denylist keeps extension-tool registration open, including late registration. */
+  excludeTools: string[];
   resourceLoader: ResourceLoaderLike;
   thinkingLevel?: ThinkingLevel;
 }
@@ -205,8 +209,9 @@ export async function createSubagentSession(
     sessionManager,
     settingsManager: deps.io.createSettingsManager(cfg.effectiveCwd, agentDir),
     modelRegistry: snapshot.modelRegistry,
+    modelRuntime: snapshot.modelRuntime,
     model: cfg.model,
-    tools: cfg.toolNames,
+    excludeTools: [...new Set([...cfg.excludedBuiltinToolNames, ...EXCLUDED_TOOL_NAMES])],
     resourceLoader: loader,
     thinkingLevel: cfg.thinkingLevel,
   });

@@ -5,7 +5,6 @@ import {
   type ProjectScopeListField,
   SCOPE_PRESET_LABELS,
 } from "../../../../config/config-command-plans.ts";
-import type { ProjectScopeConfig } from "../../../../config/schema.ts";
 import type { CommandReport } from "../../types.ts";
 import type { SettingsAction } from "../actions.ts";
 import {
@@ -84,15 +83,7 @@ export const SCOPE_PANEL: SettingsPanel = {
 
 export function scopeRows(model: SettingsReadModel): readonly SettingsRow[] {
   const scope = model.projectScope;
-  const preset = inferScopePreset({
-    safeHomeUseDefaults: scope.safeHomeUseDefaults ?? true,
-    ...(scope.agentSupportUseDefaults === undefined
-      ? {}
-      : { agentSupportUseDefaults: scope.agentSupportUseDefaults }),
-    homePathBehavior: scope.homePathBehavior,
-    sensitivePathBehavior: scope.sensitivePathBehavior,
-    unknownPathBehavior: scope.unknownPathBehavior,
-  } as ProjectScopeConfig);
+  const preset = inferScopePreset(scope);
 
   return [
     {
@@ -308,5 +299,5 @@ function markdownTable(rows: readonly SettingsRow[]): string {
 }
 
 function escapeCell(value: string): string {
-  return value.replaceAll("|", "\\|").replaceAll("\n", "<br>");
+  return value.replaceAll("|", "\\|").replaceAll("\n", "; ");
 }

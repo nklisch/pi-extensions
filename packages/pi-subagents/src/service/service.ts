@@ -125,6 +125,7 @@ export interface SubagentsService {
 export const SUBAGENT_EVENTS = {
   STARTED: "subagents:started",
   COMPLETED: "subagents:completed",
+  RESUMED: "subagents:resumed",
   FAILED: "subagents:failed",
   COMPACTED: "subagents:compacted",
   CREATED: "subagents:created",

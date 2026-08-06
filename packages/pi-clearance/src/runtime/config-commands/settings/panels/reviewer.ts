@@ -5,7 +5,14 @@ export const REVIEWER_PANEL: SettingsPanel = {
   id: "reviewer",
   title: "Reviewer",
   rows: reviewerRows,
-  actions: ["reviewer.model", "reviewer.open"],
+  actions: [
+    "reviewer.model",
+    "reviewer.posture.select",
+    "reviewer.posture.set",
+    "gated-tools.add",
+    "gated-tools.remove",
+    "reviewer.open",
+  ],
 };
 
 export function reviewerRows(model: SettingsReadModel): readonly SettingsRow[] {
@@ -33,7 +40,7 @@ export function reviewerRows(model: SettingsReadModel): readonly SettingsRow[] {
     {
       label: "Prompt posture",
       value: reviewer.promptPosture,
-      meaning: "Edit advanced reviewer settings in global.json.",
+      meaning: "Select a posture; writes global.json after confirmation.",
     },
     {
       label: "Context mode",
@@ -42,6 +49,15 @@ export function reviewerRows(model: SettingsReadModel): readonly SettingsRow[] {
     },
     { label: "Token budget", value: formatTokenBudget(reviewer.tokenBudget) },
     { label: "Escalation", value: formatEscalation(reviewer.escalation) },
+    {
+      label: "Gated non-Bash tools",
+      value:
+        model.gatedTools.names.length === 0
+          ? "none"
+          : `${model.gatedTools.names.length} configured`,
+      meaning:
+        "Only exact names shown in this control are analyzed by Clearance; Bash remains gated and cannot be listed.",
+    },
   ];
 }
 
@@ -51,7 +67,7 @@ export function renderReviewerPanel(model: SettingsReadModel): string {
     "",
     markdownTable(reviewerRows(model)),
     "",
-    "Model selection is interactive. Other reviewer settings are read-only here; edit global.json.",
+    "Model and prompt-posture selection are interactive and confirm-backed. Other reviewer settings are read-only here; edit global.json.",
   ].join("\n");
 }
 

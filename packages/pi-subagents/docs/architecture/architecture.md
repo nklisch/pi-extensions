@@ -15,8 +15,7 @@ This document describes the architecture of the pi-subagents fork: a focused, co
    The max-concurrent admission gate is not scheduling in this sense — concurrency management stays in core.
 5. **UI is an in-core, substitutable consumer** — [ADR-0004](../decisions/0004-reconsider-ui-direction.md) records the per-component decision: the widget shrinks to background agents only, the bespoke conversation viewer is replaced by native session navigation, the `/agents` command is dissolved into focused surfaces, and the surviving UI stays in the core as a reactive consumer (not extracted to a separate package).
    Extraction remains an available future option because the composition invariant holds — the core is byte-for-byte identical with or without a given UI consumer.
-6. **Snapshot, don't capture** — mutable parent state (ctx, session, model) is read once at spawn time and frozen into a `ParentSnapshot` data object.
-   No live references survive past the spawn call.
+6. **Snapshot identity; share the canonical runtime** — mutable parent identity and prompt state are frozen into `ParentSnapshot` at spawn. The parent `ModelRuntime` is deliberately shared so child sessions preserve runtime provider and authentication registrations; no live session context is captured.
 7. **Subscribe, don't thread** — observation of agent progress uses direct session-event subscription, not callback parameters threaded through multiple layers.
 8. **Construct complete** — objects are born with all their dependencies.
    If state isn't available yet, the object that needs it doesn't exist yet.
@@ -180,6 +179,7 @@ classDiagram
         +systemPrompt: string
         +model: unknown
         +modelRegistry: unknown
+        +modelRuntime?: unknown
         +parentContext?: string
     }
 
@@ -208,6 +208,7 @@ stateDiagram-v2
     [*] --> queued : spawn (background, at capacity)
     [*] --> running : spawn (foreground or under limit)
     queued --> running : capacity available
+    queued --> stopped : stopped before admission
     running --> completed : all turns finished
     running --> error : unhandled exception
     running --> aborted : abort() called
@@ -232,6 +233,10 @@ stateDiagram-v2
 
 Note: `markStopped` always succeeds regardless of current status.
 Other terminal transitions guard against overwriting `stopped` — once an agent is stopped, only `resetForResume` can return it to `running`.
+
+Terminal outcomes also carry orthogonal consumption state. Foreground delivery, `get_subagent_result`, and a queued completion notification mark the outcome consumed. Records remain available for the parent session; only their heavy live child sessions are released after the configured consumed or unconsumed retention window. Released records keep their result and persisted transcript pointer but cannot resume.
+
+Completion notifications are held while the parent agent run is active and flushed on `agent_settled`, rechecking consumption before enqueueing a follow-up. Child session creation shares the parent model runtime and leaves extension-tool registration open; a denylist removes disallowed built-ins and recursive orchestration tools across registry refreshes.
 
 ## Execution flow
 
@@ -265,7 +270,7 @@ sequenceDiagram
     Ag-->>Mgr: update Subagent
     Mgr-->>Tool: Subagent
     Tool-->>LLM: formatted result
-    Note over Mgr: disposeSession() fires `disposed` at cleanup (resume-detectable)
+    Note over Mgr: retention releases heavy sessions but keeps terminal records and transcript pointers
 ```
 
 ## Module organization
@@ -287,7 +292,7 @@ src/
 │
 ├── config/                         agent type definitions and resolution
 │   ├── agent-types.ts              AgentTypeRegistry class
-│   ├── default-agents.ts           built-in agent configs (general-purpose, Explore, Plan)
+│   ├── default-agents.ts           built-in agent configs (general-purpose, Explore)
 │   ├── custom-agents.ts            user-defined agent .md file loader
 │   └── invocation-config.ts        per-call config merge
 │
@@ -481,6 +486,7 @@ The core emits events on `pi.events` that any extension can observe:
 | --------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------- |
 | `subagents:started`   | `{ id, type, description }`                                                         | Agent begins running                          |
 | `subagents:completed` | `{ id, type, description, status, result?, error?, toolUses, durationMs, tokens? }` | Agent finishes successfully                   |
+| `subagents:resumed`   | same as `completed` (`buildEventData` shape)                                        | A retained session's resumed turn finishes    |
 | `subagents:failed`    | same as `completed` (`buildEventData` shape)                                        | Agent ends in `error`/`stopped`/`aborted`     |
 | `subagents:compacted` | `{ id, type, description, reason, tokensBefore, compactionCount }`                  | Child session compacts                        |
 | `subagents:created`   | `{ id, type, description, isBackground }`                                           | Background agent created (pre-admission)      |
@@ -943,21 +949,7 @@ Directory organization is healthy (seven domain directories, six root files) —
 
 #### ✅ Step 1 — Extract result delivery from `Subagent` ([#535])
 
-Smell: Category C (anemic domain / misplaced state, Law of Demeter, scattered resets) — the result-delivery domain named in the first-principles refinement is still fused into the execution record.
-Target files:
-
-- `src/lifecycle/subagent.ts` — drop `_notification` / `notification`; stop constructing `NotificationState` from `parentSession.toolCallId`.
-- `src/observation/notification.ts` — `NotificationManager` owns consumed-state keyed by agent id behind a single tell operation (e.g. `consume(id)`) that also cancels the pending nudge.
-- `src/observation/notification-state.ts` — dissolve into the manager or move wholly into the observation domain.
-- `src/observation/subagent-events-observer.ts`, `src/tools/get-result-tool.ts` — call the new delivery interface instead of reaching through the record.
-
-The `toolCallId` needed by `formatTaskNotification` already travels on `execution.parentSession`; expose it without routing through a notification object.
-The pre-await consumption ordering (the "Bug 1" race tests in `test/lifecycle/subagent-manager.test.ts`) is a preserved invariant — consuming before awaiting must still suppress the completion nudge.
-
-Outcome: zero `record.notification?.` reach-throughs in `src/`; `Subagent` carries no notification field; delivery state lives in the observation domain.
-
-Landed: `notification-state.ts` deleted; `Subagent.toolCallId` getter added over `execution.parentSession`; `NotificationManager` owns `consumed: Set<string>` behind one `consume(id)` tell that adds to the set and cancels the pending nudge atomically.
-Collapsing the old two-step reset (`markConsumed()` + `cancelNudge()`) into one atomic operation structurally eliminates the historical "Bug 1" race rather than just reordering it — `consume()` now suppresses the nudge regardless of whether it runs before or after the completion promise resolves, as long as it runs within the 200 ms hold window.
+Result delivery evolved twice. `notification-state.ts` was first dissolved and `Subagent.toolCallId` moved to execution identity. Consumption now lives as domain state on `SubagentState`, where retention and every push/pull delivery path can consult it. `NotificationManager` owns only delivery timing: it withholds records during a parent run and rechecks consumption at `agent_settled`, eliminating the uncancellable follow-up race rather than relying on a timer window.
 
 `Release: batch "result-delivery"`
 

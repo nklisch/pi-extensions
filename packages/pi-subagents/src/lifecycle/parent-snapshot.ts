@@ -16,11 +16,13 @@ export interface ParentSnapshot {
   systemPrompt: string;
   /** Parent's current model instance (fallback when agent config has no model). */
   model: unknown;
-  /** Model registry for resolving config.model strings and creating sessions. */
+  /** Model registry compatibility facade used for synchronous model lookup. */
   modelRegistry: {
     find(provider: string, modelId: string): unknown;
     getAvailable?(): Array<{ provider: string; id: string }>;
   };
+  /** Canonical parent model/auth runtime, when exposed by the host Pi version. */
+  modelRuntime?: unknown;
   /** Pre-built parent conversation text (when inheritContext was requested). */
   parentContext?: string;
 }
@@ -36,12 +38,18 @@ export function buildParentSnapshot(
   inheritContext?: boolean,
 ): ParentSnapshot {
   const parentContext = inheritContext ? buildParentContext(ctx) : undefined;
+  const modelRegistry = ctx.modelRegistry!;
+  // Pi exposes ModelRegistry as a compatibility facade. Modern createAgentSession
+  // consumes its underlying ModelRuntime; carrying that same runtime preserves
+  // extension-registered providers and in-memory auth state in child sessions.
+  const modelRuntime = (modelRegistry as unknown as { runtime?: unknown }).runtime;
+
   return {
     cwd: ctx.cwd,
     systemPrompt: ctx.getSystemPrompt(),
     model: ctx.model,
-
-    modelRegistry: ctx.modelRegistry!,
+    modelRegistry,
+    modelRuntime,
     // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- || intentional: converts empty string to undefined as well as null/undefined
     parentContext: parentContext || undefined,
   };

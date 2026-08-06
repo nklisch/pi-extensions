@@ -111,22 +111,31 @@ export async function runForeground(
 
   clearInterval(spinnerInterval);
 
+  // Foreground delivery returns the complete outcome inline, so retention can
+  // use the shorter consumed-session window.
+  record.markConsumed();
+
   const tokenText = formatLifetimeTokens(record);
   const details = buildDetails(presentation.detailBase, record, { tokens: tokenText });
 
   const fallbackNote = identity.fellBack
-    ? `Note: Unknown agent type "${identity.rawType}" — using general-purpose.\n\n`
+    ? `Note: Unknown agent type "${identity.rawType}" — using ${identity.subagentType}.\n\n`
     : "";
 
   if (record.status === "error") {
-    return textResult(`${fallbackNote}Agent failed: ${record.error}`, details);
+    const partial = record.result?.trim();
+    return textResult(
+      `${fallbackNote}Model: ${record.modelLabel}\nRuntime: ${formatMs(details.durationMs)}\nAgent failed: ${record.error}` +
+        (partial ? `\n\nPartial output before the failure:\n${partial}` : ""),
+      details,
+    );
   }
 
   const durationMs = (record.completedAt ?? Date.now()) - record.startedAt;
   const statsParts = [`${record.toolUses} tool uses`];
   if (tokenText) statsParts.push(tokenText);
   return textResult(
-    `${fallbackNote}Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getStatusNote(record.status)}.\n\n` +
+    `${fallbackNote}Model: ${record.modelLabel}\nRuntime: ${formatMs(durationMs)}\nAgent completed (${statsParts.join(", ")})${getStatusNote(record.status)}.\n\n` +
       (record.result?.trim() ?? "No output."),
     details,
   );

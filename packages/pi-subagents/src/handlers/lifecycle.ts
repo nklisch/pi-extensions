@@ -49,14 +49,14 @@ export class SessionLifecycleHandler {
   // Cleanup order matters:
   // 1. Unpublish service — prevent new cross-extension calls
   // 2. Clear session context — no more session state
-  // 3. Abort all agents — stop running work
-  // 4. Dispose notifications — cancel pending nudges/timers
+  // 3. Dispose notifications — prevent terminal transitions from enqueueing follow-ups
+  // 4. Abort all agents — stop running and queued work
   // 5. Dispose manager — final cleanup
   handleSessionShutdown(): Promise<void> {
     this.unpublishService();
     this.runtime.clearSessionContext();
-    this.manager.abortAll();
     this.disposeNotifications();
+    this.manager.abortAll();
     this.manager.dispose();
     return Promise.resolve();
   }

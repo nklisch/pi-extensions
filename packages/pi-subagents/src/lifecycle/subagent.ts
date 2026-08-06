@@ -25,6 +25,7 @@ import type { WorkspaceProvider } from "#src/lifecycle/workspace";
 import { WorkspaceBracket } from "#src/lifecycle/workspace-bracket";
 import { subscribeSubagentObserver } from "#src/observation/record-observer";
 import type { RunConfig } from "#src/runtime";
+import { formatModelLabel } from "#src/session/model-label";
 import type { AgentInvocation, CompactionInfo, ParentSessionInfo, SessionMessage, SubagentType, ThinkingLevel } from "#src/types";
 
 /** Per-subagent lifecycle observer — created by SubagentManager for each spawn. */
@@ -33,8 +34,10 @@ export interface SubagentLifecycleObserver {
 	onStarted?(agent: Subagent): void;
 	/** Fires once the session is created — the subagent's subagentSession is now available. */
 	onSessionCreated?(agent: Subagent): void;
-	/** Fires once when the run completes or fails (for concurrency drain). */
+	/** Fires once when the initial run completes or fails (for concurrency drain). */
 	onRunFinished?(agent: Subagent): void;
+	/** Fires once when a resumed turn reaches a terminal state. */
+	onResumedFinished?(agent: Subagent): void;
 	/** Fires on compaction events during the run. */
 	onCompacted?(agent: Subagent, info: CompactionInfo): void;
 }
@@ -112,6 +115,9 @@ export class Subagent {
 	get error(): string | undefined { return this.state.error; }
 	get startedAt(): number { return this.state.startedAt; }
 	get completedAt(): number | undefined { return this.state.completedAt; }
+	get stoppedWhileQueued(): boolean { return this.state.stoppedWhileQueued; }
+	get consumedAt(): number | undefined { return this.state.consumedAt; }
+	get consumed(): boolean { return this.state.consumed; }
 	get toolUses(): number { return this.state.toolUses; }
 	get lifetimeUsage(): Readonly<LifetimeUsage> { return this.state.lifetimeUsage; }
 	get compactionCount(): number { return this.state.compactionCount; }
@@ -119,8 +125,10 @@ export class Subagent {
 	get activeTools(): ReadonlyMap<string, string> { return this.state.activeTools; }
 	get responseText(): string { return this.state.responseText; }
 	get maxTurns(): number | undefined { return this.execution.maxTurns; }
+	/** Exact effective model label used by every operator-facing status surface. */
+	get modelLabel(): string { return formatModelLabel(this.execution.model ?? this.execution.snapshot.model); }
 
-	readonly abortController: AbortController;
+	abortController: AbortController;
 	private _promise?: Promise<void>;
 	get promise(): Promise<void> | undefined { return this._promise; }
 
@@ -129,6 +137,9 @@ export class Subagent {
 	private readonly workspaceBracket: WorkspaceBracket;
 
 	subagentSession?: SubagentSession;
+	private releasedOutputFile?: string;
+	private _sessionReleased = false;
+	get sessionReleased(): boolean { return this._sessionReleased; }
 
 	// Steer buffer — messages queued before the session is ready
 	private _pendingSteers: string[] = [];
@@ -137,7 +148,7 @@ export class Subagent {
 
 	/** Path to the agent's session JSONL file, or undefined if not yet available. */
 	get outputFile(): string | undefined {
-		return this.subagentSession?.outputFile;
+		return this.subagentSession?.outputFile ?? this.releasedOutputFile;
 	}
 
 	/** The tool call ID that spawned this background agent, if any. */
@@ -148,6 +159,14 @@ export class Subagent {
 	/** Returns true when a SubagentSession is available (session is ready). */
 	isSessionReady(): boolean {
 		return this.subagentSession != null;
+	}
+
+	isActive(): boolean {
+		return this.status === "queued" || this.status === "running";
+	}
+
+	isRunning(): boolean {
+		return this.status === "running";
 	}
 
 	/**
@@ -329,21 +348,35 @@ export class Subagent {
 	 *
 	 * Requires an existing SubagentSession (set when the original run created it).
 	 * The returned promise always resolves (errors are captured internally).
-	 * The parent signal flows straight through to resumeTurnLoop — resume does not
-	 * route through this.abortController.
+	 * Parent cancellation and manager abort both stop the resumed turn.
 	 */
-	async resume(prompt: string, signal?: AbortSignal): Promise<void> {
+	resume(prompt: string, signal?: AbortSignal): Promise<void> {
 		const subagentSession = this.subagentSession;
 		if (!subagentSession) {
-			throw new Error("Subagent not configured for resume — missing session");
+			return Promise.reject(new Error(
+				this.sessionReleased
+					? "Subagent session was released and can no longer be resumed"
+					: "Subagent not configured for resume — missing session",
+			));
 		}
+		this._promise = this.runResume(subagentSession, prompt, signal);
+		return this._promise;
+	}
 
+	private async runResume(
+		subagentSession: SubagentSession,
+		prompt: string,
+		signal?: AbortSignal,
+	): Promise<void> {
 		this.resetForResume(Date.now());
+		const executionSignal = signal
+			? AbortSignal.any([this.abortController.signal, signal])
+			: this.abortController.signal;
 		this.listeners.attachObserver(subscribeSubagentObserver(subagentSession, this.state, {
 			onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
 		}));
 
-		const lifecycle = this.createTurnLifecycle("resume", signal);
+		const lifecycle = this.createTurnLifecycle("resume", executionSignal);
 		try {
 			if (lifecycle) {
 				const result = await subagentSession.resumeLifecycleTurnLoop(
@@ -351,18 +384,29 @@ export class Subagent {
 					lifecycle.signal,
 					lifecycle,
 				);
-				if (result.aborted) this.markAborted(result.responseText);
+				if (result.failure) this.markFailed(result.failure, result.responseText);
+				else if (result.aborted) this.markAborted(result.responseText);
 				else if (result.steered) this.markSteered(result.responseText);
 				else this.markCompleted(result.responseText);
 			} else {
-				const responseText = await subagentSession.resumeTurnLoop(prompt, signal);
-				this.markCompleted(responseText);
+				const resumed = await subagentSession.resumeTurnLoop(prompt, executionSignal);
+				const outcome = typeof resumed === "string" ? { text: resumed } : resumed;
+				if (outcome.failure) this.markFailed(outcome.failure, outcome.text);
+				else this.markCompleted(outcome.text);
 			}
 		} catch (err) {
 			this.markError(err);
 		} finally {
 			this.listeners.release();
+			this.execution.observer?.onResumedFinished?.(this);
 		}
+	}
+
+	/** Wait for the current queued, running, or resumed execution without cancelling it. */
+	async waitUntilSettled(signal: AbortSignal): Promise<void> {
+		const run = this._promise;
+		if (!run || !this.isActive() || signal.aborted) return;
+		await settleOrAbort(run, signal);
 	}
 
 	/** Build a callback-only lifecycle bridge after the immutable child session exists. */
@@ -449,9 +493,24 @@ export class Subagent {
 		this.state.markError(error, completedAt);
 	}
 
+	/** Record a provider failure and preserve any partial output. */
+	markFailed(error: unknown, partialResult?: string, completedAt?: number): void {
+		this.state.markFailed(error, partialResult, completedAt);
+	}
+
 	/** Transition to stopped state. Always valid — no guard. */
 	markStopped(completedAt?: number): void {
 		this.state.markStopped(completedAt);
+	}
+
+	markConsumed(at?: number): void {
+		this.state.markConsumed(at);
+	}
+
+	/** Stop a queued agent through the same terminal observer funnel as a run. */
+	stopQueued(): void {
+		this.state.stopQueued();
+		this.execution.observer?.onRunFinished?.(this);
 	}
 
 	/**
@@ -488,6 +547,7 @@ export class Subagent {
 
 	/** Reset for resume: running status, new startedAt, clear completedAt/result/error/listeners. */
 	resetForResume(startedAt: number): void {
+		this.abortController = new AbortController();
 		this.state.resetForResume(startedAt);
 		this.listeners.release();
 	}
@@ -496,16 +556,19 @@ export class Subagent {
 	completeRun(result: TurnLoopResult): void {
 		this.listeners.release();
 
-		const finalStatus: SubagentStatus = result.aborted
-			? "aborted"
-			: result.steered
-				? "steered"
-				: "completed";
+		const finalStatus: SubagentStatus = result.failure
+			? "error"
+			: result.aborted
+				? "aborted"
+				: result.steered
+					? "steered"
+					: "completed";
 		const finalResult =
 			result.responseText +
 			this.workspaceBracket.dispose({ status: finalStatus, description: this.description });
 
-		if (result.aborted) this.markAborted(finalResult);
+		if (result.failure) this.markFailed(result.failure, finalResult);
+		else if (result.aborted) this.markAborted(finalResult);
 		else if (result.steered) this.markSteered(finalResult);
 		else this.markCompleted(finalResult);
 
@@ -515,6 +578,16 @@ export class Subagent {
 	/** Dispose the wrapped session, firing the `disposed` lifecycle event. */
 	disposeSession(): void {
 		this.subagentSession?.dispose();
+	}
+
+	/** Release heavy session state while preserving the transcript pointer and record. */
+	releaseSession(): void {
+		const session = this.subagentSession;
+		if (!session) return;
+		this.releasedOutputFile = session.outputFile;
+		session.dispose();
+		this.subagentSession = undefined;
+		this._sessionReleased = true;
 	}
 
 	/** Fail a run: mark error, release listeners, best-effort workspace dispose, notify observer. */
@@ -528,4 +601,19 @@ export class Subagent {
 
 		this.execution.observer?.onRunFinished?.(this);
 	}
+}
+
+/** Resolve when either the run settles or the caller's wait is interrupted. */
+async function settleOrAbort(run: Promise<void>, signal: AbortSignal): Promise<void> {
+	await new Promise<void>((resolve) => {
+		let done = false;
+		const finish = (): void => {
+			if (done) return;
+			done = true;
+			signal.removeEventListener("abort", finish);
+			resolve();
+		};
+		signal.addEventListener("abort", finish, { once: true });
+		void run.then(finish, finish);
+	});
 }

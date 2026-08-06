@@ -46,6 +46,15 @@ describe("spawnBackground", () => {
     expect(result.content[0].text).toContain("my task");
   });
 
+  it("tells the parent to rely on automatic completion wake-up instead of polling", () => {
+    const { manager } = createToolDeps();
+    const text = spawnBackground(manager, makeParams()).content[0].text;
+    expect(text).toContain("automatically notify and wake you");
+    expect(text).toContain("do not poll");
+    expect(text).toContain("Use steer_subagent");
+    expect(text).toContain("Use get_subagent_result only");
+  });
+
   it("mentions 'queued' in result when record status is queued", () => {
     const deps = createToolDeps({
       manager: {

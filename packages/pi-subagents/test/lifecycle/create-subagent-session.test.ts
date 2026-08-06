@@ -87,6 +87,22 @@ describe("createSubagentSession — assembly", () => {
     );
   });
 
+  it("inherits the parent model runtime and uses a denylist so extension tools can register", async () => {
+    const modelRuntime = { marker: "parent-runtime" };
+    await createSubagentSession(
+      { snapshot: { ...STUB_SNAPSHOT, modelRuntime }, type: "Explore" },
+      createSubagentSessionDeps({ io, exec, registry: mockAgentLookup }),
+    );
+
+    const options = io.createSession.mock.calls[0][0];
+    expect(options.modelRuntime).toBe(modelRuntime);
+    expect(options.excludeTools).toEqual(expect.arrayContaining([
+      "edit", "write", "subagent", "get_subagent_result", "steer_subagent",
+    ]));
+    expect(options.excludeTools).not.toContain("read");
+    expect(options).not.toHaveProperty("tools");
+  });
+
   it("suppresses AGENTS.md/CLAUDE.md/APPEND_SYSTEM.md for subagents", async () => {
     await createSubagentSession(
       { snapshot: STUB_SNAPSHOT, type: "Explore" },

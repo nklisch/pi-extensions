@@ -27,6 +27,12 @@ describe("loadCustomAgents", () => {
     writeFileSync(join(dir, `${name}.md`), content);
   }
 
+  function writeSharedAgent(name: string, content: string) {
+    const dir = join(tmpDir, ".agents", "agents");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${name}.md`), content);
+  }
+
   it("returns empty map when .pi/agents/ does not exist", () => {
     const result = loadCustomAgents(tmpDir);
     expect(result.size).toBe(0);
@@ -173,6 +179,24 @@ Unknown mode.`);
 
     const result = loadCustomAgents(tmpDir);
     expect(result.get("badmode")!.promptMode).toBe("append");
+  });
+
+  it("discovers shared project agents from .agents/agents", () => {
+    writeSharedAgent("shared", "---\ndescription: Shared agent\n---\nShared prompt.");
+    const result = loadCustomAgents(tmpDir);
+    expect(result.get("shared")).toMatchObject({
+      description: "Shared agent",
+      source: "shared-project",
+    });
+  });
+
+  it("gives .pi/agents precedence over .agents/agents", () => {
+    writeSharedAgent("same", "---\ndescription: Shared\n---\nShared.");
+    writeAgent("same", "---\ndescription: Pi authority\n---\nPi.");
+    expect(loadCustomAgents(tmpDir).get("same")).toMatchObject({
+      description: "Pi authority",
+      source: "project",
+    });
   });
 
   it("loads multiple agents", () => {

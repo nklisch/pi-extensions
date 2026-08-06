@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  planGatedToolCommandChange,
   planReviewNoteDisplayCommandChange,
   type ReviewNoteDisplayCommandChange,
 } from "../../src/config/config-command-plans.ts";
@@ -19,9 +20,7 @@ let configHome: string;
 
 beforeEach(async () => {
   setPlatform("linux");
-  tempRoot = await mkdtemp(
-    path.join(tmpdir(), "pi-clearance-config-plans-"),
-  );
+  tempRoot = await mkdtemp(path.join(tmpdir(), "pi-clearance-config-plans-"));
   cwd = path.join(tempRoot, "repo");
   configHome = path.join(tempRoot, "xdg-config");
   process.env = { ...ORIGINAL_ENV, XDG_CONFIG_HOME: configHome };
@@ -31,6 +30,49 @@ beforeEach(async () => {
 afterEach(() => {
   setPlatform(ORIGINAL_PLATFORM);
   process.env = { ...ORIGINAL_ENV };
+});
+
+describe("planGatedToolCommandChange", () => {
+  it("plans exact global gated-tool additions and removals", async () => {
+    const resolved = await loadConfig({ cwd });
+    const add = planGatedToolCommandChange({
+      change: { kind: "add", toolName: "edit" },
+      resolvedConfig: resolved,
+    });
+    expect(add.ok).toBe(true);
+    if (!add.ok) throw new Error(add.reason);
+    expect(add.plan.patch).toEqual([
+      { op: "replace", path: "/gatedTools", before: [], value: ["edit"] },
+    ]);
+
+    const remove = planGatedToolCommandChange({
+      change: { kind: "remove", toolName: "edit" },
+      resolvedConfig: {
+        ...resolved,
+        gatedTools: ["edit"],
+        sourceSnapshots: {
+          ...resolved.sourceSnapshots!,
+          global: { ...resolved.sourceSnapshots!.global, gatedTools: ["edit"] },
+        },
+      },
+    });
+    expect(remove.ok).toBe(true);
+    if (!remove.ok) throw new Error(remove.reason);
+    expect(remove.plan.patch).toEqual([
+      { op: "replace", path: "/gatedTools", before: ["edit"], value: [] },
+    ]);
+  });
+
+  it.each(["bash", "*", "edit tool"])(
+    "rejects non-exact gated-tool names",
+    async (toolName) => {
+      const result = planGatedToolCommandChange({
+        change: { kind: "add", toolName },
+        resolvedConfig: await loadConfig({ cwd }),
+      });
+      expect(result.ok).toBe(false);
+    },
+  );
 });
 
 describe("planReviewNoteDisplayCommandChange", () => {

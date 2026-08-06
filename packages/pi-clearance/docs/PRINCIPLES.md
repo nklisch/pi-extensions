@@ -48,17 +48,20 @@ pretends the floor is still active.
 ## 5. Review is the safe default for uncertainty
 
 Parse failure, unsupported shell syntax, invalid config, ambiguous policy conflicts,
-unknown tools, model failure, and missing UI all move toward `review` or
+opted-in unknown tools, model failure, and missing UI all move toward `review` or
 block-and-log. They never become auto-allow by accident.
 
-`unknownToolPosture` defaults to `"allow"`: tools without a registered analyzer (non-bash
-extension and MCP tools) are ungated, because no structural analysis exists for them and
-review of an opaque tool is guesswork. Bash is always fully gated. Setting it to `"review"`
-or `"deny"` is an explicit tightening knob: those calls then bypass bash-specific structural
-analysis and the sealed bash deny floor when allowed, and carry no safety guarantee.
+Non-Bash extension and MCP tools are ungated by default because harness availability is
+the host approval boundary. Global `gatedTools` is an exact-name opt-in list with no
+wildcards or future-tool consent; Bash is always fully gated and cannot be listed. An
+opted-in tool without a registered analyzer uses `unknownToolPosture`, which defaults to
+`"allow"` and may be tightened to `"review"` or `"deny"`. The posture does not apply to
+absent names, and the next minor release must communicate this intentional typed-tool
+protection break.
 
-**Implication:** the interpreter must be pure and total: every input returns `allow`,
-`deny`, or `review` with a reason.
+**Implication:** the interpreter must be pure and total for gated calls: every analyzed
+or opted-in unknown input returns `allow`, `deny`, or `review` with a reason; bypasses are
+separately audit-visible.
 
 ## 6. Policy growth is agent-mediated, Pi-native, and user-approved
 
@@ -133,8 +136,9 @@ redacted, and clearly labeled as untrusted context.
 ## 11. Generalize only after a second tool earns it
 
 Bash is the proving ground. Other Pi tools should get analyzers when real history shows
-repeated review friction or safety ambiguity. The analyzer seam should be simple, but the
-policy model should not be warped around hypothetical tools.
+repeated review friction or safety ambiguity, and users must explicitly opt those tools
+into Clearance through exact names. The analyzer seam should be simple, but the policy
+model should not be warped around hypothetical tools.
 
 **Implication:** implement bash deeply before abstracting the whole product around generic
 tool policy.

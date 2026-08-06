@@ -5,6 +5,11 @@ import path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { ResolvedReviewerConfig } from "../../src/config/loader.ts";
+import {
+  gatherReviewerContext,
+  type ReviewerContextSources,
+} from "../../src/runtime/reviewer-context.ts";
 import {
   type AuditEntry,
   createConfigEventEntry,
@@ -111,6 +116,41 @@ describe("audit-log recent decision source", () => {
 });
 
 describe("session conversation turn source", () => {
+  it("excludes a Clearance allow custom message from curated intent and conversation", async () => {
+    const source = createSessionConversationTurnSource({
+      sessionManager: sessionManager([
+        messageEntry("assistant-1", "2026-06-25T12:02:00.000Z", {
+          role: "assistant",
+          content: [{ type: "text", text: "ordinary assistant context" }],
+        }),
+        clearanceAllowRequestEntry(),
+        messageEntry("user-1", "2026-06-25T12:00:00.000Z", {
+          role: "user",
+          content: [{ type: "text", text: "please run the focused tests" }],
+        }),
+      ]),
+    });
+    const sources: ReviewerContextSources = {
+      decisions: { readRecent: () => ({ items: [], warnings: [] }) },
+      conversation: source,
+    };
+
+    const bundle = await gatherReviewerContext(
+      sources,
+      reviewerContextConfig(),
+      { now: new Date("2026-06-25T12:03:00.000Z") },
+    );
+
+    expect(bundle?.userIntentTurns?.map((turn) => turn.text)).toEqual([
+      "please run the focused tests",
+    ]);
+    expect(bundle?.conversationTurns.map((turn) => turn.text)).toEqual([
+      "ordinary assistant context",
+    ]);
+    expect(JSON.stringify(bundle)).not.toContain("clearance.allow-request");
+    expect(JSON.stringify(bundle)).not.toContain("Author a policy proposal");
+  });
+
   it("returns only user and assistant text content from the current branch", () => {
     const source = createSessionConversationTurnSource({
       sessionManager: sessionManager([
@@ -270,6 +310,47 @@ function hiddenCustomMessageEntry(content: string): unknown {
     customType: "test",
     content,
     display: false,
+  };
+}
+
+function clearanceAllowRequestEntry(): unknown {
+  return {
+    type: "custom_message",
+    id: "clearance-allow-request",
+    parentId: null,
+    timestamp: "2026-06-25T12:01:00.000Z",
+    customType: "clearance.allow-request",
+    content: [
+      {
+        type: "text",
+        text: "[Pi Clearance] Author a policy proposal for the user's request.",
+      },
+    ],
+    details: {
+      brief: "Author a policy proposal for the user's request.",
+      form: "free-text",
+    },
+    display: true,
+  };
+}
+
+function reviewerContextConfig(): ResolvedReviewerConfig {
+  return {
+    promptPosture: "reviewer.default",
+    promptAppends: [],
+    projectPromptAppends: [],
+    promptOverride: null,
+    model: null,
+    tokenBudget: { window: "24h", limit: null },
+    contextMode: "recentContext",
+    recentContext: {
+      decisionLimit: 25,
+      decisionWindow: "2h",
+      conversationTurns: 3,
+      userTurns: 5,
+      conversationCharLimit: 6000,
+    },
+    escalation: { enabled: true, denialLimit: 3, window: "10m" },
   };
 }
 

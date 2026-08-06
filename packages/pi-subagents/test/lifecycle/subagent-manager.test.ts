@@ -34,6 +34,7 @@ function createManager(overrides?: {
     ? {
         onSubagentStarted: overrides.observer.onSubagentStarted ?? (() => {}),
         onSubagentCompleted: overrides.observer.onSubagentCompleted ?? (() => {}),
+        onSubagentResumed: overrides.observer.onSubagentResumed,
         onSubagentCompacted: overrides.observer.onSubagentCompacted ?? (() => {}),
         onSubagentCreated: overrides.observer.onSubagentCreated ?? (() => {}),
       }
@@ -95,6 +96,7 @@ function seedNotificationScenario() {
   const { manager } = createManager({
     observer: { onSubagentCompleted: (r) => notifications.sendCompletion(r) },
   });
+  notifications.onParentAgentStart();
   const id = spawnBgWithToolCall(manager, "tc-1");
   const record = manager.getRecord(id)!;
   return { manager, record, notifications, sendMessage };
@@ -112,35 +114,27 @@ describe("SubagentManager — Bug 1 race condition (consumed state vs onComplete
     vi.useRealTimers();
   });
 
-  it("consume() called after awaiting still suppresses the nudge — the atomic consume() operation", async () => {
+  it("suppresses a withheld nudge when the parent consumes after awaiting", async () => {
     const seeded = seedNotificationScenario();
     manager = seeded.manager;
     const { record, notifications, sendMessage } = seeded;
 
-    // onSubagentCompleted already scheduled the nudge by the time this await
-    // resumes (it fires synchronously inside record.promise's resolution
-    // chain, as the original Bug 1 comment noted). consume() still cancels
-    // it because it always cancels the pending timer as part of one atomic
-    // tell — unlike the old markConsumed()-only flag, which needed a
-    // separately paired cancelNudge() call to actually kill the timer.
     await record.promise;
-    notifications.consume(record.id);
+    record.markConsumed();
+    notifications.onParentAgentSettled();
 
-    await vi.advanceTimersByTimeAsync(300);
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
-  it("fix: nudge is suppressed when consume() is called before await", async () => {
+  it("flushes a withheld nudge when the result remains unconsumed", async () => {
     const seeded = seedNotificationScenario();
     manager = seeded.manager;
     const { record, notifications, sendMessage } = seeded;
 
-    // The fix: consume BEFORE awaiting
-    notifications.consume(record.id);
     await record.promise;
+    notifications.onParentAgentSettled();
 
-    await vi.advanceTimersByTimeAsync(300);
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledOnce();
   });
 
   it("onComplete is not called for foreground agents", async () => {
@@ -256,7 +250,7 @@ describe("SubagentManager — Bug 3 clearCompleted", () => {
   });
 });
 
-describe("SubagentManager — evicted descriptors", () => {
+describe("SubagentManager — consumption-aware session retention", () => {
   let manager: SubagentManager;
 
   afterEach(() => {
@@ -264,48 +258,53 @@ describe("SubagentManager — evicted descriptors", () => {
     manager.dispose();
   });
 
-  /** Spawn, await completion, then evict via the 10-minute cleanup sweep. */
-  async function spawnAndEvict(outputFile?: string): Promise<string> {
-    const { factory } = createSessionFactory(createMockSession(), outputFile);
-    ({ manager } = createManager({ createSubagentSession: factory }));
+  async function spawnCompleted(): Promise<Subagent> {
+    const { factory } = createSessionFactory(createMockSession(), "/tasks/agent.jsonl");
+    ({ manager } = createManager({
+      createSubagentSession: factory,
+      getRunConfig: () => ({
+        defaultMaxTurns: undefined,
+        graceTurns: 5,
+        consumedSessionRetentionMinutes: 10,
+        unconsumedSessionRetentionMinutes: 720,
+      }),
+    }));
     const id = spawnBg(manager, "test", "investigate the bug");
-    await manager.getRecord(id)!.promise;
-    const completedAt = manager.getRecord(id)!.completedAt!;
-    vi.spyOn(Date, "now").mockReturnValue(completedAt + 11 * 60_000);
-    (manager as any).cleanup();
-    return id;
+    const record = manager.getRecord(id)!;
+    await record.promise;
+    return record;
   }
 
-  it("retains a descriptor for an evicted agent with an outputFile", async () => {
-    const id = await spawnAndEvict("/tasks/agent.jsonl");
+  it("releases a consumed live session after the short window but keeps its record", async () => {
+    const record = await spawnCompleted();
+    record.markConsumed(record.completedAt);
+    vi.spyOn(Date, "now").mockReturnValue(record.completedAt! + 11 * 60_000);
+    (manager as any).cleanup();
 
-    expect(manager.listAgents()).toHaveLength(0);
-    const evicted = manager.listEvicted();
-    expect(evicted).toHaveLength(1);
-    expect(evicted[0]).toMatchObject({
-      id,
-      type: "general-purpose",
-      description: "investigate the bug",
-      status: "completed",
-      toolUses: 0,
-      outputFile: "/tasks/agent.jsonl",
-    });
-    expect(typeof evicted[0].startedAt).toBe("number");
+    expect(manager.getRecord(record.id)).toBe(record);
+    expect(record.isSessionReady()).toBe(false);
+    expect(record.outputFile).toBe("/tasks/agent.jsonl");
   });
 
-  it("does not retain a descriptor for an evicted agent without an outputFile", async () => {
-    await spawnAndEvict(undefined);
-
-    expect(manager.listAgents()).toHaveLength(0);
-    expect(manager.listEvicted()).toEqual([]);
+  it("retains an unconsumed live session past the consumed window", async () => {
+    const record = await spawnCompleted();
+    vi.spyOn(Date, "now").mockReturnValue(record.completedAt! + 11 * 60_000);
+    (manager as any).cleanup();
+    expect(record.isSessionReady()).toBe(true);
   });
 
-  it("clearCompleted empties the evicted descriptors", async () => {
-    await spawnAndEvict("/tasks/agent.jsonl");
-    expect(manager.listEvicted()).toHaveLength(1);
+  it("releases an unconsumed live session at the safety cap", async () => {
+    const record = await spawnCompleted();
+    vi.spyOn(Date, "now").mockReturnValue(record.completedAt! + 721 * 60_000);
+    (manager as any).cleanup();
+    expect(record.isSessionReady()).toBe(false);
+    expect(manager.getRecord(record.id)).toBe(record);
+  });
 
+  it("clearCompleted removes retained records for the prior parent session", async () => {
+    const record = await spawnCompleted();
     manager.clearCompleted();
-    expect(manager.listEvicted()).toEqual([]);
+    expect(manager.getRecord(record.id)).toBeUndefined();
   });
 });
 
@@ -568,10 +567,26 @@ describe("SubagentManager — queueing and concurrency with injected stubs", () 
     // Abort the queued agent
     expect(manager.abort(queued)).toBe(true);
     expect(manager.getRecord(queued)!.status).toBe("stopped");
+    expect(manager.getRecord(queued)!.stoppedWhileQueued).toBe(true);
 
     // factory was called once (for the first agent), never for the aborted one
     expect(factory).toHaveBeenCalledOnce();
 
+    manager.abort(running);
+  });
+
+  it("routes a queued stop through the terminal observer", () => {
+    const completed = vi.fn();
+    const factory = createBlockingFactory();
+    ({ manager } = createManager({
+      createSubagentSession: factory,
+      getMaxConcurrent: () => 1,
+      observer: { onSubagentCompleted: completed },
+    }));
+    const running = spawnBg(manager, "first");
+    const queued = spawnBg(manager, "second");
+    manager.abort(queued);
+    expect(completed).toHaveBeenCalledExactlyOnceWith(manager.getRecord(queued));
     manager.abort(running);
   });
 

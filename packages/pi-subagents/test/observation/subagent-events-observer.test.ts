@@ -124,6 +124,18 @@ describe("SubagentEventsObserver", () => {
 		});
 	});
 
+	describe("onSubagentResumed", () => {
+		it("emits the additive resumed channel without scheduling a background nudge", () => {
+			const notifications = makeNotifications();
+			const { observer, emit, appendEntry } = makeObserver({ notifications });
+			const record = createTestSubagent({ status: "completed", result: "continued" });
+			observer.onSubagentResumed(record);
+			expect(emit).toHaveBeenCalledWith("subagents:resumed", buildEventData(record));
+			expect(appendEntry).toHaveBeenCalledWith("subagents:record", expect.anything());
+			expect(notifications.sendCompletion).not.toHaveBeenCalled();
+		});
+	});
+
 	describe("onSubagentCompacted", () => {
 		it("emits subagents:compacted with id, type, description, reason, tokensBefore, compactionCount", () => {
 			const { observer, emit } = makeObserver();

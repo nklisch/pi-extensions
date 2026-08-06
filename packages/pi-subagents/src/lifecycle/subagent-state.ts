@@ -34,8 +34,12 @@ export interface SubagentStateInit {
 	status?: SubagentStatus;
 	result?: string;
 	error?: string;
+	/** Whether the limiter never admitted this agent. */
+	stoppedWhileQueued?: boolean;
 	startedAt?: number;
 	completedAt?: number;
+	/** Time the parent first collected the terminal outcome. */
+	consumedAt?: number;
 }
 
 export class SubagentState {
@@ -54,6 +58,13 @@ export class SubagentState {
 
 	private _completedAt?: number;
 	get completedAt(): number | undefined { return this._completedAt; }
+
+	private _stoppedWhileQueued: boolean;
+	get stoppedWhileQueued(): boolean { return this._stoppedWhileQueued; }
+
+	private _consumedAt?: number;
+	get consumedAt(): number | undefined { return this._consumedAt; }
+	get consumed(): boolean { return this._consumedAt != null; }
 
 	// Stats — accumulated via mutation methods, readable via getters
 	private _toolUses = 0;
@@ -81,8 +92,10 @@ export class SubagentState {
 		this._status = init.status ?? "queued";
 		this._result = init.result;
 		this._error = init.error;
+		this._stoppedWhileQueued = init.stoppedWhileQueued ?? false;
 		this._startedAt = init.startedAt ?? Date.now();
 		this._completedAt = init.completedAt;
+		this._consumedAt = init.consumedAt;
 	}
 
 	/** Increment tool use count. Called by record-observer on tool_execution_end. */
@@ -177,17 +190,34 @@ export class SubagentState {
 	 * Always sets error (formatted) and completedAt (??=). Only changes status if not stopped.
 	 */
 	markError(error: unknown, completedAt?: number): void {
+		this.markFailed(error, undefined, completedAt);
+	}
+
+	/** Record a failure together with any partial output produced before it. */
+	markFailed(error: unknown, partialResult?: string, completedAt?: number): void {
 		this._error = error instanceof Error ? error.message : String(error);
+		this._result = partialResult?.trim() ? partialResult : undefined;
 		this._completedAt ??= completedAt ?? Date.now();
 		if (this._status !== "stopped") {
 			this._status = "error";
 		}
 	}
 
+	/** Record that the parent collected the outcome. Idempotent. */
+	markConsumed(at?: number): void {
+		this._consumedAt ??= at ?? Date.now();
+	}
+
 	/** Transition to stopped state. Always valid — no guard. */
 	markStopped(completedAt?: number): void {
 		this._status = "stopped";
 		this._completedAt = completedAt ?? Date.now();
+	}
+
+	/** Stop an agent before the limiter admitted it. */
+	stopQueued(completedAt?: number): void {
+		if (this._status === "queued") this._stoppedWhileQueued = true;
+		this.markStopped(completedAt);
 	}
 
 	/** Reset for resume: running status, new startedAt, clear completedAt/result/error. */
@@ -197,5 +227,7 @@ export class SubagentState {
 		this._completedAt = undefined;
 		this._result = undefined;
 		this._error = undefined;
+		this._consumedAt = undefined;
+		this._stoppedWhileQueued = false;
 	}
 }

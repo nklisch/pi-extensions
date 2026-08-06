@@ -1,6 +1,10 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 import type { ToolAnalyzerRegistry } from "../../parse/registry.ts";
+import {
+  CLEARANCE_ALLOW_REQUEST_CUSTOM_TYPE,
+  type ClearanceAllowRequestDetails,
+} from "../allow-request-message.ts";
 import type { ToolShape } from "../../parse/shape.ts";
 import {
   flattenStages,
@@ -385,10 +389,30 @@ async function handoff(
   if (!prepared.ok) return prepared.report;
 
   try {
+    const details: ClearanceAllowRequestDetails = {
+      brief: prepared.brief,
+      form: prepared.form,
+    };
     if (ctx.isIdle()) {
-      await pi.sendUserMessage(prepared.brief);
+      await pi.sendMessage(
+        {
+          customType: CLEARANCE_ALLOW_REQUEST_CUSTOM_TYPE,
+          content: prepared.brief,
+          display: true,
+          details,
+        },
+        { triggerTurn: true },
+      );
     } else {
-      await pi.sendUserMessage(prepared.brief, { deliverAs: "followUp" });
+      await pi.sendMessage(
+        {
+          customType: CLEARANCE_ALLOW_REQUEST_CUSTOM_TYPE,
+          content: prepared.brief,
+          display: true,
+          details,
+        },
+        { deliverAs: "followUp" },
+      );
     }
   } catch (error: unknown) {
     const message = errorMessage(error);

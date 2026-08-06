@@ -1,7 +1,6 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 import { buildAutoReviewerStatusView } from "../auto-reviewer-read-models.ts";
-import type { ReviewerModelRegistry } from "../reviewer-model.ts";
 import {
   canOpenSettingsNativeUi,
   openSettingsNativeUi,
@@ -16,6 +15,9 @@ import {
   resolvePolicyReport,
   usageReport,
 } from "./types.ts";
+import { availableReviewerModels } from "./settings/model-options.ts";
+
+export { availableReviewerModels } from "./settings/model-options.ts";
 
 type SettingsNativePanel = SettingsReadModel["panels"][number]["id"];
 
@@ -156,9 +158,7 @@ async function buildSettingsCommandView(
       : {
           ...policy.policy.config.projectScope,
           safeHomeUseDefaults: rawScope.safeHomeUseDefaults,
-          ...(rawScope.agentSupportUseDefaults === undefined
-            ? {}
-            : { agentSupportUseDefaults: rawScope.agentSupportUseDefaults }),
+          agentSupportUseDefaults: rawScope.agentSupportUseDefaults ?? true,
           homePathBehavior: rawScope.homePathBehavior,
           sensitivePathBehavior: rawScope.sensitivePathBehavior,
         };
@@ -183,43 +183,38 @@ async function buildSettingsCommandView(
       };
     }),
     reviewerModels: availableReviewerModels(ctx),
+    gatedTools: buildGatedToolsReadModel(
+      policy.policy.config.gatedTools ?? [],
+      deps.toolMetadata?.() ?? { activeToolNames: [], allToolNames: [] },
+    ),
   });
 
   return { ok: true, model };
 }
 
-const REVIEWER_MODEL_OPTION_LIMIT = 12;
+function buildGatedToolsReadModel(
+  gatedTools: readonly string[],
+  metadata: {
+    readonly activeToolNames: readonly string[];
+    readonly allToolNames: readonly string[];
+  },
+): SettingsReadModel["gatedTools"] {
+  const names = uniqueToolNames(gatedTools).filter((name) => name !== "bash");
+  const activeToolNames = uniqueToolNames(metadata.activeToolNames).filter(
+    (name) => name !== "bash",
+  );
+  const allToolNames = uniqueToolNames(metadata.allToolNames).filter(
+    (name) => name !== "bash",
+  );
+  const addSource = activeToolNames.length > 0 ? activeToolNames : allToolNames;
+  return {
+    names,
+    activeToolNames,
+    allToolNames,
+    addableToolNames: addSource.filter((name) => !names.includes(name)),
+  };
+}
 
-/** Available reviewer model specs (provider/modelId) with configured auth. */
-export function availableReviewerModels(
-  ctx: ExtensionCommandContext,
-): readonly { readonly spec: string; readonly label: string }[] {
-  // Pi's ModelRegistry.hasConfiguredAuth takes the MODEL, not a provider
-  // string — passing a string silently filters out every model.
-  const registry = (ctx as { readonly modelRegistry?: unknown })
-    .modelRegistry as ReviewerModelRegistry | undefined;
-  if (
-    registry === undefined ||
-    typeof registry.getAll !== "function" ||
-    typeof registry.hasConfiguredAuth !== "function"
-  ) {
-    return [];
-  }
-
-  try {
-    return registry
-      .getAll()
-      .filter((model) => registry.hasConfiguredAuth(model))
-      .map((model) => ({
-        spec: `${model.provider}/${model.id}`,
-        label:
-          typeof model.name === "string" && model.name.length > 0
-            ? `${model.name} (${model.provider}/${model.id})`
-            : `${model.provider}/${model.id}`,
-      }))
-      .sort((a, b) => a.spec.localeCompare(b.spec))
-      .slice(0, REVIEWER_MODEL_OPTION_LIMIT);
-  } catch {
-    return [];
-  }
+function uniqueToolNames(names: readonly string[]): string[] {
+  return [...new Set(names.filter((name) => name.trim().length > 0))].sort();
 }

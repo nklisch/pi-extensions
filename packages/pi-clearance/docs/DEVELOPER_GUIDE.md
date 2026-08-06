@@ -8,7 +8,7 @@ For product behavior, start with [README.md](../README.md) and [USER_GUIDE.md](U
 
 ## Requirements
 
-- Node.js 24 or newer
+- Node.js 22.18 or newer
 - npm 11
 - a stable Rust toolchain for native builds and tests
 - Pi, when testing the extension in a real session
@@ -50,8 +50,12 @@ Node-API addon, not a package-install build:
 
 Pi loads `src/index.ts` as the extension composition root. `src/native/loader.ts`
 resolves the matching artifact from the package's `native/` directory. A missing
-artifact refuses to arm the extension; no install script or Cargo fallback exists.
-Native builds are contributor- and release-only. Release CI builds every declared
+artifact refuses to arm the extension; installation never invokes Cargo. The
+package `postinstall` runs `src/config/postinstall.ts` with Node's built-in type
+stripping and repairs only existing user-owned config files; it does not create
+missing files. Symlinked global files, overlays, and project directories are
+reported as skipped rather than followed or replaced; those deliberate skips do
+not fail installation. Native builds are contributor- and release-only. Release CI builds every declared
 target and stages all artifacts into the existing Pi Clearance package before
 publishing.
 
@@ -97,6 +101,8 @@ README.md or docs/*.md    # docs linked from pack metadata
 The registration payload provides package provenance (`name`, optional `version`, install kind,
 source spec, package path, entrypoint path) for display and audit. Provenance is not trust:
 installation makes packs visible in the registry, while user-owned config enables them later.
+The package install repair may also compact existing Clearance settings, but it never
+activates a pack or creates a missing settings file.
 Bad registrations produce issues and no active policy. `/reload` clears the in-memory snapshot
 and asks package extensions to register again. Contributor extensions should keep the unsubscribe
 returned by `pi.events.on` and call it from `session_shutdown`; Pi reuses the event bus across
@@ -132,7 +138,7 @@ package README snippets.
 
 The primary command surface is `/clearance`, `/clearance setup`, `/clearance mode [off|ask|auto]`, `/clearance settings`, `/clearance status`, `/clearance packs`, `/clearance scope`, `/clearance tune`, and `/clearance why`. The former profile and auto commands are removed with no aliases.
 
-Bare `/clearance` and `/clearance settings` open the native in-chat settings component in `src/runtime/config-commands/settings/native-ui.ts`. There is intentionally no markdown fallback for settings: hosts without Pi's `ctx.ui.custom()` surface get a no-write unavailable result instead of a transcript dump.
+Bare `/clearance` opens guided setup; `/clearance settings` opens the native in-chat settings component in `src/runtime/config-commands/settings/native-ui.ts`; `/clearance mode` without an argument also opens settings. There is intentionally no markdown fallback for settings: hosts without Pi's `ctx.ui.custom()` surface get a no-write unavailable result instead of a transcript dump.
 
 Settings panels must route every mutation through `dispatchSettingsAction` in `src/runtime/config-commands/settings/dispatcher.ts`. The stable action ids live in `SettingsActionId` in `src/runtime/config-commands/settings/actions.ts`. That type is the single list panels use for both write actions and drill actions.
 
@@ -151,17 +157,18 @@ The dispatcher keeps settings writes on the same path as direct commands: existi
 
 1. Pi fires `session_start`; the policy resolver warms the config cache.
 2. Pi fires `tool_call`.
-3. The TypeScript runtime sends the tool input plus resolved scope/config snapshot into the lazy native engine.
-4. The Rust core analyzes the tool input, parses bash structurally, derives path facts, validates/compiles data packs, and evaluates effective policy.
-5. The native policy result returns `allow`, `deny`, or `review`.
-6. `review` goes through the runtime reviewer path:
+3. The TypeScript runtime resolves exact `gatedTools`; an absent non-Bash name is audit-logged as allow/bypass and executes without analyzer or policy evaluation. Bash and opted-in names continue through the shared path.
+4. The TypeScript runtime sends the tool input plus resolved scope/config snapshot into the lazy native engine.
+5. The Rust core analyzes the tool input, parses bash structurally, derives path facts, validates/compiles data packs, and evaluates effective policy.
+6. The native policy result returns `allow`, `deny`, or `review`.
+7. `review` goes through the runtime reviewer path:
    - token-budget gate;
    - optional recent-context gathering;
    - model adapter when global Clearance mode is `auto`;
    - temporary escalation/contention labels for repeated denies or unresolved calls;
    - human UI fallback only after the model path is unavailable, fails, or denies/escalates;
    - block-and-log fallback.
-7. Audit entries are written for policy and reviewer decisions.
+8. Audit entries are written for policy and reviewer decisions.
 
 Do not move safety decisions into prompt text. Prompt text is for runtime review only; deterministic policy remains the source of truth for fast paths and hard blocks.
 

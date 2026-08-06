@@ -38,6 +38,7 @@ Not yet recorded.
 
 ## Project-specific guidance
 
+- Agent model posture: GPT-5.6 Luna at `xhigh` implements all repository work. Kimi K3 or GPT-5.6 Sol reviews implementations. GPT-5.6 Sol or Kimi K3 handles design.
 - Inter-package dependency ranges are major-only (`^0`, `^2`) — never exact
   pins and never patch-floor carets (`^0.1.18` on a 0.x package means
   `>=0.1.18 <0.2.0`, which silently strands consumers on an old minor line;

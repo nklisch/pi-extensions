@@ -19,6 +19,7 @@ const defaultRecentContext = {
   decisionLimit: 25,
   decisionWindow: "2h",
   conversationTurns: 3,
+  userTurns: 5,
   conversationCharLimit: 6000,
 } as const;
 
@@ -120,10 +121,10 @@ describe("reviewer context curation", () => {
       "Authorization: Bearer [redacted]",
     );
     expect(bundle.decisions[0]?.command).toBe("echo api_key=[redacted]");
-    expect(bundle.conversationTurns[0]?.text).toContain(
+    expect(bundle.userIntentTurns?.[0]?.text).toContain(
       "Authorization: Bearer [redacted]",
     );
-    expect(bundle.conversationTurns[0]?.text).toContain("password=[redacted]");
+    expect(bundle.userIntentTurns?.[0]?.text).toContain("password=[redacted]");
     expect(renderContextBundle(bundle)).not.toContain("hunter2");
   });
 
@@ -176,6 +177,7 @@ describe("reviewer context curation", () => {
         recentContext: {
           ...defaultRecentContext,
           conversationTurns: 3,
+          userTurns: 0,
           conversationCharLimit: 30,
         },
       }),
@@ -249,7 +251,8 @@ describe("reviewer context gather", () => {
     );
 
     expect(bundle?.decisions).toHaveLength(1);
-    expect(bundle?.conversationTurns).toHaveLength(1);
+    expect(bundle?.userIntentTurns).toHaveLength(1);
+    expect(bundle?.conversationTurns).toHaveLength(0);
     expect(bundle?.warnings).toEqual([]);
   });
 
@@ -351,8 +354,8 @@ function sources(raw: {
 }
 
 function totalConversationTextLength(bundle: ReviewerContextBundle): number {
-  return bundle.conversationTurns.reduce(
-    (total, turnSummary) => total + turnSummary.text.length,
-    0,
-  );
+  return [
+    ...(bundle.userIntentTurns ?? []),
+    ...bundle.conversationTurns,
+  ].reduce((total, turnSummary) => total + turnSummary.text.length, 0);
 }

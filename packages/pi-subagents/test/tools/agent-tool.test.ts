@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { AgentTool } from "#src/tools/agent-tool";
 import { createToolDeps, createToolDepsWithDisabledBuiltInAgents } from "#test/helpers/make-deps";
-import { createTestSubagent } from "#test/helpers/make-subagent";
+import { makeModel } from "#test/helpers/make-model";
+import { createTestSubagent, makeStubExecution } from "#test/helpers/make-subagent";
 import { createMockSession, createSubagentSessionStub, toSubagentSession } from "#test/helpers/mock-session";
 
 function makeCtx(overrides: Record<string, unknown> = {}) {
@@ -45,9 +46,10 @@ describe("AgentTool", () => {
 
 	it("derives type list from registry — includes default agents in description", () => {
 		const def = makeTool(createToolDeps()).toToolDefinition();
-		// testRegistry loads default agents: general-purpose, Explore, Plan
+		// The package ships only general-purpose and Explore defaults.
 		expect(def.description).toContain("- general-purpose: General-purpose agent");
 		expect(def.description).toContain("- Explore: Fast codebase exploration agent");
+		expect(def.description).not.toContain("- Plan:");
 	});
 
 	it("lists the built-in agent guidelines in registry order", () => {
@@ -55,14 +57,13 @@ describe("AgentTool", () => {
 		const guidelines = [
 			"- Use general-purpose for complex tasks that need file editing.",
 			"- Use Explore for codebase searches and code understanding.",
-			"- Use Plan for architecture and implementation planning.",
 		];
 		for (const line of guidelines) expect(def.description).toContain(line);
 		const positions = guidelines.map((line) => def.description.indexOf(line));
 		expect(positions).toEqual([...positions].sort((a, b) => a - b));
 	});
 
-	it.for(["Explore", "Plan", "general-purpose"])(
+	it.for(["Explore", "general-purpose"])(
 		"omits the type-list entry and guideline for a disabled built-in %s",
 		(name) => {
 			const def = makeTool(createToolDepsWithDisabledBuiltInAgents(name)).toToolDefinition();
@@ -70,6 +71,20 @@ describe("AgentTool", () => {
 			expect(def.description).not.toContain(`- Use ${name} for `);
 		},
 	);
+
+	it("explains steer, resume, fresh context, and automatic background wake-up", () => {
+		const def = makeTool(createToolDeps()).toToolDefinition();
+		expect(def.description).toContain("automatically wakes you");
+		expect(def.description).toContain("instead of polling");
+		expect(def.description).toContain("steer_subagent to redirect an agent that is still running");
+		expect(def.description).toContain("resume only after an agent finishes");
+		expect(def.description).toContain("same retained conversation history");
+		expect(def.description).toContain("Launch a new subagent without resume");
+		expect(def.parameters.properties.resume.description).toContain("retained, finished session");
+		expect(def.parameters.properties.resume.description).toContain("same conversation history");
+		expect(def.parameters.properties.run_in_background.description).toContain("automatically wakes you");
+		expect(def.parameters.properties.thinking.description).toContain("max");
+	});
 
 	it("calls registry.reload() on each execute", async () => {
 		const deps = createToolDeps();
@@ -116,14 +131,65 @@ describe("AgentTool — resume path", () => {
 		const resumeRecord = createTestSubagent();
 		resumeRecord.subagentSession = toSubagentSession(createSubagentSessionStub(createMockSession()));
 		deps.manager.getRecord = vi.fn().mockReturnValue(resumeRecord);
-		deps.manager.resume = vi.fn().mockResolvedValue(createTestSubagent({ result: "Resumed output." }));
+		const resumed = createTestSubagent({
+			result: "Resumed output.",
+			execution: makeStubExecution({ model: makeModel({ provider: "zai", id: "glm-5.2" }) }),
+		});
+		deps.manager.resume = vi.fn().mockResolvedValue(resumed);
 		const result = await execute(deps, {
 			prompt: "continue",
 			description: "resume",
 			subagent_type: "general-purpose",
 			resume: "agent-1",
 		});
+		expect(result.content[0].text).toContain("Model: zai/glm-5.2");
+		expect(result.content[0].text).toContain("Runtime: 1.0s");
 		expect(result.content[0].text).toContain("Resumed output.");
+		expect(result.details).toMatchObject({ modelName: "zai/glm-5.2", durationMs: 1000 });
+	});
+
+	it("reports a resumed provider failure with partial output", async () => {
+		const deps = createToolDeps();
+		const resumeRecord = createTestSubagent();
+		resumeRecord.subagentSession = toSubagentSession(createSubagentSessionStub(createMockSession()));
+		deps.manager.getRecord = vi.fn().mockReturnValue(resumeRecord);
+		deps.manager.resume = vi.fn().mockResolvedValue(createTestSubagent({
+			status: "error",
+			error: "Provider error: overloaded",
+			result: "Useful partial work.",
+		}));
+
+		const result = await execute(deps, {
+			prompt: "continue",
+			description: "resume",
+			subagent_type: "general-purpose",
+			resume: "agent-1",
+		});
+
+		expect(result.content[0].text).toContain("Error: Provider error: overloaded");
+		expect(result.content[0].text).toContain("Partial output before the failure:\nUseful partial work.");
+	});
+
+	it("reports a resumed provider failure without partial output", async () => {
+		const deps = createToolDeps();
+		const resumeRecord = createTestSubagent();
+		resumeRecord.subagentSession = toSubagentSession(createSubagentSessionStub(createMockSession()));
+		deps.manager.getRecord = vi.fn().mockReturnValue(resumeRecord);
+		deps.manager.resume = vi.fn().mockResolvedValue(createTestSubagent({
+			status: "error",
+			error: "Provider error: unavailable",
+			result: undefined,
+		}));
+
+		const result = await execute(deps, {
+			prompt: "continue",
+			description: "resume",
+			subagent_type: "general-purpose",
+			resume: "agent-1",
+		});
+
+		expect(result.content[0].text).toContain("Error: Provider error: unavailable");
+		expect(result.content[0].text).not.toContain("Partial output");
 	});
 });
 

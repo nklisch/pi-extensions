@@ -146,6 +146,32 @@ describe("settings persistence", () => {
       expect(loadSettings(globalDir, projectDir)).toEqual({});
     });
 
+    it("accepts retention, interrupt, and fallback policy fields", () => {
+      writeProject({
+        consumedSessionRetentionMinutes: 0,
+        unconsumedSessionRetentionMinutes: 1440,
+        abortAllOnInterrupt: false,
+        fallbackSubagent: "none",
+      });
+      expect(loadSettings(globalDir, projectDir)).toEqual({
+        consumedSessionRetentionMinutes: 0,
+        unconsumedSessionRetentionMinutes: 1440,
+        abortAllOnInterrupt: false,
+        fallbackSubagent: false,
+      });
+    });
+
+    it("drops invalid retention and fallback values independently", () => {
+      writeProject({
+        consumedSessionRetentionMinutes: -1,
+        unconsumedSessionRetentionMinutes: 1.5,
+        abortAllOnInterrupt: "yes",
+        fallbackSubagent: "",
+        graceTurns: 3,
+      });
+      expect(loadSettings(globalDir, projectDir)).toEqual({ graceTurns: 3 });
+    });
+
     it("returns {} when the JSON root is not an object (array, string, null)", () => {
       mkdirSync(join(projectDir, ".pi"), { recursive: true });
       writeFileSync(projectFile(), '["not", "an", "object"]');
@@ -397,10 +423,20 @@ describe("SettingsManager", () => {
     });
   });
 
+  const defaultSnapshot = {
+    maxConcurrent: 4,
+    defaultMaxTurns: 0,
+    graceTurns: 5,
+    consumedSessionRetentionMinutes: 10,
+    unconsumedSessionRetentionMinutes: 720,
+    abortAllOnInterrupt: true,
+    fallbackSubagent: "general-purpose" as const,
+  };
+
   describe("snapshot()", () => {
     it("returns default values before any changes", () => {
       const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
-      expect(sm.snapshot()).toEqual({ maxConcurrent: 4, defaultMaxTurns: 0, graceTurns: 5 });
+      expect(sm.snapshot()).toEqual(defaultSnapshot);
     });
 
     it("reflects mutations: defaultMaxTurns undefined maps to 0 in snapshot", () => {
@@ -408,13 +444,13 @@ describe("SettingsManager", () => {
       sm.defaultMaxTurns = undefined;
       sm.graceTurns = 3;
       sm.maxConcurrent = 8;
-      expect(sm.snapshot()).toEqual({ maxConcurrent: 8, defaultMaxTurns: 0, graceTurns: 3 });
+      expect(sm.snapshot()).toEqual({ ...defaultSnapshot, maxConcurrent: 8, graceTurns: 3 });
     });
 
     it("reflects a concrete defaultMaxTurns value", () => {
       const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
       sm.defaultMaxTurns = 20;
-      expect(sm.snapshot()).toEqual({ maxConcurrent: 4, defaultMaxTurns: 20, graceTurns: 5 });
+      expect(sm.snapshot()).toEqual({ ...defaultSnapshot, defaultMaxTurns: 20 });
     });
   });
 
@@ -436,7 +472,7 @@ describe("SettingsManager", () => {
       const toast = sm.saveAndNotify("Max concurrency set to 5");
       expect(toast).toEqual({ message: "Max concurrency set to 5", level: "info" });
       const written = JSON.parse(readFileSync(join(projectDir, ".pi", "subagents.json"), "utf-8"));
-      expect(written).toEqual({ maxConcurrent: 5, defaultMaxTurns: 0, graceTurns: 5 });
+      expect(written).toEqual({ ...defaultSnapshot, maxConcurrent: 5 });
     });
 
     it("emits subagents:settings_changed with persisted:true on success", () => {
@@ -445,7 +481,7 @@ describe("SettingsManager", () => {
       sm.graceTurns = 3;
       sm.saveAndNotify("Grace turns set to 3");
       expect(emit).toHaveBeenCalledWith("subagents:settings_changed", {
-        settings: { maxConcurrent: 4, defaultMaxTurns: 0, graceTurns: 3 },
+        settings: { ...defaultSnapshot, graceTurns: 3 },
         persisted: true,
       });
     });
@@ -473,7 +509,7 @@ describe("SettingsManager", () => {
         const sm = new SettingsManager({ emit, cwd: filePosingAsCwd, agentDir: "/nonexistent" });
         sm.saveAndNotify("something");
         expect(emit).toHaveBeenCalledWith("subagents:settings_changed", {
-          settings: { maxConcurrent: 4, defaultMaxTurns: 0, graceTurns: 5 },
+          settings: defaultSnapshot,
           persisted: false,
         });
       } finally {

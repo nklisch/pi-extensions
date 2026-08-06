@@ -4,7 +4,9 @@
 Pi tool_call
   -> runtime handler
   -> config/package/scope resolution
-  -> structural analyzer
+  -> exact non-Bash gate check
+     -> absent name: audit allow/bypass -> execute
+     -> Bash or opted-in name: structural analyzer
   -> sealed floor + baseline + overlays
   -> allow / deny / review
   -> mode dispatch: passthrough / human / model-first
@@ -32,11 +34,16 @@ stages both `clearance-core.<platform>.node` artifacts into the existing
 `@nklisch/pi-clearance` package. The loader selects the matching bundled artifact
 at runtime. Publishing fails unless every declared target is present, preventing a
 release that works only on the publisher's host. Installation never builds Rust and
-does not create separate platform packages.
+does not create separate platform packages. The npm `postinstall` entrypoint only
+repairs existing platform-specific Clearance config files: it compacts valid
+materialized defaults, resets invalid or obsolete files after backing them up, and
+never creates absent config files. It does not follow or replace symlinked global
+files, overlays, or project directories; each deliberate skip is reported as a
+warning while installation remains successful.
 
 ## Policy and dispatch
 
-The handler never skips deterministic policy. `dispatchReview` is the only tri-state seam:
+The handler resolves config before dispatch. Bash and exact names in global `gatedTools` use the deterministic pipeline; absent non-Bash names short-circuit before analysis/policy, audit an allow/bypass, and execute. `dispatchReview` is the only tri-state seam for opted-in review results:
 
 - `off`: return allow, log `reviewer.decision` with `decisionSource: "mode-off-passthrough"`;
 - `ask`: human adapter, then block-and-log when unattended;
@@ -46,4 +53,4 @@ Consent is not a runtime state. `mode: "auto"` in explicit user configuration is
 
 ## Settings
 
-The settings read model exposes one mode selector. Reviewer details are read-only except interactive model selection. Briefing/display and reviewer prompt/context/budget/escalation writes are advanced config-file concerns. The baseline explorer uses `inBaseline`; it does not expose policy posture membership.
+The settings read model exposes compact selector/toggle rows for mode, reviewer model/posture, scope preset and unknown-path behavior, briefing/display controls, and exact gated non-Bash tools. Every mutation uses the existing planner, confirmation, atomic writer, reload, and policy invalidation path. The baseline explorer uses `inBaseline`; it does not expose policy posture membership. Status exposes one concise customization-category line when non-default settings exist.

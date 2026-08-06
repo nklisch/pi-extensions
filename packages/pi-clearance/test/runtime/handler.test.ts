@@ -316,6 +316,7 @@ describe("createHandleToolCall", () => {
         roots: ["/repo"],
         writableDirectories: ["/repo"],
       },
+      gatedTools: ["read"],
     });
     const handler = createHandleToolCall(
       deps({
@@ -378,6 +379,7 @@ describe("createHandleToolCall", () => {
         writableDirectories: ["/repo"],
       },
       mode: "ask",
+      gatedTools: ["write", "edit"],
     });
     const handler = createHandleToolCall(
       deps({
@@ -472,6 +474,7 @@ describe("createHandleToolCall", () => {
         safeHomeDirectories: ["/home/user/dev"],
       },
       mode: "ask",
+      gatedTools: ["write"],
     });
     const handler = createHandleToolCall(
       deps({
@@ -637,7 +640,9 @@ describe("createHandleToolCall", () => {
       },
       "still uncertain",
     ],
-  ] as const)("maps review fallback final %s decisions to Pi results", async (effect, expectedResult, reason) => {
+  ] as const)(
+    "maps review fallback final %s decisions to Pi results",
+    async (effect, expectedResult, reason) => {
     const audit = captureAudit();
     const model = modelAdapter({ available: true, effect, reason });
     const handler = createHandleToolCall(
@@ -652,14 +657,18 @@ describe("createHandleToolCall", () => {
     );
 
     await expect(
-      handler(bashEvent({ command: "pnpm test" }), context(`review-${effect}`)),
+        handler(
+          bashEvent({ command: "pnpm test" }),
+          context(`review-${effect}`),
+        ),
     ).resolves.toEqual(expectedResult);
 
     expect(model.calls).toBe(1);
     expect(audit.policyEntries[0]?.decision.effect).toBe("review");
     expect(audit.reviewerEntries).toHaveLength(1);
     expect(audit.reviewerEntries[0]?.toolCallId).toBe("tool-call-1");
-  });
+    },
+  );
 
   it("updates operator status during model review and notifies model reasons", async () => {
     const audit = captureAudit();
@@ -936,11 +945,9 @@ describe("createHandleToolCall", () => {
       modelCalls: 0,
     },
     { posture: "review" as const, result: {}, modelCalls: 1 },
-  ])("applies unknown-tool posture $posture to unsupported non-bash tools", async ({
-    posture,
-    result,
-    modelCalls,
-  }) => {
+  ])(
+    "applies unknown-tool posture $posture to unsupported non-bash tools",
+    async ({ posture, result, modelCalls }) => {
     const audit = captureAudit();
     const model = modelAdapter({
       available: true,
@@ -952,7 +959,7 @@ describe("createHandleToolCall", () => {
         audit,
         analyzerRegistry: registryReturning(unknownShape("mystery")),
         policyResolver: resolverReturning(
-          okPolicy({ unknownToolPosture: posture }),
+            okPolicy({ unknownToolPosture: posture, gatedTools: ["mystery"] }),
         ),
         modelAdapter: model,
       }),
@@ -976,7 +983,8 @@ describe("createHandleToolCall", () => {
       },
       shape: { kind: "unknown", toolName: "mystery" },
     });
-  });
+    },
+  );
 
   it("fails closed and logs a policy decision when policy resolution fails", async () => {
     const audit = captureAudit();
@@ -1352,6 +1360,7 @@ function okPolicy(
     readonly config?: ResolvedConfig;
     readonly policy?: EffectivePolicy;
     readonly unknownToolPosture?: DecisionEffect;
+    readonly gatedTools?: readonly string[];
     readonly reviewer?: Partial<ResolvedReviewerConfig>;
   } = {},
 ): PolicyResolverResult {
@@ -1361,6 +1370,9 @@ function okPolicy(
       ...(options.unknownToolPosture === undefined
         ? {}
         : { unknownToolPosture: options.unknownToolPosture }),
+      ...(options.gatedTools === undefined
+        ? {}
+        : { gatedTools: options.gatedTools }),
       ...(options.reviewer === undefined ? {} : { reviewer: options.reviewer }),
     });
   return {
@@ -1388,6 +1400,7 @@ function resolvedConfig(
     readonly cwd?: string;
     readonly homeDirectory?: string;
     readonly unknownToolPosture?: DecisionEffect;
+    readonly gatedTools?: readonly string[];
     readonly mode?: ResolvedConfig["mode"];
     readonly reviewer?: Partial<ResolvedReviewerConfig>;
     readonly projectScope?: ResolvedConfig["projectScope"];
@@ -1402,6 +1415,7 @@ function resolvedConfig(
       ? {}
       : { homeDirectory: options.homeDirectory }),
     unknownToolPosture: options.unknownToolPosture ?? "review",
+    gatedTools: options.gatedTools ?? [],
     projectScope: options.projectScope ?? defaultResolvedProjectScope(),
     packEnablement: defaultResolvedPackEnablement(),
     display: options.display ?? defaultResolvedDisplay(),

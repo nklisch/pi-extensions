@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { AgentTypeRegistry } from "#src/config/agent-types";
 import type { ParentSnapshot } from "#src/lifecycle/parent-snapshot";
 import type { WorkspaceProvider } from "#src/lifecycle/workspace";
 import type { SubagentsService } from "#src/service/service";
@@ -216,6 +217,47 @@ describe("SubagentsServiceAdapter — getRecord and listAgents", () => {
 });
 
 describe("SubagentsServiceAdapter — spawn", () => {
+  it("applies fail-closed type policy at the service boundary", () => {
+    const registry = new AgentTypeRegistry(() => new Map());
+    const svc = new SubagentsServiceAdapter(
+      createManagerStub(),
+      vi.fn(),
+      makeRuntimeStub(),
+      registry,
+      { fallbackSubagent: false },
+    );
+    expect(() => svc.spawn("typo", "work")).toThrow('Unknown agent type "typo"');
+  });
+
+  it("reloads agent definitions before resolving a service spawn", () => {
+    let userAgents = new Map();
+    const registry = new AgentTypeRegistry(() => userAgents);
+    const manager = createManagerStub();
+    const svc = new SubagentsServiceAdapter(
+      manager,
+      () => makeModel({ id: "test" }),
+      makeRuntimeStub(),
+      registry,
+      { fallbackSubagent: false },
+    );
+    userAgents = new Map([["LateAgent", {
+      name: "LateAgent",
+      description: "Registered after service construction",
+      promptMode: "append" as const,
+      systemPrompt: "Handle late work.",
+      enabled: true,
+    }]]);
+
+    svc.spawn("LateAgent", "work");
+
+    expect(manager.spawn).toHaveBeenCalledWith(
+      expect.anything(),
+      "LateAgent",
+      "work",
+      expect.anything(),
+    );
+  });
+
   it("throws when currentCtx is undefined (no active session)", () => {
     const svc = new SubagentsServiceAdapter(
       createManagerStub(),
@@ -323,6 +365,47 @@ describe("SubagentsServiceAdapter — spawn", () => {
     const svc = new SubagentsServiceAdapter(createManagerStub(), resolveModel, makeRuntimeStub());
     svc.spawn("Explore", "quick check");
     expect(resolveModel).not.toHaveBeenCalled();
+  });
+
+  it("resolves an agent type default before spawn and records its exact model label", () => {
+    const configuredModel = makeModel({ provider: "zai", id: "glm-5.2" });
+    const modelRegistry = {
+      find: (provider: string, id: string) => provider === "zai" && id === "glm-5.2" ? configuredModel : undefined,
+      getAll: () => [configuredModel],
+      getAvailable: () => [configuredModel],
+    };
+    const agentRegistry = new AgentTypeRegistry(() => new Map([[
+      "specialist",
+      {
+        name: "specialist",
+        description: "Specialist",
+        promptMode: "replace" as const,
+        systemPrompt: "Specialist",
+        model: "zai/glm-5.2",
+      },
+    ]]));
+    const manager = createManagerStub();
+    const service = new SubagentsServiceAdapter(
+      manager,
+      vi.fn(),
+      makeRuntimeStub({ currentCtx: { ...makeStubCtx(), modelRegistry } }),
+      agentRegistry,
+    );
+
+    service.spawn("specialist", "inspect");
+
+    expect(manager.spawn).toHaveBeenCalledWith(
+      expect.anything(),
+      "specialist",
+      "inspect",
+      expect.objectContaining({
+        model: configuredModel,
+        invocation: expect.objectContaining({
+          modelName: "zai/glm-5.2",
+          runInBackground: true,
+        }),
+      }),
+    );
   });
 });
 

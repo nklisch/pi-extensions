@@ -1,22 +1,24 @@
 # Maintained-fork policy
 
 `@nklisch/pi-subagents` is a published MIT fork of `@gotgenes/pi-subagents`,
-most recently cut as `18.0.4-nklisch.0` on the upstream 18.0.4 release
-(upstream base commit `c76a294a777a990950da23fc06cb0caf51da7ac6` line).
+initially cut as `18.0.4-nklisch.0` from upstream base commit
+`c76a294a777a990950da23fc06cb0caf51da7ac6`, whose package version is 18.0.3.
+The fork version did not correspond to an upstream 18.0.4 release.
 Since 2026-07 its home is the `nklisch/pi-extensions` monorepo
 (`packages/pi-subagents`); earlier history lives in the `nklisch/pi-packages`
 fork.
 
-The fork retains upstream history, copyright notices, license, exports, Pi
-extension behavior, peer ranges, and package layout. Its intentional delta is
-the documented ordered lifecycle-interceptor provider seam (ADR 0005) and its
-tests.
+The fork retains upstream history, copyright notices, license, exports, and
+package layout. Its intentional delta includes the documented ordered
+lifecycle-interceptor provider seam (ADR 0005), exact model/runtime visibility,
+and selected post-base reliability adaptations. It requires Pi coding-agent
+`>=0.80.5` so completion nudges can synchronize on `agent_settled`.
 
 ## Release policy
 
 Each fork release must:
 
-1. rebase the narrow generic commits onto a current verified upstream release;
+1. selectively rebase or port current verified upstream changes, preserving the fork's lifecycle-interceptor and exact model/runtime contracts;
 2. choose a `-nklisch.N` suffix on the upstream version it tracks;
 3. capture registry integrity and tag/commit provenance;
 4. run the package and consumer qualification suites (pi-plugins' bundled
@@ -32,7 +34,11 @@ only, not lifecycle semantics or consumer contracts.
 
 ## Scope guard
 
-The published package excludes the experimental UI layer that existed
-mid-refactor on the import branch (agent editors, wizards, conversation
-viewers). Reviving any UI direction is a new decision, not a restoration —
-see ADR 0004 for the history.
+The published package keeps the narrow built-in background widget, session
+navigator, and settings command accepted by ADR 0004. These status surfaces
+show each subagent's exact effective model and elapsed or final runtime. The
+package excludes the retired agent editors, wizards, and bespoke conversation
+viewer from the import branch. Reviving those surfaces is a new decision, not
+a restoration. Children inherit extension tools through a registration-open
+denylist policy; scheduling, memory, nested delegation, worktrees, and RPC stay
+outside the core.

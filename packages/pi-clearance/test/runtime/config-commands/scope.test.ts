@@ -180,7 +180,7 @@ describe("handleScopeCommand", () => {
     const report = await handleScopeCommand([], fakeContext(), dependencies());
 
     expect(report.level).toBe("info");
-    expect(report.markdown).toContain("# Auto-reviewer project scope");
+    expect(report.markdown).toContain("# Pi Clearance project scope");
     expect(report.markdown).toContain("lexical-only");
     expect(report.markdown).toContain("does not follow symlinks");
     expect(report.markdown).toContain("Unknown path behavior: deny");
@@ -254,9 +254,15 @@ describe("handleScopeCommand", () => {
         deps,
       );
       expect(remove.markdown).toContain("Changed: yes");
-      await expect(readProjectScope(paths.projectOverlayFile)).resolves.toEqual(
-        expect.objectContaining({ [field]: [] }),
+      // Default-valued path lists are omitted from the persisted overlay. The
+      // normalized source snapshot still supplies an empty configured list.
+      await expect(readProjectScope(paths.projectOverlayFile)).resolves.toBe(
+        undefined,
       );
+      const normalizedAfterRemove = await loadConfig({ cwd });
+      expect(
+        normalizedAfterRemove.sourceSnapshots?.project.projectScope[field],
+      ).toEqual([]);
     }
 
     await expect(readJson(paths.projectOverlayFile)).resolves.toMatchObject({
@@ -404,13 +410,17 @@ describe("handleScopeCommand", () => {
     // The unrestricted preset breadth warning requires acknowledgement.
     expect(ctx.confirmCalls[0]?.message).toContain("requires acknowledgement");
     expect(result.level).not.toBe("error");
-    await expect(readProjectScope(paths.projectOverlayFile)).resolves.toEqual(
-      expect.objectContaining({
-        sensitivePathBehavior: "deny",
-        homePathBehavior: "allow",
-        unknownPathBehavior: "review",
-      }),
-    );
+    await expect(readProjectScope(paths.projectOverlayFile)).resolves.toEqual({
+      sensitivePathBehavior: "deny",
+    });
+    const normalized = await loadConfig({ cwd });
+    expect(normalized.sourceSnapshots?.project.projectScope).toMatchObject({
+      safeHomeUseDefaults: true,
+      agentSupportUseDefaults: true,
+      sensitivePathBehavior: "deny",
+      homePathBehavior: "allow",
+      unknownPathBehavior: "review",
+    });
     expect(deps.invalidations).toEqual([cwd]);
   });
 

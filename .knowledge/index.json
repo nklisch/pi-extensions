@@ -638,17 +638,6 @@
       "relationships": []
     },
     {
-      "path": ".work/active/epic-clearance-control-coherence.md",
-      "namespace": "work",
-      "kind": "epic",
-      "id": "epic-clearance-control-coherence",
-      "title": "Make Clearance controls and review behavior coherent",
-      "summary": null,
-      "updated": "2026-08-05",
-      "status": "active",
-      "relationships": []
-    },
-    {
       "path": ".work/active/epic-independent-mcp-modernization.md",
       "namespace": "work",
       "kind": "epic",
@@ -660,46 +649,13 @@
       "relationships": []
     },
     {
-      "path": ".work/active/epic-subagent-upstream-hardening.md",
-      "namespace": "work",
-      "kind": "epic",
-      "id": "epic-subagent-upstream-hardening",
-      "title": "Adapt selected upstream subagent improvements",
-      "summary": null,
-      "updated": "2026-08-05",
-      "status": "active",
-      "relationships": []
-    },
-    {
-      "path": ".work/active/feature-clearance-control-surface.md",
+      "path": ".work/active/feature-all-packages-minor-release.md",
       "namespace": "work",
       "kind": "feature",
-      "id": "feature-clearance-control-surface",
-      "title": "Unify Clearance setup, settings, and diagnostics",
+      "id": "feature-all-packages-minor-release",
+      "title": "Publish the prepared repository release",
       "summary": null,
-      "updated": "2026-08-05",
-      "status": "blocked",
-      "relationships": []
-    },
-    {
-      "path": ".work/active/feature-clearance-non-bash-opt-in.md",
-      "namespace": "work",
-      "kind": "feature",
-      "id": "feature-clearance-non-bash-opt-in",
-      "title": "Make non-Bash Clearance gating opt-in",
-      "summary": null,
-      "updated": "2026-08-05",
-      "status": "active",
-      "relationships": []
-    },
-    {
-      "path": ".work/active/feature-clearance-reviewer-judgment.md",
-      "namespace": "work",
-      "kind": "feature",
-      "id": "feature-clearance-reviewer-judgment",
-      "title": "Make auto-review resolve ambiguity by judgment",
-      "summary": null,
-      "updated": "2026-08-05",
+      "updated": "2026-08-06",
       "status": "active",
       "relationships": []
     },
@@ -745,72 +701,6 @@
       "summary": null,
       "updated": "2026-08-06",
       "status": "blocked",
-      "relationships": []
-    },
-    {
-      "path": ".work/active/feature-subagent-agent-policy-controls.md",
-      "namespace": "work",
-      "kind": "feature",
-      "id": "feature-subagent-agent-policy-controls",
-      "title": "Improve agent policy controls and discovery",
-      "summary": null,
-      "updated": "2026-08-05",
-      "status": "active",
-      "relationships": []
-    },
-    {
-      "path": ".work/active/feature-subagent-child-session-compatibility.md",
-      "namespace": "work",
-      "kind": "feature",
-      "id": "feature-subagent-child-session-compatibility",
-      "title": "Correct child session compatibility",
-      "summary": null,
-      "updated": "2026-08-05",
-      "status": "active",
-      "relationships": []
-    },
-    {
-      "path": ".work/active/feature-subagent-model-runtime-visibility.md",
-      "namespace": "work",
-      "kind": "feature",
-      "id": "feature-subagent-model-runtime-visibility",
-      "title": "Show each subagent model and runtime everywhere",
-      "summary": null,
-      "updated": "2026-08-05",
-      "status": "blocked",
-      "relationships": []
-    },
-    {
-      "path": ".work/active/feature-subagent-result-lifecycle-hardening.md",
-      "namespace": "work",
-      "kind": "feature",
-      "id": "feature-subagent-result-lifecycle-hardening",
-      "title": "Harden result and lifecycle behavior",
-      "summary": null,
-      "updated": "2026-08-05",
-      "status": "active",
-      "relationships": []
-    },
-    {
-      "path": ".work/active/feature-subagent-upstream-polish.md",
-      "namespace": "work",
-      "kind": "feature",
-      "id": "feature-subagent-upstream-polish",
-      "title": "Apply upstream compatibility and presentation polish",
-      "summary": null,
-      "updated": "2026-08-05",
-      "status": "active",
-      "relationships": []
-    },
-    {
-      "path": ".work/completed/feature-codex-mcp-config.md",
-      "namespace": "work",
-      "kind": "feature",
-      "id": "feature-codex-mcp-config",
-      "title": "Support current Codex MCP configuration",
-      "summary": null,
-      "updated": null,
-      "status": "completed",
       "relationships": []
     },
     {
@@ -935,6 +825,17 @@
       "relationships": []
     },
     {
+      "path": ".work/releases/prepared-packages-2026-08-06.md",
+      "namespace": "work",
+      "kind": "release",
+      "id": "releases/prepared-packages-2026-08-06",
+      "title": "Prepared package release — 2026-08-06",
+      "summary": null,
+      "updated": null,
+      "status": null,
+      "relationships": []
+    },
+    {
       "path": ".work/completed/fix-background-wake-custom-message.md",
       "namespace": "work",
       "kind": "story",
@@ -942,28 +843,6 @@
       "title": "fix-background-wake-custom-message",
       "summary": null,
       "updated": "2026-06-22",
-      "status": "completed",
-      "relationships": []
-    },
-    {
-      "path": ".work/completed/story-remove-plan-subagent.md",
-      "namespace": "work",
-      "kind": "story",
-      "id": "story-remove-plan-subagent",
-      "title": "Remove the built-in Plan subagent",
-      "summary": null,
-      "updated": null,
-      "status": "completed",
-      "relationships": []
-    },
-    {
-      "path": ".work/completed/story-subagent-orchestration-guidance.md",
-      "namespace": "work",
-      "kind": "story",
-      "id": "story-subagent-orchestration-guidance",
-      "title": "Clarify subagent orchestration guidance",
-      "summary": null,
-      "updated": null,
       "status": "completed",
       "relationships": []
     }

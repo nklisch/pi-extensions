@@ -1,6 +1,6 @@
 # Configuration reference
 
-Pi Clearance uses strict JSON schemas. Missing config is safe and normalizes to `mode: "ask"`; unknown fields are rejected and invalid config causes the composer to use the sealed floor only.
+Pi Clearance uses strict JSON schemas. Missing config is safe and normalizes to `mode: "ask"`; unknown fields are rejected and invalid config causes the composer to use the sealed floor only. Persisted global and project files are sparse: they contain `version` plus only non-default user choices. Defaults remain runtime-only, so the examples below intentionally omit default scaffolding. The npm `postinstall` repair compacts existing materialized files, backs up every rewrite, resets invalid or obsolete files to `{ "version": 1 }`, and never creates an absent file. It deliberately skips symlinked `global.json`, `overlay.json`, and project directories without following or replacing them; each skip is warned about and does not fail installation.
 
 ## Files
 
@@ -14,22 +14,17 @@ Pi Clearance uses strict JSON schemas. Missing config is safe and normalizes to 
 ```json
 {
   "version": 1,
-  "mode": "ask",
-  "unknownToolPosture": "allow",
-  "packs": [],
-  "packEnablement": {
-    "enabledPackagePacks": [],
-    "disabledPackagePacks": [],
-    "disabledConfigPacks": []
-  },
-  "reviewer": {
-    "promptPosture": "reviewer.default",
-    "model": null,
-    "contextMode": "recentContext"
-  },
-  "display": { "reviewNote": { "mode": "reason+accent", "showModelLabel": false, "accent": true } }
+  "mode": "auto",
+  "gatedTools": ["pi.read"],
+  "packEnablement": { "enabledPackagePacks": ["example.package-pack"] },
+  "reviewer": { "model": "openai/example" },
+  "display": { "reviewNote": { "accent": false } }
 }
 ```
+
+A default global config is simply `{ "version": 1 }`. For example, setting only
+`mode` persists `{ "version": 1, "mode": "auto" }`; the omitted reviewer,
+display, pack, and posture fields are supplied by runtime normalization.
 
 `mode` is global-only:
 
@@ -39,7 +34,9 @@ Pi Clearance uses strict JSON schemas. Missing config is safe and normalizes to 
 | `ask` | human prompt; unattended calls block-and-log | deny |
 | `auto` | model first, then human/block fallback | deny |
 
-`unknownToolPosture` remains a config-file-only knob and feeds the review bucket before mode dispatch. It defaults to `"allow"`: non-bash tools without a registered analyzer are ungated (audit-logged), matching bash-focused clearance. Setting it to `"review"` or `"deny"` re-gates those tools. The sealed floor and all active user/shipped deny rules run in every mode.
+`gatedTools` is a global exact-name list and defaults to empty. Non-Bash tools absent from the list bypass Clearance analysis and policy entirely, execute, and receive an audit entry marked as an allow/bypass. There are no wildcards or future-tool opt-ins, and `bash` cannot be listed. Bash remains fully gated. This intentionally makes typed edit/read protections opt-in and is a published behavioral break for the next minor release.
+
+`unknownToolPosture` remains a config-file-only knob and applies only to an opted-in non-Bash tool that has no registered analyzer. It defaults to `"allow"`; it does not re-gate tools absent from `gatedTools`. Setting it to `"review"` or `"deny"` tightens opted-in unknown tools. The sealed floor and all active user/shipped deny rules run in every mode.
 
 There is no `defaultPosture`, `maxPosture`, project/repository `posture`, `reviewer.enabled`, or `reviewer.mode`. Those legacy keys are not translated; strict validation rejects them and runtime falls back to floor-only policy. There is no consent file or Clearance trust record: explicit `mode: "auto"` is the acknowledgment, and existing trust files are inert.
 
@@ -48,24 +45,17 @@ There is no `defaultPosture`, `maxPosture`, project/repository `posture`, `revie
 ```json
 {
   "version": 1,
-  "packs": [],
-  "packEnablement": {
-    "enabledPackagePacks": [],
-    "disabledPackagePacks": [],
-    "disabledConfigPacks": []
-  },
   "projectScope": {
-    "roots": [], "writableDirectories": [], "tempDirectories": [],
-    "deniedDirectories": [], "safeHomeDirectories": [],
-    "safeHomeUseDefaults": true,
-    "agentSupportDirectories": [], "agentSupportUseDefaults": true,
-    "unknownPathBehavior": "review",
-    "sensitivePathBehavior": "review",
-    "homePathBehavior": "allow"
+    "roots": ["packages"],
+    "safeHomeUseDefaults": false,
+    "homePathBehavior": "review"
   },
-  "promptAppends": []
+  "promptAppends": ["Prefer the project test command."]
 }
 ```
+
+A default project overlay is `{ "version": 1 }`. Non-default nested scope
+fields are retained without persisting the other scope defaults.
 
 `unknownPathBehavior` and `sensitivePathBehavior` are ceilings, not just knobs: even `review` emits a config-derived rule so no allow can auto-clear unknown or sensitive-home (credentials, keys, auth files) paths, and `deny` hard-blocks them. One exception: scope classification puts writable-project/project ahead of sensitive-home, so a sensitive location explicitly made a project root classifies as project and the sensitive ceiling does not fire there. `homePathBehavior: "review"` sends any command touching home paths to review. Configured `deniedDirectories` deny outright at the effective-policy level. These rules compose as the derived `config.scope.behavior` pack; they never appear in `/clearance packs` because they are a projection of config, not a discoverable pack.
 
@@ -77,7 +67,7 @@ Mode cannot be set per project. Repository policy has `version`, `packs`, and `p
 
 ## Reviewer advanced settings
 
-The surviving config-file-only reviewer fields are `promptPosture` (default `reviewer.default`), `promptAppends`, `projectPromptAppends`, `promptOverride`, `model`, `tokenBudget`, `contextMode` (default `recentContext`), `recentContext`, and `escalation`. Reviewer model selection is interactive in the settings UI (chosen from available models with configured auth); the other advanced fields are read-only there. `display.reviewNote` preferences (mode, model label, accent) are editable in the settings Stream briefing panel. The shipped prompt ids are `reviewer.strict`, `reviewer.default`, and `reviewer.permissive`.
+The reviewer settings selector exposes `promptPosture` and `model` interactively; both changes use Pi confirmation and write only user-owned config. The remaining config-file-only reviewer fields are `promptAppends`, `projectPromptAppends`, `promptOverride`, `tokenBudget`, `contextMode` (default `recentContext`), `recentContext` (including `conversationTurns`, `userTurns` default `5`, and the shared `conversationCharLimit`), and `escalation`. `display.reviewNote` preferences (mode, model label, accent) are editable in the settings Stream briefing panel. The shipped prompt ids are `reviewer.strict`, `reviewer.default`, and `reviewer.permissive`.
 
 ## Packs
 
@@ -85,10 +75,10 @@ The baseline is always the old default pack set plus `bash.network.read`, `pi.ex
 
 ## Commands
 
-- `/clearance setup` — one mode selector; choosing Auto shows the model/context disclosure in the confirmation card.
-- `/clearance mode [off|ask|auto]` — read/select or set the global mode; writes require UI confirmation.
-- `/clearance settings` — control center; mode is the only behavioral dial.
+- `/clearance` and `/clearance setup` — open guided setup; choosing Auto shows the model/context disclosure in the confirmation card.
+- `/clearance mode [off|ask|auto]` — read/select or set the global mode; writes require UI confirmation. Without an argument it opens settings.
+- `/clearance settings` — compact control center with selector/toggle rows, including exact gated non-Bash tools.
 - `/clearance status`, `/clearance packs`, `/clearance scope`, `/clearance tune`, `/clearance why` — unchanged surfaces with mode/baseline vocabulary. Scope management also supports `scope agent-support add|remove <path>` and `scope agent-support-defaults <on|off>`.
 - `/clearance allow <plain language>` or `/clearance allow` — hand an agent-authored structural allow request to the shared proposal card. Accepted rules land in the user-global pack; this command adds no separate config surface.
 
-`/clearance profile` and `/clearance auto` are removed with no aliases.
+`/clearance profile` and `/clearance auto` are removed with no aliases. The next minor release must call out the non-Bash default bypass and the typed-tool protection break.

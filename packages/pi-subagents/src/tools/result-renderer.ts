@@ -33,14 +33,17 @@ export function renderAgentResult(
 export function renderRunning(details: AgentDetails, theme: Theme): string {
 	const frame = SPINNER[details.spinnerFrame ?? 0];
 	const s = renderStats(details, theme);
+	const duration = theme.fg("dim", formatMs(details.durationMs));
 	let line = theme.fg("accent", frame) + (s ? " " + s : "");
+	line += `${s ? " " + theme.fg("dim", "·") + " " : " "}${duration}`;
 	line += "\n" + theme.fg("dim", `  ⎿  ${details.activity ?? "thinking\u2026"}`);
 	return line;
 }
 
 /** Render background launch status. */
 export function renderBackground(details: AgentDetails, theme: Theme): string {
-	return theme.fg("dim", `  \u23BF  Running in background (ID: ${details.agentId})`);
+	const identity = [details.modelName, formatMs(details.durationMs)].filter(Boolean).join(" · ");
+	return theme.fg("dim", `  \u23BF  Running in background (ID: ${details.agentId}) · ${identity}`);
 }
 
 /** Render completed or steered status with optional expanded result text. */
@@ -83,6 +86,7 @@ export function renderCompleted(
 export function renderStopped(details: AgentDetails, theme: Theme): string {
 	const s = renderStats(details, theme);
 	let line = theme.fg("dim", "\u25A0") + (s ? " " + s : "");
+	line += ` ${theme.fg("dim", "·")} ${theme.fg("dim", formatMs(details.durationMs))}`;
 	line += "\n" + theme.fg("dim", "  \u23BF  Stopped");
 	return line;
 }
@@ -91,6 +95,7 @@ export function renderStopped(details: AgentDetails, theme: Theme): string {
 export function renderFailed(details: AgentDetails, theme: Theme): string {
 	const s = renderStats(details, theme);
 	let line = theme.fg("error", "\u2717") + (s ? " " + s : "");
+	line += ` ${theme.fg("dim", "·")} ${theme.fg("dim", formatMs(details.durationMs))}`;
 
 	if (details.status === "error") {
 		line += "\n" + theme.fg("error", `  \u23BF  Error: ${details.error ?? "unknown"}`);

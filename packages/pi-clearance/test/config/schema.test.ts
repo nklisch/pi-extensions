@@ -15,7 +15,23 @@ describe("tri-state config schemas", () => {
       expect(result.value.mode).toBe("ask");
       expect(result.value.reviewer.promptPosture).toBe("reviewer.default");
       expect(result.value.reviewer.contextMode).toBe("recentContext");
+      expect(result.value.gatedTools).toEqual([]);
+      expect(result.value.reviewer.recentContext.userTurns).toBe(5);
     }
+  });
+
+  it("rejects wildcard and Bash gated-tool entries", () => {
+    for (const gatedTools of [["*"], ["bash"], ["read tool"]]) {
+      expect(
+        normalizeConfig(GlobalConfigSchema, { version: 1, gatedTools }).ok,
+      ).toBe(false);
+    }
+    expect(
+      normalizeConfig(GlobalConfigSchema, {
+        version: 1,
+        gatedTools: ["edit", "custom_tool"],
+      }).ok,
+    ).toBe(true);
   });
 
   it("rejects removed behavioral keys instead of translating them", () => {

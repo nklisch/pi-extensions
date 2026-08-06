@@ -81,8 +81,15 @@ function fakePi() {
     getAllTools: () => [],
     setActiveTools: () => {},
     registerTool: () => {},
-    sendUserMessage: (brief: string, options?: unknown) => {
-      calls.push({ brief, ...(options === undefined ? {} : { options }) });
+    sendMessage: (
+      message: { readonly content: unknown; readonly display: boolean },
+      options?: unknown,
+    ) => {
+      calls.push({
+        brief: typeof message.content === "string" ? message.content : "",
+        ...(options === undefined ? {} : { options }),
+      });
+      expect(message.display).toBe(true);
     },
   } as unknown as CommandPi;
   return { pi, calls };
@@ -215,7 +222,7 @@ describe("allow recent selection and handoff", () => {
     expect(report.summary).toContain("Request handed to the agent");
     expect(calls).toHaveLength(1);
     expect(calls[0]?.brief).toContain("pnpm   test");
-    expect(calls[0]?.options).toBeUndefined();
+    expect(calls[0]?.options).toEqual({ triggerTurn: true });
   });
 
   it("queues the brief as a follow-up while the agent is busy", async () => {

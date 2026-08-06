@@ -30,12 +30,21 @@ export const SETTINGS_PANELS = [
 ] as const satisfies readonly SettingsPanel[];
 
 export function renderControlCenter(model: SettingsReadModel): string {
-  const rows: readonly SettingsRow[] = [
+  const rows: SettingsRow[] = [
     {
       label: "Clearance mode",
       value: model.currentMode.label,
       meaning: model.currentMode.description,
     },
+    ...(model.status.customizations === undefined ||
+    model.status.customizations.length === 0
+      ? []
+      : [
+          {
+            label: "Customizations",
+            value: model.status.customizations.join("; "),
+          },
+        ]),
     {
       label: "Tune mode",
       value: formatTuneCueStatus(model.status.ratchet.active),

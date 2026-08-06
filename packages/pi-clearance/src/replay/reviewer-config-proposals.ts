@@ -9,6 +9,7 @@ import {
   ReviewerConfigSchema,
 } from "../config/schema.ts";
 import {
+  isShippedReviewerPostureId,
   REVIEWER_BASE_CONTRACT,
   SHIPPED_REVIEWER_POSTURES,
   validatePromptOverride,
@@ -146,8 +147,10 @@ export type ReviewerModelDrafter = (
 ) => Promise<ReviewerModelDraftResult | undefined>;
 
 /** True iff `postureId` is one of the shipped reviewer posture fragments. */
-export function isShippedReviewerPosture(postureId: string): boolean {
-  return Object.hasOwn(SHIPPED_REVIEWER_POSTURES, postureId);
+export function isShippedReviewerPosture(
+  postureId: string,
+): postureId is keyof typeof SHIPPED_REVIEWER_POSTURES {
+  return isShippedReviewerPostureId(postureId);
 }
 
 /**
@@ -700,9 +703,9 @@ function draftOverrideSet(
   const postureFragments =
     SHIPPED_REVIEWER_POSTURES[
       isShippedReviewerPosture(current.promptPosture)
-        ? (current.promptPosture as keyof typeof SHIPPED_REVIEWER_POSTURES)
+        ? current.promptPosture
         : "reviewer.default"
-    ];
+    ].fragments;
   const text = [
     REVIEWER_BASE_CONTRACT.text,
     ...postureFragments.map((fragment) => fragment.text),

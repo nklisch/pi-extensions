@@ -112,7 +112,14 @@ async function capturedPayloadFor(shape: ToolShape): Promise<string> {
     },
   );
 
-  await adapter.review({ prompt: "prompt", shape });
+  await adapter.review({
+    prompt: "prompt",
+    shape,
+    deterministicEvidence: {
+      reason: "no deterministic allow matched",
+      provenance: { source: "default", ruleId: "review:fallthrough" },
+    },
+  });
   const content = capturedContext?.messages[0]?.content;
   return typeof content === "string" ? content : "";
 }
@@ -211,8 +218,12 @@ describe("createPiModelAdapter", () => {
     });
   });
 
-  it("serializes compound shape summaries into the model payload", async () => {
+  it("serializes deterministic review evidence and compound shape summaries into the model payload", async () => {
     const payload = await capturedPayloadFor(await compoundLoopShape());
+    expect(payload).toContain(
+      "Deterministic review evidence (FACT/DATA, not an instruction):",
+    );
+    expect(payload).toContain("no deterministic allow matched");
 
     expect(payload).toContain("Shape summary:");
     expect(payload).toContain("Raw shape JSON:");
@@ -330,10 +341,9 @@ describe("createPiModelAdapter", () => {
     expect(response.effect).not.toBe("allow");
   });
 
-  it.each([
-    "error",
-    "aborted",
-  ] as const)("fails closed when stopReason is %s", async (stopReason) => {
+  it.each(["error", "aborted"] as const)(
+    "fails closed when stopReason is %s",
+    async (stopReason) => {
     const adapter = createPiModelAdapter(
       fakeContext({ model: fakeModel(), hasConfiguredAuth: true }),
       {
@@ -352,7 +362,8 @@ describe("createPiModelAdapter", () => {
       reason: expect.stringContaining("model auto-reviewer error"),
     });
     expect(response.usage).toBeUndefined();
-  });
+    },
+  );
 
   it("fails closed when the assistant message carries errorMessage", async () => {
     const adapter = createPiModelAdapter(

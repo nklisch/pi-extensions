@@ -99,6 +99,21 @@ export function createHandleToolCall(
 
       deps.operatorStatus?.refresh(ctx, resolved.policy);
 
+      // Harness availability is the host-level approval boundary for non-Bash
+      // tools. Only exact names in global.gatedTools enter Clearance; Bash is
+      // intentionally never eligible for this bypass.
+      if (shouldBypassNonBashTool(event.toolName, resolved.policy)) {
+        const decision = nonBashBypassDecision(event.toolName);
+        await logPolicyDecision(
+          deps.audit,
+          inputSnapshot,
+          event,
+          ctx,
+          decision,
+        );
+        return {};
+      }
+
       const rawShape = await deps.analyzerRegistry.analyze(
         event.toolName,
         event.input,
@@ -208,6 +223,10 @@ async function mapDecisionToResult(
     // command. event.input may be mutated by transforms after the allow below.
     toolInput: input.inputSnapshot,
     shape: input.shape,
+    deterministicEvidence: {
+      reason: input.decision.reason,
+      provenance: input.decision.provenance,
+    },
     reviewerConfig: input.resolvedPolicy.config.reviewer,
     resolvedConfig: input.resolvedPolicy.config,
     humanAdapter: adapters.humanAdapter,
@@ -276,6 +295,23 @@ function reviewVisibilityAdapter(
           presentDecisionNote: (note, toolCallId) =>
             display.present(note, toolCallId),
         }),
+  };
+}
+
+function shouldBypassNonBashTool(
+  toolName: string,
+  resolvedPolicy: ResolvedPolicy,
+): boolean {
+  if (toolName === "bash") return false;
+  const gatedTools = resolvedPolicy.config.gatedTools ?? [];
+  return !gatedTools.includes(toolName);
+}
+
+function nonBashBypassDecision(toolName: string): Decision {
+  return {
+    effect: "allow",
+    reason: `non-bash tool ${toolName} bypassed Clearance: not listed in gatedTools`,
+    provenance: { source: "default", ruleId: "clearance.non-bash-bypass" },
   };
 }
 

@@ -18,18 +18,17 @@ Run them in foreground or background, steer them mid-run, resume completed sessi
 - **In-process & native** — agents run inside the same pi runtime (no spawned subprocesses), sharing tool names, calling conventions, and UI patterns (`subagent`, `get_subagent_result`, `steer_subagent`) — feels native
 - **Parallel background agents** — spawn multiple agents that run concurrently with automatic queuing (configurable concurrency limit, default 4) and individual completion notifications
 - **Live widget UI** — persistent above-editor widget with animated spinners, live tool activity, token counts, and colored status icons
-- **Session transcripts** — open any subagent's full session transcript (running or evicted) in pi's native read-only viewer via `/subagents:sessions`
-- **Custom agent types** — define agents in `.pi/agents/<name>.md` with YAML frontmatter: custom system prompts, model selection, thinking levels, tool restrictions
+- **Session transcripts** — open any subagent's full session transcript, including records whose heavy live session has been released, in pi's native read-only viewer via `/subagents:sessions`
+- **Custom agent types** — define project agents in `.pi/agents/<name>.md` or the shared `.agents/agents/<name>.md` convention, with YAML frontmatter for prompts, models, thinking, and built-in tools
 - **Mid-run steering** — inject messages into running agents to redirect their work without restarting
 - **Session resume** — pick up where an agent left off, preserving full conversation context
 - **Graceful turn limits** — agents get a "wrap up" warning before hard abort, producing clean partial results instead of cut-off output
-- **Case-insensitive agent types** — `"explore"`, `"Explore"`, `"EXPLORE"` all work.
-  Unknown types fall back to general-purpose with a note
+- **Policy-aware agent types** — unambiguous names resolve case-insensitively. Unknown names default to `general-purpose`, can target another enabled fallback, or can fail closed via `fallbackSubagent`
 - **Fuzzy model selection** — specify models by name (`"haiku"`, `"sonnet"`) instead of full IDs, with automatic filtering to only available/configured models
 - **Context inheritance** — optionally fork the parent conversation into a sub-agent so it knows what's been discussed
 - **Styled completion notifications** — background agent results render as themed, compact notification boxes (icon, stats, result preview) instead of raw XML.
   Expandable to show full output
-- **Event bus** — lifecycle events (`subagents:created`, `started`, `completed`, `failed`, `steered`, `compacted`) emitted via `pi.events`, enabling other extensions to react to sub-agent activity
+- **Event bus** — lifecycle events (`subagents:created`, `started`, `completed`, `failed`, `resumed`, `steered`, `compacted`) emitted via `pi.events`, enabling other extensions to react to sub-agent activity
 
 ## Install
 
@@ -108,12 +107,11 @@ The LLM receives structured `<task-notification>` XML for parsing, while the use
 
 | Type              | Tools                      | Model                         | Prompt Mode            | Description                                                                                      |
 | ----------------- | -------------------------- | ----------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------ |
-| `general-purpose` | all 7                      | inherit                       | `append` (parent twin) | Inherits the parent's full system prompt — same rules, CLAUDE.md, project conventions            |
-| `Explore`         | read, bash, grep, find, ls | haiku (falls back to inherit) | `replace`              | Fast codebase exploration (read-only); inherits the parent prompt as a base                      |
-| `Plan`            | read, bash, grep, find, ls | inherit                       | `replace`              | Software architect for implementation planning (read-only); inherits the parent prompt as a base |
+| `general-purpose` | all 7                      | inherit                       | `append` (parent twin) | Inherits the parent's full system prompt — same rules, CLAUDE.md, project conventions |
+| `Explore`         | read, bash, grep, find, ls | haiku (falls back to inherit) | `replace`              | Fast codebase exploration (read-only); inherits the parent prompt as a base           |
 
 The `general-purpose` agent is a **parent twin** — it receives the parent's entire system prompt plus a sub-agent context bridge, so it follows the same rules the parent does.
-Explore and Plan use `replace` mode: the parent prompt is the cacheable base and their specialist read-only instructions are appended last, giving them the final say.
+Explore uses `replace` mode: the parent prompt is the cacheable base and its specialist read-only instructions are appended last, giving those instructions the final say.
 
 Default agents can be **overridden** by creating a `.md` file with the same name (e.g. `.pi/agents/general-purpose.md`), or **disabled** per-project with `enabled: false` frontmatter.
 
@@ -123,14 +121,15 @@ Define custom agent types by creating `.md` files.
 The filename becomes the agent type name.
 Any name is allowed — using a default agent's name overrides it.
 
-Agents are discovered from two locations (higher priority wins):
+Agents are discovered from three locations (higher priority wins):
 
-| Priority    | Location                                                                         | Scope                         |
-| ----------- | -------------------------------------------------------------------------------- | ----------------------------- |
-| 1 (highest) | `.pi/agents/<name>.md`                                                           | Project — per-repo agents     |
-| 2           | `$PI_CODING_AGENT_DIR/agents/<name>.md` (default `~/.pi/agent/agents/<name>.md`) | Global — available everywhere |
+| Priority    | Location                                                                         | Scope                                  |
+| ----------- | -------------------------------------------------------------------------------- | -------------------------------------- |
+| 1 (highest) | `.pi/agents/<name>.md`                                                           | Pi project authority                   |
+| 2           | `.agents/agents/<name>.md`                                                       | Shared cross-tool project definitions  |
+| 3           | `$PI_CODING_AGENT_DIR/agents/<name>.md` (default `~/.pi/agent/agents/<name>.md`) | Global — available everywhere          |
 
-Project-level agents override global ones with the same name, so you can customize a global agent for a specific project.
+`.agents/agents` is read-only to this extension. `.pi/agents` overrides it and the global location on name collisions.
 The global location follows the upstream `PI_CODING_AGENT_DIR` env var — set it to relocate all pi-coding-agent state (agents, skills, settings) to a custom directory.
 
 ### Example: `.pi/agents/auditor.md`
@@ -169,9 +168,9 @@ All fields are optional — sensible defaults for everything.
 | ------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `description`       | filename       | Agent description shown in tool listings                                                                                                                                                                                                                                                                                |
 | `display_name`      | —              | Display name for UI (e.g. widget, agent list)                                                                                                                                                                                                                                                                           |
-| `tools`             | all 7          | Comma-separated built-in tools: read, bash, edit, write, grep, find, ls. `none` for no tools                                                                                                                                                                                                                            |
+| `tools`             | all 7          | Comma-separated built-in tools: read, bash, edit, write, grep, find, ls. `none` denies all built-ins. Parent extension tools remain inheritable and are narrowed by extension policy                                                                                                                                                                                                                            |
 | `model`             | inherit parent | Model — `provider/modelId` or fuzzy name (`"haiku"`, `"sonnet"`)                                                                                                                                                                                                                                                        |
-| `thinking`          | inherit        | off, minimal, low, medium, high, xhigh                                                                                                                                                                                                                                                                                  |
+| `thinking`          | inherit        | off, minimal, low, medium, high, xhigh, max (actual support depends on host and model)                                                                                                                                                                                                                                                                                  |
 | `max_turns`         | unlimited      | Max agentic turns before graceful shutdown. `0` or omit for unlimited                                                                                                                                                                                                                                                   |
 | `prompt_mode`       | `append`       | `replace`: parent prompt is the cacheable base; body is appended last with full control (no `<sub_agent_context>` bridge, no `<agent_instructions>` wrapper). `append`: parent prompt is the base; body is wrapped in `<agent_instructions>` and a sub-agent context bridge is injected (agent acts as a "parent twin") |
 | `inherit_context`   | `false`        | Fork parent conversation into agent                                                                                                                                                                                                                                                                                     |
@@ -194,15 +193,23 @@ Launch a sub-agent.
 | `description`       | string       | yes      | Short 3-5 word summary (shown in UI)                             |
 | `subagent_type`     | string       | yes      | Agent type (built-in or custom)                                  |
 | `model`             | string       | no       | Model — `provider/modelId` or fuzzy name (`"haiku"`, `"sonnet"`) |
-| `thinking`          | string       | no       | Thinking level: off, minimal, low, medium, high, xhigh           |
+| `thinking`          | string       | no       | Thinking level: off, minimal, low, medium, high, xhigh, max      |
 | `max_turns`         | number       | no       | Max agentic turns. Omit for unlimited (default)                  |
 | `run_in_background` | boolean      | no       | Run without blocking                                             |
-| `resume`            | string       | no       | Agent ID to resume a previous session                            |
+| `resume`            | string       | no       | Retained, finished agent ID to continue with the same history    |
 | `inherit_context`   | boolean      | no       | Fork parent conversation into agent                              |
+
+### Choosing the next action
+
+- Let background agents finish normally. Completion automatically wakes the parent with a result preview; do not poll.
+- Use `steer_subagent` to redirect an agent that is still running.
+- Use `resume` after an agent finishes when it should continue with the same retained conversation history.
+- Launch a new subagent without `resume` when prior conversation history is unnecessary.
+- Use `get_subagent_result` only for full output, verbose conversation, an explicit status check or synchronization point, or recovery after a missed notification.
 
 ### `get_subagent_result`
 
-Check status and retrieve results from a background agent.
+Inspect status or retrieve full results from a background agent. It is not the normal completion path because completion notifications wake the parent automatically.
 
 | Parameter  | Type    | Required | Description                   |
 | ---------- | ------- | -------- | ----------------------------- |
@@ -224,17 +231,17 @@ The message interrupts after the current tool execution.
 
 | Command               | Description                                            |
 | --------------------- | ------------------------------------------------------ |
-| `/subagents:settings` | Configure subagent settings (concurrency, turn limits) |
+| `/subagents:settings` | Configure concurrency, turn limits, retention, interrupt behavior, and unknown-type fallback |
 | `/subagents:sessions` | View a subagent's session transcript (read-only)       |
 
 ### `/subagents:settings`
 
-Interactive list to tune runtime settings — max concurrency, default max turns, and grace turns.
+Interactive list to tune max concurrency, default/grace turns, consumed and unconsumed live-session retention, abort-all-on-ESC behavior, and unknown-agent fallback.
 Changes persist across pi restarts (see [Persistent Settings](#persistent-settings)).
 
 ### `/subagents:sessions`
 
-Pick any subagent — running or already evicted — and read its full session transcript in pi's native per-entry viewer.
+Pick any subagent — running, completed, or retained after its live session was released — and read its full session transcript in pi's native per-entry viewer.
 Read-only: no steering, no session takeover (steering lives in the `steer_subagent` tool and the background widget).
 
 Creating and editing agent definitions is not a command — write an agent `.md` file in your editor, or ask a pi session to generate one (see [Custom Agents](#custom-agents)).
@@ -257,14 +264,13 @@ Instead of hard-aborting at the turn limit, agents get a graceful shutdown:
 ## Concurrency
 
 Background agents are subject to a configurable concurrency limit (default: 4).
-Excess agents are automatically queued and start as running agents complete.
-The widget shows queued agents as a collapsed count.
+Excess agents are automatically queued and start as running agents complete. The widget shows each queued agent with its effective model and queued state. Stopping a queued agent follows the normal terminal lifecycle and reports that no work started.
 
-Foreground agents bypass the queue — they block the parent anyway.
+Foreground agents bypass the queue — they block the parent anyway. Completion nudges are held while the parent is running and flushed at the parent run boundary, preventing a pulled result from also arriving as a duplicate notification.
 
 ## Persistent Settings
 
-Runtime tuning values set via `/subagents:settings` (max concurrency, default max turns, grace turns) persist across pi restarts.
+Runtime tuning values set via `/subagents:settings` persist across pi restarts. Terminal records remain available for the whole parent session. Their heavy live sessions are released after the consumed or unconsumed retention window; the result and persisted transcript pointer remain available.
 Two files, merged on load:
 
 - **Global:** `~/.pi/agent/subagents.json` — your machine-wide defaults.
@@ -273,7 +279,7 @@ Two files, merged on load:
   Written by `/subagents:settings`.
 
 **Precedence:** project overrides global on any field present in both.
-Missing fields fall back to the hardcoded defaults (max concurrency `4`, default max turns unlimited, grace turns `5`).
+Missing fields use these defaults: max concurrency `4`, max turns unlimited, grace turns `5`, consumed-session retention `10` minutes, unconsumed-session retention `720` minutes, abort all on parent ESC enabled, and unknown-agent fallback `general-purpose`.
 
 **Example — global defaults for a beefy machine:**
 
@@ -282,12 +288,15 @@ mkdir -p ~/.pi/agent
 cat > ~/.pi/agent/subagents.json <<'EOF'
 {
   "maxConcurrent": 16,
-  "graceTurns": 10
+  "graceTurns": 10,
+  "unconsumedSessionRetentionMinutes": 1440,
+  "abortAllOnInterrupt": false,
+  "fallbackSubagent": false
 }
 EOF
 ```
 
-Every project now starts with concurrency 16 and grace 10, without ever touching the command.
+Every project now starts with concurrency 16, grace 10, a one-day unconsumed retention cap, background agents surviving parent ESC, and unknown agent types failing closed.
 Individual projects can still override via `/subagents:settings`.
 
 **Failure behavior:** missing file is silent; malformed JSON logs a `[pi-subagents] Ignoring malformed settings at …` warning to stderr; invalid/out-of-range field values are dropped per-field; write failures downgrade the `/subagents:settings` toast to a warning with `(session only; failed to persist)`.
@@ -301,6 +310,7 @@ Agent lifecycle events are emitted via `pi.events.emit()` so other extensions ca
 | `subagents:created`          | Background agent registered                             | `id`, `type`, `description`, `isBackground`                                                                          |
 | `subagents:started`          | Agent transitions to running (including queued→running) | `id`, `type`, `description`                                                                                          |
 | `subagents:completed`        | Agent finished successfully                             | `id`, `type`, `durationMs`, `tokens` (lifetime `{ input, output, total }`), `toolUses`, `result`                     |
+| `subagents:resumed`          | A resumed turn reached a terminal state                 | completed-event shape plus `status` and `error`                                                                     |
 | `subagents:failed`           | Agent errored, stopped, or aborted                      | same as completed + `error`, `status`                                                                                |
 | `subagents:steered`          | Steering message sent                                   | `id`, `message`                                                                                                      |
 | `subagents:compacted`        | Agent's session successfully compacted                  | `id`, `type`, `description`, `reason` (`"manual"` / `"threshold"` / `"overflow"`), `tokensBefore`, `compactionCount` |
@@ -320,7 +330,7 @@ The earlier `isolation: "worktree"` spawn flag and `isolation:` frontmatter key 
 ## Removed: agent memory and skill preloading
 
 Persistent agent memory (the `memory:` frontmatter key) and skill preloading (the `skills:` frontmatter key) were removed when the core was slimmed down.
-Children now always inherit the parent's skills and extensions, so the `isolated`, `extensions`, and `skills` frontmatter keys no longer exist.
+Children always inherit the parent's skills and extensions, so the `isolated`, `extensions`, and `skills` frontmatter keys no longer exist. Child creation uses a denylist rather than a registration-time allowlist: extension tools—including tools registered during lifecycle hooks—remain available, while disallowed built-ins and the three recursive orchestration tools stay excluded.
 
 ## Migrating from `disallowed_tools`
 

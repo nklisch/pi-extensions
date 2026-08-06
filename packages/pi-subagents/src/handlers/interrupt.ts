@@ -29,7 +29,10 @@ export class InterruptHandler {
   private latched?: AbortSignal;
   private detach?: () => void;
 
-  constructor(private readonly manager: InterruptManager) {}
+  constructor(
+    private readonly manager: InterruptManager,
+    private readonly shouldAbortAll: () => boolean = () => true,
+  ) {}
 
   handleTurnStart(ctx: InterruptCtx): void {
     const signal = ctx.signal;
@@ -41,7 +44,7 @@ export class InterruptHandler {
     if (!signal) return;
 
     const onAbort = (): void => {
-      this.manager.abortAll();
+      if (this.shouldAbortAll()) this.manager.abortAll();
     };
     signal.addEventListener("abort", onAbort, { once: true });
     this.detach = () => signal.removeEventListener("abort", onAbort);

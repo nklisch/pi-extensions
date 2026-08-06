@@ -1,77 +1,82 @@
 # Comparison with upstream
 
-`@gotgenes/pi-subagents` began as a fork of [`tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents) by [@tintinweb](https://github.com/tintinweb).
-The original design — autonomous subagent dispatch, the live widget, the conversation viewer, custom agent types — is the foundation everything here builds on.
+`@nklisch/pi-subagents` is a maintained fork of `@gotgenes/pi-subagents`, which began as a hard fork of [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents). This page explains which ideas this fork preserves, adapts, or leaves upstream.
 
-It has since become an independently maintained hard fork.
-It follows its own architecture, does not track upstream as a merge target, and cherry-picks upstream fixes only when they fit its scope.
-This document compares the fork against the current upstream release so you can choose between them.
+The source tree was reviewed against `@gotgenes/pi-subagents` 19.2.1 and `@tintinweb/pi-subagents` 0.14.3 plus its unreleased changelog. The local package version remains independently managed; see [Fork maintenance](./FORK-MAINTENANCE.md) for provenance and release rules.
 
-Versions compared: `@gotgenes/pi-subagents` 16.2.1 and `@tintinweb/pi-subagents` 0.10.3 (current at the time of writing).
+## Shared core
 
-## At a glance
+All three implementations provide in-process foreground and background agents, custom agent definitions, concurrency control, steering, result retrieval, session resume, model selection, thinking control, and completion notifications.
 
-| Aspect          | @gotgenes/pi-subagents          | @tintinweb/pi-subagents                 |
-| --------------- | ------------------------------- | --------------------------------------- |
-| Philosophy      | Minimal, composable core        | Batteries-included, all-in-one          |
-| Pi peer scope   | `@earendil-works/pi-*` (>=0.75) | `@earendil-works/pi-*` (>=0.74)         |
-| Spawn tool name | `subagent`                      | `Agent`                                 |
-| Runtime deps    | `@sinclair/typebox`             | `@sinclair/typebox`, `croner`, `nanoid` |
-| License         | MIT                             | MIT                                     |
+The direct `gotgenes` lineage and this fork also share a focused-core architecture:
 
-Both ship TypeScript source directly (Pi runs `./src/index.ts`) and target the same `@earendil-works/pi-*` Pi.
-The peer-dep migration that prompted the original fork has since landed upstream, so the Pi scope is no longer a differentiator.
+- typed cross-extension service access;
+- child-session lifecycle events;
+- workspace and permission integration through companion packages;
+- native read-only session transcripts;
+- no built-in scheduling, memory, worktrees, or event RPC.
 
-## Common ground
+## What this fork preserves beyond direct upstream
 
-Both extensions provide the same core experience:
+This fork retains several contracts that must survive selective upstream ports:
 
-- Foreground/background subagents with a live above-editor widget and a conversation viewer.
-- Custom agent types defined in `.pi/agents/<name>.md` with YAML frontmatter (system prompt, model, thinking, tools).
-- Fuzzy model selection, context inheritance, mid-run steering, session resume, and graceful turn limits.
-- A `pi.events` lifecycle bus (`subagents:created`, `started`, `completed`, `failed`, `steered`, `compacted`).
+- ordered lifecycle interception for prompt, result, and continuation decisions;
+- exact `provider/id` and elapsed or final runtime on every operator status surface;
+- a typed service and deterministic child-session lifecycle;
+- only `general-purpose` and `Explore` as built-in agents;
+- model runtime inheritance for runtime-registered providers and authentication;
+- inherited extension tools through a registration-open denylist, with recursive orchestration tools excluded;
+- provider terminal failures reported as failures instead of successful empty or stale results.
 
-## What upstream has that this fork does not
+A mechanical rebase is unsafe because direct upstream may change or remove these surfaces.
 
-Upstream is the batteries-included option.
-It keeps several subsystems built in that this fork deliberately removed or delegated:
+## Reliability changes adapted from direct upstream
 
-| Capability              | @tintinweb/pi-subagents                           | @gotgenes/pi-subagents                                                                                                                            |
-| ----------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tool restrictions       | `disallowed_tools` frontmatter (denylist)         | Delegated — `permission:` via [`@gotgenes/pi-permission-system`](https://github.com/gotgenes/pi-packages/tree/main/packages/pi-permission-system) |
-| Worktree isolation      | Built-in                                          | Delegated — [`@gotgenes/pi-subagents-worktrees`](https://github.com/gotgenes/pi-packages/tree/main/packages/pi-subagents-worktrees)               |
-| Persistent agent memory | `memory:` frontmatter (project / local / user)    | Removed                                                                                                                                           |
-| Skill preloading        | `skills:` frontmatter (preload named skills)      | Removed — children always inherit the parent's skills                                                                                             |
-| Scheduling              | Cron / interval / one-shot subagents (`schedule`) | Removed                                                                                                                                           |
-| Cross-extension control | `subagents:rpc:*` event RPC                       | Replaced by a typed service (below)                                                                                                               |
-| Model-scope enforcement | `enabledModels` allowlist validation              | Not included                                                                                                                                      |
-| Notifications           | Smart group-join consolidation                    | Individual per-agent notifications                                                                                                                |
+This fork selectively carries the useful 18.1–19.2 reliability work:
 
-## What this fork adds
+- queued and resumed runs are awaitable through the current record promise;
+- interrupting `get_subagent_result(wait: true)` ends only the wait;
+- queued stops follow the terminal lifecycle and state that no work started;
+- consumption-aware retention keeps terminal records for the parent session while releasing heavy live sessions on separate consumed and unconsumed windows;
+- completion notifications wait for the parent `agent_settled` boundary and recheck consumption;
+- parent ESC abort-all behavior is configurable;
+- resumed turns emit `subagents:resumed`;
+- contradictory inherited cwd footer text is removed for workspace-backed children;
+- terminal glyphs and XML escaping are safe across common terminal and structured-message contexts.
 
-This fork is a minimal core that other extensions build on, plus a small companion ecosystem:
+These changes require `@earendil-works/pi-coding-agent >=0.80.5`.
 
-- **Typed service API** — `SubagentsService` exposed via `Symbol.for()` accessors, so another extension can spawn and manage subagents without importing this package or relying on ad-hoc event RPC.
-- **Child-session lifecycle events** — `subagents:child:spawning` / `session-created` / `completed` / `disposed`, with `session-created` firing synchronously before `bindExtensions()` so consumers can register the child session deterministically.
-- **`<active_agent>` system-prompt tag** — lets [`@gotgenes/pi-permission-system`](https://github.com/gotgenes/pi-packages/tree/main/packages/pi-permission-system) resolve per-agent `permission:` frontmatter (allow / ask / deny — richer than a binary denylist) inside the child session.
-- **Companion packages** — permission policy and worktree isolation live in dedicated packages rather than the core.
-- **Re-architected codebase** — decomposed into seven domains behind a typed public API boundary, backed by ~994 tests.
+## Ideas adapted from the original upstream
 
-## Which should I use?
+The original `tintinweb` project remains the broader product laboratory. This fork adapted a narrow subset that fits its focused-core direction:
 
-**Use `@tintinweb/pi-subagents`** if you want a single, batteries-included extension with nothing else to install: built-in tool denylist, scheduled / cron subagents, cross-extension RPC, and model-scope enforcement in one package.
-It is the canonical upstream and the original.
+- final assistant `stopReason` classification for provider errors and empty output-limit failures;
+- modern parent `ModelRuntime` forwarding;
+- the `max` thinking level in model-facing and human-facing descriptions;
+- optional fail-closed unknown-agent resolution;
+- `.agents/agents` as a read-only shared project discovery tier.
 
-**Use `@gotgenes/pi-subagents`** if you want a minimal, composable core: richer allow / ask / deny permissions and worktree isolation through companion packages, a typed service plus lifecycle events to build your own extensions on, and an actively refactored codebase — and you do not need built-in scheduling, RPC, or model-scope enforcement.
+## Capabilities intentionally left upstream
 
-The spawn tool is named `subagent` here versus `Agent` upstream, so prompts and docs that hard-code the tool name are not drop-in portable between the two.
+| Capability | `@tintinweb/pi-subagents` | This fork |
+| --- | --- | --- |
+| Nested subagent delegation | Available or under active development | Excluded; recursion remains disabled |
+| Scheduling | Cron, interval, and one-shot jobs | Separate extension concern |
+| Persistent agent memory | Built in | Excluded |
+| Worktree isolation | Built in | Companion workspace provider |
+| Tool permission policy | Built-in selectors and denylist | Companion permission layer plus built-in denylist |
+| Fleet/editor UI | Broad agent management UI | Narrow widget, settings, and native transcript viewer |
+| Cross-extension RPC | Event RPC | Typed service contract |
+| Transcript opt-out | Sidecar output control | Not adopted; this fork uses official persisted Pi sessions |
 
-## Patches contributed upstream
+These are product choices, not missing parity work. Adopting one requires a new architectural decision and a concrete consumer need.
 
-Three of the fork's early changes were opened as PRs against upstream and remain a record of the shared lineage:
+## Choosing an implementation
 
-1. Peer-dep migration to `@earendil-works/pi-*` — [tintinweb/pi-subagents#71](https://github.com/tintinweb/pi-subagents/pull/71) (upstream has since migrated).
-2. Post-`bindExtensions` active-tool re-filter — [tintinweb/pi-subagents#72](https://github.com/tintinweb/pi-subagents/pull/72).
-3. `<active_agent>` system-prompt tag — [tintinweb/pi-subagents#73](https://github.com/tintinweb/pi-subagents/pull/73).
+Use `@tintinweb/pi-subagents` when you want a batteries-included extension with scheduling, memory, nested delegation, worktrees, and its full management UI.
 
-The fork has since diverged well beyond these.
+Use `@gotgenes/pi-subagents` when you want the direct focused-core lineage without this fork's lifecycle interception and status-display guarantees.
+
+Use `@nklisch/pi-subagents` when companion extensions need deterministic lifecycle decisions, inherited runtime and extension tooling, exact model/runtime visibility, and the selective reliability contracts described above.
+
+Tool names and configuration are not drop-in portable across all three projects. Review agent definitions and orchestration prompts before switching packages.

@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-subagents",
-  "version": "18.0.4-nklisch.1",
+  "version": "18.1.0-nklisch.0",
   "type": "module",
   "exports": {
     ".": {
@@ -52,7 +52,7 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.75.0",
-    "@earendil-works/pi-coding-agent": ">=0.75.0",
+    "@earendil-works/pi-coding-agent": ">=0.80.5",
     "@earendil-works/pi-tui": ">=0.75.0"
   },
   "dependencies": {

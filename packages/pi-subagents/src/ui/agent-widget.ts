@@ -10,7 +10,7 @@ import { AgentTypeRegistry } from "#src/config/agent-types";
 import type { Subagent } from "#src/lifecycle/subagent";
 import type { SubagentManager, SubagentManagerObserver } from "#src/lifecycle/subagent-manager";
 import type { CompactionInfo } from "#src/types";
-import { ERROR_STATUSES, type Theme } from "#src/ui/display";
+import { ERROR_STATUSES, formatMs, type Theme } from "#src/ui/display";
 import { renderWidgetLines, type WidgetAgent } from "#src/ui/widget-renderer";
 
 // ---- Types ----
@@ -49,6 +49,25 @@ export function assembleWidgetState(
   }
   const hasActive = runningCount > 0 || queuedCount > 0;
   return { runningCount, queuedCount, hasFinished, hasActive };
+}
+
+/** Render the aggregate status bar without hiding per-agent model/runtime details. */
+export function formatStatusBar(
+  state: WidgetState,
+  agents: readonly Pick<Subagent, "status" | "modelLabel" | "startedAt">[],
+  now = Date.now(),
+): string | undefined {
+  if (!state.hasActive) return undefined;
+  const statusParts: string[] = [];
+  if (state.runningCount > 0) statusParts.push(`${state.runningCount} running`);
+  if (state.queuedCount > 0) statusParts.push(`${state.queuedCount} queued`);
+  const total = state.runningCount + state.queuedCount;
+  const activeDetails = agents
+    .filter((agent) => agent.status === "running" || agent.status === "queued")
+    .map((agent) => agent.status === "running"
+      ? `${agent.modelLabel} ${formatMs(now - agent.startedAt)}`
+      : `${agent.modelLabel} queued`);
+  return `${statusParts.join(", ")} agent${total === 1 ? "" : "s"} · ${activeDetails.join(", ")}`;
 }
 
 export type UICtx = {
@@ -165,6 +184,7 @@ export class AgentWidget implements SubagentManagerObserver {
       type: record.type,
       status: record.status,
       description: record.description,
+      modelLabel: record.modelLabel,
       toolUses: record.toolUses,
       startedAt: record.startedAt,
       completedAt: record.completedAt,
@@ -216,15 +236,8 @@ export class AgentWidget implements SubagentManagerObserver {
    * Compute the status bar text from the current widget state and call
    * `setStatus` only when it differs from the last cached value.
    */
-  private updateStatusBar(state: WidgetState): void {
-    let newStatusText: string | undefined;
-    if (state.hasActive) {
-      const statusParts: string[] = [];
-      if (state.runningCount > 0) statusParts.push(`${state.runningCount} running`);
-      if (state.queuedCount > 0) statusParts.push(`${state.queuedCount} queued`);
-      const total = state.runningCount + state.queuedCount;
-      newStatusText = `${statusParts.join(", ")} agent${total === 1 ? "" : "s"}`;
-    }
+  private updateStatusBar(state: WidgetState, agents: readonly Subagent[]): void {
+    const newStatusText = formatStatusBar(state, agents);
     if (newStatusText !== this.lastStatusText) {
       this.uiCtx!.setStatus("subagents", newStatusText);
       this.lastStatusText = newStatusText;
@@ -259,7 +272,7 @@ export class AgentWidget implements SubagentManagerObserver {
       return;
     }
 
-    this.updateStatusBar(state);
+    this.updateStatusBar(state, backgroundAgents);
     this.widgetFrame++;
 
     // Register widget callback once; subsequent updates use requestRender()

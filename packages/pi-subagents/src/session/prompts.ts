@@ -27,12 +27,14 @@ import type { AgentPromptConfig } from "#src/types";
  * The tag follows the cacheable parent prefix in both modes.
  *
  * @param parentSystemPrompt  The parent agent's effective system prompt.
+ * @param parentCwd           Parent cwd used to remove a contradictory Pi footer.
  */
 export function buildAgentPrompt(
   config: AgentPromptConfig,
   cwd: string,
   env: EnvInfo,
   parentSystemPrompt?: string,
+  parentCwd?: string,
 ): string {
   const activeAgentTag = `<active_agent name="${config.name}"/>\n\n`;
 
@@ -41,7 +43,9 @@ Working directory: ${cwd}
 ${env.isGitRepo ? `Git repository: yes\nBranch: ${env.branch}` : "Not a git repository"}
 Platform: ${env.platform}`;
 
-  const identity = parentSystemPrompt ?? genericBase;
+  const identity = parentSystemPrompt
+    ? withoutContradictoryCwdFooter(parentSystemPrompt, parentCwd, cwd)
+    : genericBase;
 
   if (config.promptMode === "append") {
 
@@ -83,6 +87,25 @@ You are operating as a sub-agent invoked to handle a specific task.
   // Unlike append mode, no <sub_agent_context> bridge or <agent_instructions>
   // wrapper is injected — the custom prompt retains full control.
   return identity + "\n\n" + activeAgentTag + envBlock + "\n\n" + config.systemPrompt;
+}
+
+/**
+ * Pi appends an authoritative cwd line to the parent prompt. A workspace-backed
+ * child appends its own environment block, so retain that footer only when both
+ * sessions actually share a directory.
+ */
+function withoutContradictoryCwdFooter(
+  prompt: string,
+  parentCwd: string | undefined,
+  childCwd: string,
+): string {
+  if (!parentCwd || toPromptPath(parentCwd) === toPromptPath(childCwd)) return prompt;
+  const footerLine = `Current working directory: ${toPromptPath(parentCwd)}`;
+  return prompt.split("\n").filter((line) => line !== footerLine).join("\n");
+}
+
+function toPromptPath(cwd: string): string {
+  return cwd.replaceAll("\\", "/");
 }
 
 /** Fallback base prompt when parent system prompt is unavailable (both modes). */

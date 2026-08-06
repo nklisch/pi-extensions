@@ -25,8 +25,8 @@ The safe loop is:
 6. write only user-owned config;
 7. reload, validate, and replay again.
 
-Runtime reviewer decisions are evidence, not permanent policy. Package installation only makes packs available; Tune must still show and approve explicit enablement. Trusted TypeScript rule-module proposals are removed; Tune emits only inspectable data-pack and core-matcher design inputs.
+Runtime reviewer decisions are evidence, not permanent policy. Package installation makes packs available but does not enable them; Tune must still show and approve explicit enablement. Installation may compact existing user-owned Clearance config into its sparse form, with a backup before each rewrite, and never creates absent files. Trusted TypeScript rule-module proposals are removed; Tune emits only inspectable data-pack and core-matcher design inputs.
 
 The product interface is Pi-native. Helper executables are plumbing for tests and debugging, not the user's control surface.
 
-`/clearance allow` is the user-initiated entry point: it hands a deterministic authoring brief to the agent (one draft per named family, batches kept focused) and feeds the same `clearance_propose`/`clearance_present` approval pipeline. Tune remains the corpus-evidence batch surface; it sizes proposals from replay history rather than a single user request.
+`/clearance allow` is the user-initiated entry point: it sends a displayed Pi custom message of type `clearance.allow-request` containing a clearly `[Pi Clearance]`-labelled deterministic authoring brief to the agent (one draft per named family, batches kept focused). Idle sessions trigger a turn; busy sessions queue the message as a follow-up. It never impersonates a user turn and feeds the same `clearance_propose`/`clearance_present` approval pipeline. Tune remains the corpus-evidence batch surface; it sizes proposals from replay history rather than a single user request.

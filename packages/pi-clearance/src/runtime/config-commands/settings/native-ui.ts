@@ -1,7 +1,11 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 
-import type { ProjectScopeListField } from "../../../config/config-command-plans.ts";
+import {
+  inferScopePreset,
+  SCOPE_PRESET_LABELS,
+  type ProjectScopeListField,
+} from "../../../config/config-command-plans.ts";
 import { handleScopeCommand } from "../scope.ts";
 import type { CommandReport } from "../types.ts";
 import type { SettingsAction, SettingsActionId } from "./actions.ts";
@@ -645,6 +649,11 @@ export class SettingsNativeUiComponent {
       `Mode: ${this.model.currentMode.label} - ${this.model.currentMode.description}`,
       `Reviewer: ${this.model.status.reviewer.path} - ${this.model.status.reviewer.consequence}`,
       `Review context: ${this.model.status.reviewer.contextMode}`,
+      ...((this.model.status.customizations?.length ?? 0) === 0
+        ? []
+        : [
+            `Customizations: ${this.model.status.customizations?.join("; ") ?? ""}`,
+          ]),
       `Packs: ${this.model.status.packs.enabled}/${this.model.status.packs.total} enabled`,
     ];
   }
@@ -720,16 +729,11 @@ export class SettingsNativeUiComponent {
 
 function homeItems(model: SettingsReadModel): readonly NativeSettingsItem[] {
   return [
-    ...model.modes.map((mode) => ({
-      kind: "selection" as const,
-      label: `Set mode: ${mode.label}`,
-      description: mode.description,
-      selection: {
-        kind: "action" as const,
-        label: `Set mode: ${mode.label}`,
-        action: { id: "mode.set" as const, args: { mode: mode.mode } },
-      },
-    })),
+    actionItem(
+      `Mode: ${model.currentMode.label}`,
+      model.currentMode.description,
+      { id: "mode.select", args: {} },
+    ),
     ...model.panels.map((descriptor) => ({
       kind: "panel" as const,
       label: descriptor.title,
@@ -763,22 +767,36 @@ function panelItems(
 function reviewerItems(
   model: SettingsReadModel,
 ): readonly NativeSettingsItem[] {
+  const configuredModel = model.status.reviewer.configuredModel;
+  const gatedToolItems = model.gatedTools.names.map((toolName) =>
+    actionItem(
+      `Gated tool: ${toolName}`,
+      "Toggle this exact non-Bash tool off; Bash cannot be listed.",
+      { id: "gated-tools.remove", args: { toolName } },
+    ),
+  );
   return [
-    ...model.reviewerModels.map((option) =>
       actionItem(
-        `Use reviewer model ${option.label}`,
-        "Pin the reviewer model; writes user-owned config after confirmation.",
-        { id: "reviewer.model", args: { model: option.spec } },
+      `Reviewer model: ${configuredModel ?? "session model"}`,
+      "Choose a configured model or return to the active session model; writes require confirmation.",
+      { id: "reviewer.model", args: {} },
       ),
+    actionItem(
+      `Prompt posture: ${model.status.reviewer.promptPosture}`,
+      "Choose the evidence threshold used by the model reviewer; writes require confirmation.",
+      { id: "reviewer.posture.select", args: {} },
     ),
     actionItem(
-      "Clear explicit reviewer model",
-      "Fall back to the active session model for review.",
-      { id: "reviewer.model", args: { model: null } },
+      `Gated non-Bash tools: ${model.gatedTools.names.length}`,
+      model.gatedTools.addableToolNames.length === 0
+        ? "No active non-Bash tools are available to add."
+        : "Choose an active non-Bash tool to opt into exact-name Clearance gating.",
+      { id: "gated-tools.add", args: {} },
     ),
+    ...gatedToolItems,
     actionItem(
       "Show reviewer details",
-      "Reviewer settings are read-only except model selection.",
+      "Reviewer settings and current evidence thresholds.",
       { id: "reviewer.open", args: {} },
     ),
     backItem(),
@@ -786,24 +804,13 @@ function reviewerItems(
 }
 
 function scopeItems(model: SettingsReadModel): readonly NativeSettingsItem[] {
-  const safeHomeEnabled = model.projectScope.safeHomeUseDefaults !== false;
-  const agentSupportEnabled =
-    model.projectScope.agentSupportUseDefaults !== false;
+  const safeHomeEnabled = model.projectScope.safeHomeUseDefaults;
+  const agentSupportEnabled = model.projectScope.agentSupportUseDefaults;
   return [
     actionItem(
-      "Preset: Project only",
-      "Review anything touching paths outside the project; safe-home and agent-support defaults off.",
-      { id: "scope.preset", args: { preset: "project" } },
-    ),
-    actionItem(
-      "Preset: Home + project",
-      "Baseline read auto-approvals extend into non-secret home directories.",
-      { id: "scope.preset", args: { preset: "home" } },
-    ),
-    actionItem(
-      "Preset: Full minus danger list",
-      "Broad home reads; credential and key paths are hard-denied.",
-      { id: "scope.preset", args: { preset: "unrestricted" } },
+      `Scope preset: ${scopePresetLabel(model)}`,
+      "Choose one behavior bundle; path lists remain unchanged and writes require confirmation.",
+      { id: "scope.preset.select", args: {} },
     ),
     actionItem(
       "Show full scope details",
@@ -813,20 +820,9 @@ function scopeItems(model: SettingsReadModel): readonly NativeSettingsItem[] {
     ...scopePathItems("scope.add-path", "Add"),
     ...scopePathItems("scope.remove-path", "Remove"),
     actionItem(
-      "Unknown paths: review",
-      "Review ambiguous paths instead of denying immediately.",
-      {
-        id: "scope.unknown-path",
-        args: { behavior: "review" },
-      },
-    ),
-    actionItem(
-      "Unknown paths: deny",
-      "Deny ambiguous paths unless policy can prove safety.",
-      {
-        id: "scope.unknown-path",
-        args: { behavior: "deny" },
-      },
+      `Unknown paths: ${model.projectScope.unknownPathBehavior}`,
+      "Choose whether ambiguous paths review or deny; writes require confirmation.",
+      { id: "scope.unknown-path.select", args: {} },
     ),
     actionItem(
       safeHomeEnabled ? "Safe-home defaults: off" : "Safe-home defaults: on",
@@ -888,30 +884,21 @@ export function packItems(
   ];
 }
 
+function scopePresetLabel(model: SettingsReadModel): string {
+  const scope = model.projectScope;
+  const preset = inferScopePreset(scope);
+  return preset === "custom" ? "Custom" : SCOPE_PRESET_LABELS[preset];
+}
+
 function briefingItems(
   model: SettingsReadModel,
 ): readonly NativeSettingsItem[] {
   const briefing = model.briefing;
   return [
     actionItem(
-      `Note text: reason + accent${briefing.mode === "reason+accent" ? " (current)" : ""}`,
-      "Show the decision reason inline after each reviewed call.",
-      { id: "briefing.mode", args: { mode: "reason+accent" } },
-    ),
-    actionItem(
-      `Note text: accent only${briefing.mode === "accent-only" ? " (current)" : ""}`,
-      "Quiet allows: no reason text, accent marker only.",
-      { id: "briefing.mode", args: { mode: "accent-only" } },
-    ),
-    actionItem(
-      `Note text: reason + model${briefing.mode === "reason+model" ? " (current)" : ""}`,
-      "Show the decision reason and the reviewer model label.",
-      { id: "briefing.mode", args: { mode: "reason+model" } },
-    ),
-    actionItem(
-      `Note text: off${briefing.mode === "off" ? " (current)" : ""}`,
-      "Hide review-note text entirely.",
-      { id: "briefing.mode", args: { mode: "off" } },
+      `Note mode: ${briefing.mode}`,
+      "Choose the inline review-note mode; writes require confirmation.",
+      { id: "briefing.mode.select", args: {} },
     ),
     actionItem(
       briefing.showModelLabel ? "Model label: hide" : "Model label: show",

@@ -1,6 +1,18 @@
 import { type Static, type TSchema, Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 
+import {
+  DEFAULT_PROJECT_SCOPE_BEHAVIOR,
+  DEFAULT_REVIEWER_CONTEXT_MODE,
+  DEFAULT_REVIEWER_ESCALATION,
+  DEFAULT_REVIEWER_PROMPT_POSTURE,
+  DEFAULT_REVIEWER_RECENT_CONTEXT,
+  DEFAULT_REVIEWER_TOKEN_BUDGET,
+  DEFAULT_REVIEW_NOTE_DISPLAY,
+  DEFAULT_UNKNOWN_TOOL_POSTURE,
+} from "./defaults.ts";
+import { EXACT_NON_BASH_TOOL_NAME_PATTERN } from "./gated-tools.ts";
+
 export const CONFIG_SCHEMA_VERSION = 1 as const;
 
 const STRICT_OBJECT_OPTIONS = { additionalProperties: false } as const;
@@ -148,9 +160,11 @@ export const PolicyPackSchema = Type.Object(
 
 export const ReviewNoteDisplaySchema = Type.Object(
   {
-    mode: reviewNoteModeLiteral({ default: "reason+accent" }),
-    showModelLabel: Type.Boolean({ default: false }),
-    accent: Type.Boolean({ default: true }),
+    mode: reviewNoteModeLiteral({ default: DEFAULT_REVIEW_NOTE_DISPLAY.mode }),
+    showModelLabel: Type.Boolean({
+      default: DEFAULT_REVIEW_NOTE_DISPLAY.showModelLabel,
+    }),
+    accent: Type.Boolean({ default: DEFAULT_REVIEW_NOTE_DISPLAY.accent }),
   },
   { ...STRICT_OBJECT_OPTIONS, default: {} },
 );
@@ -162,7 +176,7 @@ export const DisplayConfigSchema = Type.Object(
 
 export const ReviewerConfigSchema = Type.Object(
   {
-    promptPosture: Type.String({ default: "reviewer.default" }),
+    promptPosture: Type.String({ default: DEFAULT_REVIEWER_PROMPT_POSTURE }),
     promptAppends: Type.Array(Type.String(), { default: [] }),
     projectPromptAppends: Type.Array(Type.String(), { default: [] }),
     promptOverride: Type.Union([Type.String(), Type.Null()], { default: null }),
@@ -171,41 +185,58 @@ export const ReviewerConfigSchema = Type.Object(
     }),
     tokenBudget: Type.Object(
       {
-        window: Type.String({ default: "24h" }),
-        limit: Type.Union([Type.Number(), Type.Null()], { default: null }),
+        window: Type.String({ default: DEFAULT_REVIEWER_TOKEN_BUDGET.window }),
+        limit: Type.Union([Type.Number(), Type.Null()], {
+          default: DEFAULT_REVIEWER_TOKEN_BUDGET.limit,
+        }),
       },
-      { ...STRICT_OBJECT_OPTIONS, default: { window: "24h", limit: null } },
+      {
+        ...STRICT_OBJECT_OPTIONS,
+        default: DEFAULT_REVIEWER_TOKEN_BUDGET,
+      },
     ),
     contextMode: Type.Union(
       [Type.Literal("minimal"), Type.Literal("recentContext")],
-      { default: "recentContext" },
+      { default: DEFAULT_REVIEWER_CONTEXT_MODE },
     ),
     recentContext: Type.Object(
       {
-        decisionLimit: Type.Integer({ default: 25 }),
-        decisionWindow: Type.String({ default: "2h" }),
-        conversationTurns: Type.Integer({ default: 3 }),
-        conversationCharLimit: Type.Integer({ default: 6000 }),
+        decisionLimit: Type.Integer({
+          default: DEFAULT_REVIEWER_RECENT_CONTEXT.decisionLimit,
+        }),
+        decisionWindow: Type.String({
+          default: DEFAULT_REVIEWER_RECENT_CONTEXT.decisionWindow,
+        }),
+        conversationTurns: Type.Integer({
+          default: DEFAULT_REVIEWER_RECENT_CONTEXT.conversationTurns,
+        }),
+        userTurns: Type.Integer({
+          default: DEFAULT_REVIEWER_RECENT_CONTEXT.userTurns,
+        }),
+        conversationCharLimit: Type.Integer({
+          default: DEFAULT_REVIEWER_RECENT_CONTEXT.conversationCharLimit,
+        }),
       },
       {
         ...STRICT_OBJECT_OPTIONS,
         default: {
-          decisionLimit: 25,
-          decisionWindow: "2h",
-          conversationTurns: 3,
-          conversationCharLimit: 6000,
+          ...DEFAULT_REVIEWER_RECENT_CONTEXT,
         },
       },
     ),
     escalation: Type.Object(
       {
-        enabled: Type.Boolean({ default: true }),
-        denialLimit: Type.Integer({ default: 3 }),
-        window: Type.String({ default: "10m" }),
+        enabled: Type.Boolean({
+          default: DEFAULT_REVIEWER_ESCALATION.enabled,
+        }),
+        denialLimit: Type.Integer({
+          default: DEFAULT_REVIEWER_ESCALATION.denialLimit,
+        }),
+        window: Type.String({ default: DEFAULT_REVIEWER_ESCALATION.window }),
       },
       {
         ...STRICT_OBJECT_OPTIONS,
-        default: { enabled: true, denialLimit: 3, window: "10m" },
+        default: DEFAULT_REVIEWER_ESCALATION,
       },
     ),
   },
@@ -227,14 +258,25 @@ export const PackEnablementSchema = Type.Object(
   { ...STRICT_OBJECT_OPTIONS, default: {} },
 );
 
+const GatedToolName = Type.String({
+  minLength: 1,
+  // Tool opt-in is deliberately exact-name only. Keep the field a strict
+  // schema boundary so wildcard/future-tool consent cannot slip into config.
+  pattern: EXACT_NON_BASH_TOOL_NAME_PATTERN,
+});
+
 export const GlobalConfigSchema = Type.Object(
   {
     version: Type.Literal(CONFIG_SCHEMA_VERSION),
     mode: ClearanceModeLiteral,
+    gatedTools: Type.Array(GatedToolName, {
+      default: [],
+      uniqueItems: true,
+    }),
     unknownToolPosture: Type.Optional(
       Type.Union(
         [Type.Literal("allow"), Type.Literal("deny"), Type.Literal("review")],
-        { default: "allow" },
+        { default: DEFAULT_UNKNOWN_TOOL_POSTURE },
       ),
     ),
     packs: Type.Array(PolicyPackSchema, { default: [] }),
@@ -263,13 +305,19 @@ export const ProjectScopeSchema = Type.Object(
     tempDirectories: pathListSchema(),
     deniedDirectories: pathListSchema(),
     safeHomeDirectories: pathListSchema(),
-    safeHomeUseDefaults: Type.Boolean({ default: true }),
+    safeHomeUseDefaults: Type.Boolean({
+      default: DEFAULT_PROJECT_SCOPE_BEHAVIOR.safeHomeUseDefaults,
+    }),
     /** Optional custom Pi support roots; built-in roots remain enabled by default. */
     agentSupportDirectories: Type.Optional(pathListSchema()),
-    agentSupportUseDefaults: Type.Optional(Type.Boolean({ default: true })),
+    agentSupportUseDefaults: Type.Optional(
+      Type.Boolean({
+        default: DEFAULT_PROJECT_SCOPE_BEHAVIOR.agentSupportUseDefaults,
+      }),
+    ),
     unknownPathBehavior: Type.Union(
       [Type.Literal("review"), Type.Literal("deny")],
-      { default: "review" },
+      { default: DEFAULT_PROJECT_SCOPE_BEHAVIOR.unknownPathBehavior },
     ),
     /**
      * Behavior for paths the engine classifies as sensitive home
@@ -278,7 +326,7 @@ export const ProjectScopeSchema = Type.Object(
      */
     sensitivePathBehavior: Type.Union(
       [Type.Literal("review"), Type.Literal("deny")],
-      { default: "review" },
+      { default: DEFAULT_PROJECT_SCOPE_BEHAVIOR.sensitivePathBehavior },
     ),
     /**
      * `"review"` claws back baseline home-scope read auto-allows so any
@@ -286,7 +334,7 @@ export const ProjectScopeSchema = Type.Object(
      */
     homePathBehavior: Type.Union(
       [Type.Literal("allow"), Type.Literal("review")],
-      { default: "allow" },
+      { default: DEFAULT_PROJECT_SCOPE_BEHAVIOR.homePathBehavior },
     ),
   },
   { ...STRICT_OBJECT_OPTIONS, default: {} },

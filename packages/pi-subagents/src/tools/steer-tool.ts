@@ -2,6 +2,7 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { formatLifetimeTokens, textResult } from "#src/tools/helpers";
 import type { SteerOutcome, Subagent } from "#src/types";
+import { formatDuration } from "#src/ui/display";
 
 // ---- Deps interfaces ----
 
@@ -40,19 +41,22 @@ export class SteerTool {
 			outcome = await record.steer(params.message);
 		} catch (err) {
 			return textResult(
-				`Failed to steer agent: ${err instanceof Error ? err.message : String(err)}`,
+				`Failed to steer agent: ${err instanceof Error ? err.message : String(err)}\n`
+					+ this.renderRunIdentity(record),
 			);
 		}
 
 		switch (outcome.kind) {
 			case "rejected":
 				return textResult(
-					`Agent "${params.agent_id}" is not running (status: ${outcome.status}). Cannot steer a non-running agent.`,
+					`Agent "${params.agent_id}" is not running (status: ${outcome.status}). Cannot steer a non-running agent.\n`
+						+ this.renderRunIdentity(record),
 				);
 			case "buffered":
 				this.events.emit("subagents:steered", { id: record.id, message: params.message });
 				return textResult(
-					`Steering message queued for agent ${record.id}. It will be delivered once the session initializes.`,
+					`Steering message queued for agent ${record.id}. It will be delivered once the session initializes.\n`
+						+ this.renderRunIdentity(record),
 				);
 			case "delivered":
 				this.events.emit("subagents:steered", { id: record.id, message: params.message });
@@ -64,7 +68,7 @@ export class SteerTool {
 	private renderDelivered(record: Subagent) {
 		const tokens = formatLifetimeTokens(record);
 		const contextPercent = record.getContextPercent();
-		const stateParts: string[] = [];
+		const stateParts: string[] = [record.modelLabel, formatDuration(record.startedAt, record.completedAt)];
 		if (tokens) stateParts.push(tokens);
 		stateParts.push(`${record.toolUses} tool ${record.toolUses === 1 ? "use" : "uses"}`);
 		if (contextPercent !== null)
@@ -77,6 +81,10 @@ export class SteerTool {
 			`Steering message sent to agent ${record.id}. The agent will process it after its current tool execution.\n` +
 				`Current state: ${stateParts.join(" · ")}`,
 		);
+	}
+
+	private renderRunIdentity(record: Subagent): string {
+		return `Model: ${record.modelLabel}\nRuntime: ${formatDuration(record.startedAt, record.completedAt)}`;
 	}
 
 	toToolDefinition() {

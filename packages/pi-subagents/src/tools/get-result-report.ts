@@ -13,6 +13,7 @@ import type { SubagentStatus } from "#src/lifecycle/subagent";
 export interface AgentReport {
 	id: string;
 	displayName: string;
+	modelLabel: string;
 	status: SubagentStatus;
 	toolUses: number;
 	/** Pre-formatted lifetime token total; "" when zero. */
@@ -24,8 +25,11 @@ export interface AgentReport {
 	description: string;
 	result: string | undefined;
 	error: string | undefined;
+	stoppedWhileQueued: boolean;
 	/** Present only when verbose was requested and a conversation is available. */
 	conversation?: string;
+	/** Persisted transcript remains readable after the live session is released. */
+	transcriptPath?: string;
 }
 
 /** Assemble the stats parts: Tool uses / tokens? / Context? / Compactions? / Duration. */
@@ -40,9 +44,18 @@ export function renderStatsParts(report: AgentReport): string[] {
 
 /** Select the per-status body: running note, error line, or trimmed result. */
 export function renderReportBody(report: AgentReport): string {
+	if (report.status === "queued")
+		return "Agent is queued and has not started. Use wait: true to synchronize, or rely on the automatic completion notification.";
 	if (report.status === "running")
-		return "Agent is still running. Use wait: true or check back later.";
-	if (report.status === "error") return `Error: ${report.error}`;
+		return "Agent is still running. Use wait: true to synchronize, or rely on the automatic completion notification.";
+	if (report.stoppedWhileQueued)
+		return "Agent was stopped while queued and never started. No work was performed.";
+	if (report.status === "error") {
+		const partial = report.result?.trim();
+		return partial
+			? `Error: ${report.error}\n\nPartial output before the failure:\n${partial}`
+			: `Error: ${report.error}`;
+	}
 	return report.result?.trim() ?? "No output.";
 }
 
@@ -50,11 +63,12 @@ export function renderReportBody(report: AgentReport): string {
 export function formatAgentReport(report: AgentReport): string {
 	let output =
 		`Agent: ${report.id}\n` +
-		`Type: ${report.displayName} | Status: ${report.status} | ${renderStatsParts(report).join(" | ")}\n` +
+		`Type: ${report.displayName} | Model: ${report.modelLabel} | Status: ${report.status} | ${renderStatsParts(report).join(" | ")}\n` +
 		`Description: ${report.description}\n\n`;
 	output += renderReportBody(report);
 	if (report.conversation) {
 		output += `\n\n--- Agent Conversation ---\n${report.conversation}`;
 	}
+	if (report.transcriptPath) output += `\n\nFull transcript: ${report.transcriptPath}`;
 	return output;
 }

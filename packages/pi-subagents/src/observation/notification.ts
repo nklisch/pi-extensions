@@ -6,6 +6,7 @@ import type { Subagent } from "#src/types";
 export interface NotificationDetails {
   id: string;
   description: string;
+  modelLabel: string;
   status: string;
   toolUses: number;
   turnCount: number;
@@ -19,9 +20,14 @@ export interface NotificationDetails {
 
 // ---- Pure helpers (exported for unit testing) ----
 
-/** Escape XML special characters to prevent injection in structured notifications. */
+/** Escape XML text and attribute delimiters in structured notifications. */
 export function escapeXml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
 /** Human-readable status label for agent completion. */
@@ -49,7 +55,9 @@ export function formatTaskNotification(record: Subagent, resultMaxLen: number): 
   const ctxXml = contextPercent !== null ? `<context_percent>${Math.round(contextPercent)}</context_percent>` : "";
   const compactXml = record.compactionCount ? `<compactions>${record.compactionCount}</compactions>` : "";
 
-  const resultPreview = record.result
+  const resultPreview = record.stoppedWhileQueued
+    ? "Agent was stopped while queued and never started. No work was performed."
+    : record.result
     ? record.result.length > resultMaxLen
       ? record.result.slice(0, resultMaxLen) + "\n...(truncated, use get_subagent_result for full output)"
       : record.result
@@ -63,6 +71,7 @@ export function formatTaskNotification(record: Subagent, resultMaxLen: number): 
     toolCallId ? `<tool-use-id>${escapeXml(toolCallId)}</tool-use-id>` : null,
     outputFile ? `<output-file>${escapeXml(outputFile)}</output-file>` : null,
     `<status>${escapeXml(status)}</status>`,
+    `<model>${escapeXml(record.modelLabel)}</model>`,
     `<summary>Subagent "${escapeXml(record.description)}" ${record.status}</summary>`,
     `<result>${escapeXml(resultPreview)}</result>`,
     `<usage><total_tokens>${totalTokens}</total_tokens><tool_uses>${record.toolUses}</tool_uses>${ctxXml}${compactXml}<duration_ms>${durationMs}</duration_ms></usage>`,
@@ -82,6 +91,7 @@ export function buildNotificationDetails(
   return {
     id: record.id,
     description: record.description,
+    modelLabel: record.modelLabel,
     status: record.status,
     toolUses: record.toolUses,
     turnCount: record.turnCount,
@@ -90,7 +100,9 @@ export function buildNotificationDetails(
     durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
     outputFile: record.outputFile,
     error: record.error,
-    resultPreview: record.result
+    resultPreview: record.stoppedWhileQueued
+      ? "Agent was stopped while queued and never started. No work was performed."
+      : record.result
       ? record.result.length > resultMaxLen
         ? record.result.slice(0, resultMaxLen) + "…"
         : record.result
@@ -127,17 +139,12 @@ export interface NotificationSystem {
   dispose: () => void;
 }
 
-/** Delivery-consumption operation: get-result-tool's dependency on NotificationManager. */
-export interface ResultDelivery {
-  /** Record the parent consumed this agent's result: suppress its completion nudge. */
-  consume: (id: string) => void;
-}
-
-const NUDGE_HOLD_MS = 200;
-
-export class NotificationManager implements NotificationSystem, ResultDelivery {
-  private pendingNudges = new Map<string, ReturnType<typeof setTimeout>>();
-  private consumed = new Set<string>();
+export class NotificationManager implements NotificationSystem {
+  // Pi cannot recall a queued followUp. Hold records while the parent run is
+  // active so consumption can be rechecked at the actual delivery boundary.
+  private pendingNudges = new Map<string, Subagent>();
+  private parentRunActive = false;
+  private disposed = false;
 
   constructor(
     private sendMessage: (
@@ -146,51 +153,46 @@ export class NotificationManager implements NotificationSystem, ResultDelivery {
     ) => void,
   ) {}
 
-  consume(id: string): void {
-    this.consumed.add(id);
-    this.cancelNudge(id);
-  }
-
   sendCompletion(record: Subagent): void {
-    if (this.consumed.has(record.id)) return;
-    this.scheduleNudge(record.id, () => this.emitIndividualNudge(record));
+    if (this.disposed || record.consumed) return;
+    if (this.parentRunActive) {
+      this.pendingNudges.set(record.id, record);
+      return;
+    }
+    this.emitIndividualNudge(record);
   }
 
-  dispose(): void {
-    for (const timer of this.pendingNudges.values()) clearTimeout(timer);
+  onParentAgentStart(): void {
+    if (!this.disposed) this.parentRunActive = true;
+  }
+
+  onParentAgentSettled(): void {
+    if (this.disposed) return;
+    this.parentRunActive = false;
+    const withheld = [...this.pendingNudges.values()];
     this.pendingNudges.clear();
-    this.consumed.clear();
-  }
-
-  private cancelNudge(key: string): void {
-    const timer = this.pendingNudges.get(key);
-    if (timer != null) {
-      clearTimeout(timer);
-      this.pendingNudges.delete(key);
+    for (const record of withheld) {
+      try {
+        this.emitIndividualNudge(record);
+      } catch (err) {
+        debugLog("notification render", err);
+      }
     }
   }
 
-  private scheduleNudge(key: string, send: () => void, delay = NUDGE_HOLD_MS): void {
-    this.cancelNudge(key);
-    this.pendingNudges.set(
-      key,
-      setTimeout(() => {
-        this.pendingNudges.delete(key);
-        try {
-          send();
-        } catch (err) {
-          debugLog("notification render", err);
-        }
-      }, delay),
-    );
+  dispose(): void {
+    this.disposed = true;
+    this.pendingNudges.clear();
   }
 
   private emitIndividualNudge(record: Subagent): void {
-    if (this.consumed.has(record.id)) return;
+    if (this.disposed || record.consumed) return;
 
     const notification = formatTaskNotification(record, 500);
     const outputFile = record.outputFile;
-    const footer = outputFile ? `\nFull transcript available at: ${outputFile}` : "";
+    const footer = !record.stoppedWhileQueued && outputFile
+      ? `\nFull transcript available at: ${outputFile}`
+      : "";
 
     this.sendMessage(
       {
@@ -201,5 +203,7 @@ export class NotificationManager implements NotificationSystem, ResultDelivery {
       },
       { deliverAs: "followUp", triggerTurn: true },
     );
+    // Push delivery collected the terminal outcome just as surely as a pull.
+    record.markConsumed();
   }
 }

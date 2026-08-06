@@ -29,6 +29,7 @@ export interface WidgetAgent {
 	readonly type: SubagentType;
 	readonly status: string;
 	readonly description: string;
+	readonly modelLabel: string;
 	readonly toolUses: number;
 	readonly startedAt: number;
 	readonly completedAt?: number;
@@ -77,7 +78,7 @@ export function renderFinishedLine(
 		statusText = theme.fg("warning", " aborted");
 	}
 
-	const parts: string[] = [];
+	const parts: string[] = [agent.modelLabel];
 	parts.push(formatTurns(agent.turnCount, agent.maxTurns));
 	if (agent.toolUses > 0) parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
 	parts.push(duration);
@@ -101,7 +102,7 @@ export function renderRunningLines(
 	const tokens = getLifetimeTotal(agent.lifetimeUsage);
 	const tokenText = tokens > 0 ? formatSessionTokens(tokens, agent.contextPercent, theme, agent.compactionCount) : "";
 
-	const parts: string[] = [];
+	const parts: string[] = [agent.modelLabel];
 	parts.push(formatTurns(agent.turnCount, agent.maxTurns));
 	if (agent.toolUses > 0) parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
 	if (tokenText) parts.push(tokenText);
@@ -146,7 +147,7 @@ function categorizeAgents(
 interface WidgetSections {
 	finishedLines: string[];
 	runningLines: [string, string][];
-	queuedLine: string | undefined;
+	queuedLines: string[];
 }
 
 /** Render each agent bucket into pre-formatted lines with ├─ tree connectors. */
@@ -171,11 +172,17 @@ function buildSections(
 		]);
 	}
 
-	const queuedLine = categories.queued.length > 0
-		? truncate(theme.fg("dim", "\u251C\u2500") + ` ${theme.fg("muted", "\u25E6")} ${theme.fg("dim", `${categories.queued.length} queued`)}`)
-		: undefined;
+	const queuedLines = categories.queued.map((agent) =>
+		truncate(
+			theme.fg("dim", "\u251C\u2500")
+			+ ` ${theme.fg("muted", "\u25E6")} ${theme.fg("dim", getDisplayName(agent.type, registry))}`
+			+ ` ${theme.fg("dim", "·")} ${theme.fg("dim", agent.modelLabel)}`
+			+ ` ${theme.fg("dim", "·")} ${theme.fg("dim", agent.description)}`
+			+ ` ${theme.fg("dim", "· queued")}`,
+		),
+	);
 
-	return { finishedLines, runningLines, queuedLine };
+	return { finishedLines, runningLines, queuedLines };
 }
 
 /**
@@ -183,16 +190,16 @@ function buildSections(
  * Fixes the last tree connector: ├─ → └─, and │ → space for the running-agent activity line.
  */
 function assembleWithinBudget(heading: string, sections: WidgetSections): string[] {
-	const { finishedLines, runningLines, queuedLine } = sections;
+	const { finishedLines, runningLines, queuedLines } = sections;
 	const lines: string[] = [heading, ...finishedLines];
 	for (const pair of runningLines) lines.push(...pair);
-	if (queuedLine) lines.push(queuedLine);
+	lines.push(...queuedLines);
 
 	// Fix last connector: swap \u251C\u2500 \u2192 \u2514\u2500.
 	if (lines.length > 1) {
 		const last = lines.length - 1;
 		lines[last] = lines[last].replace("\u251C\u2500", "\u2514\u2500");
-		if (runningLines.length > 0 && !queuedLine) {
+		if (runningLines.length > 0 && queuedLines.length === 0) {
 			if (last >= 2) {
 				lines[last - 1] = lines[last - 1].replace("\u251C\u2500", "\u2514\u2500");
 				lines[last] = lines[last].replace("\u2502  ", "   ");
@@ -213,10 +220,11 @@ function assembleOverflow(
 	truncate: (line: string) => string,
 	theme: Theme,
 ): string[] {
-	const { finishedLines, runningLines, queuedLine } = sections;
+	const { finishedLines, runningLines, queuedLines } = sections;
 	const lines: string[] = [heading];
 	let budget = maxBody - 1;
 	let hiddenRunning = 0;
+	let hiddenQueued = 0;
 	let hiddenFinished = 0;
 
 	for (const pair of runningLines) {
@@ -228,9 +236,13 @@ function assembleOverflow(
 		}
 	}
 
-	if (queuedLine && budget >= 1) {
-		lines.push(queuedLine);
-		budget--;
+	for (const queuedLine of queuedLines) {
+		if (budget >= 1) {
+			lines.push(queuedLine);
+			budget--;
+		} else {
+			hiddenQueued++;
+		}
 	}
 
 	for (const fl of finishedLines) {
@@ -244,9 +256,10 @@ function assembleOverflow(
 
 	const overflowParts: string[] = [];
 	if (hiddenRunning > 0) overflowParts.push(`${hiddenRunning} running`);
+	if (hiddenQueued > 0) overflowParts.push(`${hiddenQueued} queued`);
 	if (hiddenFinished > 0) overflowParts.push(`${hiddenFinished} finished`);
 	const overflowText = overflowParts.join(", ");
-	lines.push(truncate(theme.fg("dim", "\u2514\u2500") + ` ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`));
+	lines.push(truncate(theme.fg("dim", "\u2514\u2500") + ` ${theme.fg("dim", `+${hiddenRunning + hiddenQueued + hiddenFinished} more (${overflowText})`)}`));
 	return lines;
 }
 
@@ -272,7 +285,7 @@ export function renderWidgetLines(params: {
 	const headingColor = hasActive ? "accent" : "dim";
 	const headingIcon = hasActive ? "\u25CF" : "\u25CB";
 
-	const { finishedLines, runningLines, queuedLine } = buildSections(
+	const { finishedLines, runningLines, queuedLines } = buildSections(
 		{ running, queued, finished },
 		registry,
 		spinnerFrame,
@@ -282,11 +295,11 @@ export function renderWidgetLines(params: {
 
 	// Assemble with overflow cap (heading takes 1 line).
 	const maxBody = MAX_WIDGET_LINES - 1;
-	const totalBody = finishedLines.length + runningLines.length * 2 + (queuedLine ? 1 : 0);
+	const totalBody = finishedLines.length + runningLines.length * 2 + queuedLines.length;
 	const heading = truncate(theme.fg(headingColor, headingIcon) + " " + theme.fg(headingColor, "Agents"));
 
 	if (totalBody <= maxBody) {
-		return assembleWithinBudget(heading, { finishedLines, runningLines, queuedLine });
+		return assembleWithinBudget(heading, { finishedLines, runningLines, queuedLines });
 	}
-	return assembleOverflow(heading, { finishedLines, runningLines, queuedLine }, maxBody, truncate, theme);
+	return assembleOverflow(heading, { finishedLines, runningLines, queuedLines }, maxBody, truncate, theme);
 }

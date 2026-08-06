@@ -2,10 +2,15 @@ import type {
   ResolvedProjectScope,
   ResolvedReviewNotePreference,
 } from "../../../config/loader.ts";
+import {
+  DEFAULT_PROJECT_SCOPE_BEHAVIOR,
+  DEFAULT_REVIEW_NOTE_DISPLAY,
+} from "../../../config/defaults.ts";
 import type { ClearanceMode } from "../../../config/schema.ts";
 import type { AutoReviewerStatusView } from "../../auto-reviewer-read-models.ts";
 import type { ReviewDecisionDisplayCapability } from "../../review-decision-display.ts";
 import type { SettingsActionId } from "./actions.ts";
+import type { ReviewerModelOption } from "./model-options.ts";
 
 export interface SettingsModeCopy {
   readonly mode: ClearanceMode;
@@ -26,9 +31,14 @@ export interface SettingsBriefingRow {
   readonly note: string;
 }
 
-export interface SettingsProjectScope extends ResolvedProjectScope {
+export interface SettingsProjectScopeInput extends ResolvedProjectScope {
   readonly safeHomeUseDefaults?: boolean;
   readonly agentSupportUseDefaults?: boolean;
+}
+
+export interface SettingsProjectScope extends ResolvedProjectScope {
+  readonly safeHomeUseDefaults: boolean;
+  readonly agentSupportUseDefaults: boolean;
 }
 
 /** A pack row for the settings pack explorer. */
@@ -45,10 +55,16 @@ export interface SettingsPackRow {
 }
 
 /** A reviewer model option for the settings reviewer panel. */
-export interface SettingsReviewerModelOption {
-  /** Canonical provider/modelId spec written to config. */
-  readonly spec: string;
-  readonly label: string;
+export type SettingsReviewerModelOption = ReviewerModelOption;
+
+export interface SettingsGatedTools {
+  /** Exact non-Bash names currently opted into Clearance gating. */
+  readonly names: readonly string[];
+  /** Active host tools are the only names offered by the add chooser. */
+  readonly activeToolNames: readonly string[];
+  /** All host metadata, when available, for disclosure and diagnostics. */
+  readonly allToolNames: readonly string[];
+  readonly addableToolNames: readonly string[];
 }
 
 export interface SettingsPanelDescriptor {
@@ -66,6 +82,7 @@ export interface SettingsReadModel {
   readonly briefing: SettingsBriefingRow;
   readonly packs: readonly SettingsPackRow[];
   readonly reviewerModels: readonly SettingsReviewerModelOption[];
+  readonly gatedTools: SettingsGatedTools;
   readonly panels: readonly SettingsPanelDescriptor[];
 }
 
@@ -90,11 +107,8 @@ export const SETTINGS_MODE_COPIES = [
   },
 ] as const satisfies readonly SettingsModeCopy[];
 
-export const DEFAULT_REVIEW_NOTE_PREFERENCE = {
-  mode: "reason+accent",
-  showModelLabel: false,
-  accent: true,
-} as const satisfies ResolvedReviewNotePreference;
+export const DEFAULT_REVIEW_NOTE_PREFERENCE =
+  DEFAULT_REVIEW_NOTE_DISPLAY satisfies ResolvedReviewNotePreference;
 
 export const DEFAULT_SETTINGS_BRIEFING_ROW = buildSettingsBriefingRow(
   DEFAULT_REVIEW_NOTE_PREFERENCE,
@@ -105,7 +119,7 @@ const SETTINGS_PANEL_DESCRIPTORS = [
     id: "reviewer",
     title: "Reviewer",
     summary:
-      "Configured model and prompt details (read-only except model selection).",
+      "Confirm-backed model and prompt-posture selectors; other advanced details are read-only.",
     drillActionId: "reviewer.open" as const,
   },
   {
@@ -131,10 +145,11 @@ const SETTINGS_PANEL_DESCRIPTORS = [
 
 export function buildSettingsReadModel(input: {
   readonly status: AutoReviewerStatusView;
-  readonly projectScope: SettingsProjectScope;
+  readonly projectScope: SettingsProjectScopeInput;
   readonly reviewNoteDisplay?: ResolvedReviewNotePreference;
   readonly packs?: readonly SettingsPackRow[];
   readonly reviewerModels?: readonly SettingsReviewerModelOption[];
+  readonly gatedTools?: SettingsGatedTools;
 }): SettingsReadModel {
   const currentMode = SETTINGS_MODE_COPIES.find(
     (mode) => mode.mode === input.status.mode,
@@ -145,13 +160,32 @@ export function buildSettingsReadModel(input: {
     modes: SETTINGS_MODE_COPIES.map((mode) => ({ ...mode })),
     currentMode: { ...currentMode },
     status: input.status,
-    projectScope: input.projectScope,
+    projectScope: normalizeSettingsProjectScope(input.projectScope),
     briefing: buildSettingsBriefingRow(
       input.reviewNoteDisplay ?? DEFAULT_REVIEW_NOTE_PREFERENCE,
     ),
     packs: input.packs ?? [],
     reviewerModels: input.reviewerModels ?? [],
+    gatedTools: input.gatedTools ?? {
+      names: [],
+      activeToolNames: [],
+      allToolNames: [],
+      addableToolNames: [],
+    },
     panels: SETTINGS_PANEL_DESCRIPTORS.map((panel) => ({ ...panel })),
+  };
+}
+
+function normalizeSettingsProjectScope(
+  scope: SettingsProjectScopeInput,
+): SettingsProjectScope {
+  return {
+    ...scope,
+    safeHomeUseDefaults:
+      scope.safeHomeUseDefaults ?? DEFAULT_PROJECT_SCOPE_BEHAVIOR.safeHomeUseDefaults,
+    agentSupportUseDefaults:
+      scope.agentSupportUseDefaults ??
+      DEFAULT_PROJECT_SCOPE_BEHAVIOR.agentSupportUseDefaults,
   };
 }
 

@@ -4,6 +4,7 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { AgentTypeRegistry } from "#src/config/agent-types";
+import { THINKING_LEVELS_DESCRIPTION } from "#src/config/thinking-levels";
 import type { ParentSnapshot } from "#src/lifecycle/parent-snapshot";
 import type { AgentSpawnConfig } from "#src/lifecycle/subagent-manager";
 import { spawnBackground } from "#src/tools/background-spawner";
@@ -12,7 +13,7 @@ import { buildAgentGuidelines, buildDetails, buildTypeListText, textResult } fro
 import { renderAgentResult } from "#src/tools/result-renderer";
 import { type ModelInfo, resolveSpawnConfig } from "#src/tools/spawn-config";
 import type { ParentSessionInfo, Subagent } from "#src/types";
-import { type AgentDetails, getDisplayName } from "#src/ui/display";
+import { type AgentDetails, formatDuration, getDisplayName } from "#src/ui/display";
 
 // ---- Deps interfaces ----
 
@@ -35,6 +36,7 @@ export interface AgentToolRuntime {
 export type AgentToolSettings = {
 	readonly defaultMaxTurns: number | undefined;
 	readonly maxConcurrent: number;
+	readonly fallbackSubagent?: string | false;
 };
 
 // ---- Class ----
@@ -90,7 +92,9 @@ export class AgentTool {
 			}
 			if (!existing.isSessionReady()) {
 				return textResult(
-					`Agent "${params.resume}" has no active session to resume.`,
+					existing.sessionReleased
+						? `Agent "${params.resume}" retained its result and transcript, but its live session was released after the retention window. Start a new subagent for fresh context.`
+						: `Agent "${params.resume}" has no active session to resume.`,
 				);
 			}
 			const record = await this.manager.resume(
@@ -101,9 +105,19 @@ export class AgentTool {
 			if (!record) {
 				return textResult(`Failed to resume agent "${params.resume}".`);
 			}
+			record.markConsumed();
+			const partial = record.result?.trim();
+			const resultText = record.status === "error"
+				? partial
+					? `Error: ${record.error}\n\nPartial output before the failure:\n${partial}`
+					: `Error: ${record.error}`
+				: partial ?? "No output.";
 			return textResult(
-				record.result?.trim() ?? record.error?.trim() ?? "No output.",
-				buildDetails(config.presentation.detailBase, record),
+				`Model: ${record.modelLabel}\nRuntime: ${formatDuration(record.startedAt, record.completedAt)}\n\n${resultText}`,
+				buildDetails(
+					{ ...config.presentation.detailBase, modelName: record.modelLabel },
+					record,
+				),
 			);
 		}
 
@@ -135,9 +149,11 @@ export class AgentTool {
 			...this.agentGuidelines,
 			"- Provide clear, detailed prompts so the agent can work autonomously.",
 			"- Subagent results are returned as text — summarize them for the user.",
-			"- Use run_in_background for work you don't need immediately. You will be notified when it completes.",
-			"- Use resume with an agent ID to continue a previous agent's work.",
-			"- Use steer_subagent to send mid-run messages to a running background agent.",
+			"- Background completion automatically wakes you with a result preview. Continue other work instead of polling.",
+			"- Use get_subagent_result only for full output, verbose conversation, an explicit status check or synchronization point, or recovery after a missed notification.",
+			"- Use steer_subagent to redirect an agent that is still running.",
+			"- Use resume only after an agent finishes when it should continue with the same retained conversation history.",
+			"- Launch a new subagent without resume when prior conversation history is unnecessary.",
 			'- Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").',
 			"- Use thinking to control extended thinking level.",
 			"- Use inherit_context if the agent needs the parent conversation history.",
@@ -176,7 +192,7 @@ ${guidelines}
 				thinking: Type.Optional(
 					Type.String({
 						description:
-							"Thinking level: off, minimal, low, medium, high, xhigh. Overrides agent default.",
+							`Thinking level: ${THINKING_LEVELS_DESCRIPTION}. Overrides agent default. Availability depends on the selected model and host Pi version.`,
 					}),
 				),
 				max_turns: Type.Optional(
@@ -189,12 +205,13 @@ ${guidelines}
 				run_in_background: Type.Optional(
 					Type.Boolean({
 						description:
-							"Set to true to run in background. Returns agent ID immediately. You will be notified when it completes.",
+							"Set to true to run in background. Returns an agent ID immediately; completion automatically wakes you with a result preview.",
 					}),
 				),
 				resume: Type.Optional(
 					Type.String({
-						description: "Optional agent ID to resume from. Continues from previous context.",
+						description:
+							"Agent ID of a retained, finished session to continue with the same conversation history. Omit to start a new context.",
 					}),
 				),
 				inherit_context: Type.Optional(

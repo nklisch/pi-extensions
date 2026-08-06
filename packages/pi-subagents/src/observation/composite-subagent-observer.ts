@@ -33,6 +33,10 @@ export class CompositeSubagentObserver implements SubagentManagerObserver {
     this.dispatch((o) => o.onSubagentCompleted(record), "onSubagentCompleted");
   }
 
+  onSubagentResumed(record: Subagent): void {
+    this.dispatch((o) => o.onSubagentResumed?.(record), "onSubagentResumed");
+  }
+
   onSubagentCompacted(record: Subagent, info: CompactionInfo): void {
     this.dispatch((o) => o.onSubagentCompacted(record, info), "onSubagentCompacted");
   }

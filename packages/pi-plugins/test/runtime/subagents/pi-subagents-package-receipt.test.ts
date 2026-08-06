@@ -21,12 +21,12 @@ describe("published pi-subagents package receipt", () => {
 
     expect(manifest).toMatchObject({
       name: "@nklisch/pi-subagents",
-      version: "18.0.4-nklisch.1",
+      version: "18.1.0-nklisch.0",
       license: "MIT",
       engines: { node: ">=22" },
       peerDependencies: {
         "@earendil-works/pi-ai": ">=0.75.0",
-        "@earendil-works/pi-coding-agent": ">=0.75.0",
+        "@earendil-works/pi-coding-agent": ">=0.80.5",
         "@earendil-works/pi-tui": ">=0.75.0",
       },
       exports: {
@@ -38,6 +38,6 @@ describe("published pi-subagents package receipt", () => {
       link: true,
       resolved: "packages/pi-subagents",
     });
-    expect(lock.packages?.["packages/pi-subagents"]?.version).toBe("18.0.4-nklisch.1");
+    expect(lock.packages?.["packages/pi-subagents"]?.version).toBe("18.1.0-nklisch.0");
   });
 });

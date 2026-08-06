@@ -7,8 +7,9 @@ model review.
 Use this order:
 
 1. **Enable an existing shipped or package-contributed pack** if one already matches the
-   workflow. Package installation only makes packs available; enablement still goes through
-   user-owned config and approval.
+   workflow. Package installation makes packs available but does not enable them; enablement
+   still goes through user-owned config and approval. Installation may compact existing
+   materialized Clearance defaults, but it never creates a config file.
 2. **Write a data pack** when the policy can be expressed with the matcher DSL. Normal file
    editing can create a global or project raw pack definition in `packs`, but broadening policy
    still needs schema validation, sealed-floor checks, replay evidence, and approval.
@@ -386,8 +387,12 @@ Package-distributed collection checklist:
 - unsubscribe request listeners on `session_shutdown`;
 - never imply installation enables policy.
 
-Installing a Pi package makes contributed packs discoverable. It does not enable them. Users
-enable package pack ids through user-owned global or project `packEnablement.enabledPackagePacks`,
+Installing a Pi package makes contributed packs discoverable. It does not enable them. The
+Clearance package's install repair may compact existing user-owned config files, with a backup
+before each rewrite, but does not create absent files. It skips symlinked config files and
+project directories rather than following or replacing them, warns about each deliberate
+skip, and still succeeds. Users enable package pack ids through
+user-owned global or project `packEnablement.enabledPackagePacks`,
 usually via `/clearance packs`. Live Pi tune tools replay and validate package-pack
 enablement against the current package-registration snapshot collected from the event bus. A
 helper or offline replay path that lacks such a snapshot is lower fidelity: it marks package

@@ -51,6 +51,9 @@ function formatStatusMarkdown(
     `- Reviewer prompt: ${details.reviewer.promptPosture}; context ${formatReviewerContextModeLabel(details.reviewer.contextMode)}`,
     `- Reviewer model configured: ${details.reviewer.configuredModel === null ? "none" : `\`${details.reviewer.configuredModel}\``}`,
     `- Reviewer model resolved: ${details.reviewer.resolvedModel === null ? "none" : `\`${details.reviewer.resolvedModel}\``} (${details.reviewer.resolvedModelSource})`,
+    ...((details.customizations?.length ?? 0) === 0
+      ? []
+      : [`- Customizations: ${details.customizations?.join("; ") ?? ""}`]),
     `- Packs: ${details.packs.enabled} enabled / ${details.packs.total} total`,
     `- Warnings: ${details.warnings.length}`,
   ];

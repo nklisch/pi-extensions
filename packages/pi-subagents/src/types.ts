@@ -63,11 +63,11 @@ export interface AgentConfig extends AgentIdentity, AgentPromptConfig {
   /** false = agent is hidden from the registry */
   enabled?: boolean;
   /** Where this agent was loaded from */
-  source?: "default" | "project" | "global";
+  source?: "default" | "project" | "shared-project" | "global";
 }
 
 export interface AgentInvocation {
-  /** Short display name, e.g. "haiku" — only set when different from parent. */
+  /** Exact effective model label in `provider/id` form. */
   modelName?: string;
   thinking?: ThinkingLevel;
   maxTurns?: number;

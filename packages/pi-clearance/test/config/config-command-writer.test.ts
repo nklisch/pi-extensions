@@ -1,11 +1,42 @@
-import { describe, expect, it } from "vitest";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { planModeCommandChange } from "../../src/config/config-command-plans.ts";
-import type { ResolvedConfig } from "../../src/config/loader.ts";
+import {
+  applyConfigCommandPlan,
+  type ConfigCommandPlan,
+} from "../../src/config/config-command-writer.ts";
+import { loadConfig, type ResolvedConfig } from "../../src/config/loader.ts";
+import { resolveConfigPaths } from "../../src/config/paths.ts";
+import {
+  GlobalConfigSchema,
+  normalizeConfig,
+} from "../../src/config/schema.ts";
 import {
   defaultResolvedDisplay,
   defaultResolvedPackEnablement,
   defaultResolvedProjectScope,
 } from "../fixtures/resolved-config.ts";
+
+const ORIGINAL_ENV = { ...process.env };
+
+let tempRoot: string;
+let cwd: string;
+
+beforeEach(async () => {
+  tempRoot = await mkdtemp(path.join(tmpdir(), "pi-clearance-config-writer-"));
+  cwd = path.join(tempRoot, "repo");
+  process.env = {
+    ...ORIGINAL_ENV,
+    XDG_CONFIG_HOME: path.join(tempRoot, "config"),
+  };
+  await mkdir(cwd, { recursive: true });
+});
+
+afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+});
 
 function config(): ResolvedConfig {
   const reviewer = {
@@ -89,5 +120,56 @@ describe("mode config command plan", () => {
         ]),
       );
     }
+  });
+
+  it("serializes the changed normalized config sparsely through the shared writer", async () => {
+    const beforeResult = normalizeConfig(GlobalConfigSchema, { version: 1 });
+    const afterResult = normalizeConfig(GlobalConfigSchema, {
+      version: 1,
+      mode: "auto",
+      reviewer: { model: "openai/example" },
+    });
+    if (!beforeResult.ok || !afterResult.ok) {
+      throw new Error("fixture config failed schema normalization");
+    }
+
+    const paths = resolveConfigPaths(cwd);
+    const plan: ConfigCommandPlan = {
+      id: "config-command:test-sparse",
+      target: { kind: "global", path: paths.globalConfigFile },
+      title: "Test sparse config write",
+      summary: "Test sparse config write",
+      patch: [
+        { op: "replace", path: "/mode", before: "ask", value: "auto" },
+        {
+          op: "replace",
+          path: "/reviewer/model",
+          before: null,
+          value: "openai/example",
+        },
+      ],
+      before: beforeResult.value,
+      after: afterResult.value,
+      requiredAcknowledgementCodes: [],
+      warnings: [],
+    };
+
+    const result = await applyConfigCommandPlan(
+      plan,
+      { confirmedPlanId: plan.id, acknowledgedWarningCodes: [] },
+      {
+        reloadConfig: () => loadConfig({ cwd }),
+        validatePostWrite: async () => ({ ok: true }),
+      },
+    );
+
+    expect(result).toMatchObject({ ok: true, changed: true });
+    await expect(
+      readFile(paths.globalConfigFile, "utf8").then((text) => JSON.parse(text)),
+    ).resolves.toEqual({
+      version: 1,
+      mode: "auto",
+      reviewer: { model: "openai/example" },
+    });
   });
 });

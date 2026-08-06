@@ -126,6 +126,33 @@ describe("SubagentSession — runTurnLoop response capture", () => {
     expect(result.responseText).toBe("hello world");
   });
 
+  it("classifies a normally-resolved provider failure instead of reporting success", async () => {
+    const { session } = createSession("unused");
+    session.prompt = vi.fn(async () => {
+      session.messages.push({
+        role: "assistant",
+        content: [{ type: "text", text: "partial answer" }],
+        stopReason: "error",
+        errorMessage: "provider unavailable",
+      });
+    });
+    const { sub } = makeSubagentSession(session);
+    const result = await sub.runTurnLoop("go", {});
+    expect(result.failure).toBe("provider unavailable");
+    expect(result.responseText).toBe("partial answer");
+  });
+
+  it("does not fall back to a previous turn when a resume fails empty", async () => {
+    const { session } = createSession("unused");
+    session.messages.push({ role: "assistant", content: [{ type: "text", text: "old answer" }] });
+    session.prompt = vi.fn(async () => {
+      session.messages.push({ role: "assistant", content: [], stopReason: "error", errorMessage: "new failure" });
+    });
+    const { sub } = makeSubagentSession(session);
+    const result = await sub.resumeTurnLoop("continue");
+    expect(result).toEqual({ text: "", failure: "new failure" });
+  });
+
   it("prepends parentContext to the prompt", async () => {
     const { session } = createSession("DONE");
     const { sub } = makeSubagentSession(session, { parentContext: "CTX\n" });
@@ -246,9 +273,9 @@ describe("SubagentSession — resumeTurnLoop", () => {
   it("re-prompts the session and returns the final assistant text", async () => {
     const { session } = createSession("RESUMED");
     const { sub } = makeSubagentSession(session);
-    const text = await sub.resumeTurnLoop("Continue");
+    const result = await sub.resumeTurnLoop("Continue");
     expect(session.prompt).toHaveBeenCalledWith("Continue");
-    expect(text).toBe("RESUMED");
+    expect(result).toEqual({ text: "RESUMED", failure: undefined });
   });
 
   it("does not emit completed or disposed", async () => {

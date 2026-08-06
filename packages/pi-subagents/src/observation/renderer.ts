@@ -39,7 +39,7 @@ export function createNotificationRenderer() {
     let line = `${icon} ${theme.bold(d.description)} ${theme.fg("dim", statusText)}`;
 
     // Line 2: stats
-    const parts: string[] = [];
+    const parts: string[] = [d.modelLabel];
     if (d.turnCount > 0) parts.push(formatTurns(d.turnCount, d.maxTurns));
     if (d.toolUses > 0) parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
     if (d.totalTokens > 0) parts.push(formatTokens(d.totalTokens));

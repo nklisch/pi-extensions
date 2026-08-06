@@ -10,6 +10,7 @@ function makeReport(overrides: Partial<AgentReport> = {}): AgentReport {
 	return {
 		id: "agent-1",
 		displayName: "General",
+		modelLabel: "anthropic/claude-sonnet",
 		status: "completed",
 		toolUses: 3,
 		tokens: "",
@@ -19,6 +20,7 @@ function makeReport(overrides: Partial<AgentReport> = {}): AgentReport {
 		description: "Investigate the bug",
 		result: "All done.",
 		error: undefined,
+		stoppedWhileQueued: false,
 		conversation: undefined,
 		...overrides,
 	};
@@ -62,13 +64,15 @@ describe("renderStatsParts", () => {
 });
 
 describe("renderReportBody", () => {
-	it("shows a still-running note for running status", () => {
+	it("shows a still-running note without encouraging polling", () => {
 		const body = renderReportBody(makeReport({ status: "running", result: undefined }));
-		expect(body).toBe("Agent is still running. Use wait: true or check back later.");
+		expect(body).toContain("Agent is still running");
+		expect(body).toContain("automatic completion notification");
+		expect(body).not.toContain("check back later");
 	});
 
 	it("shows the error message for error status", () => {
-		const body = renderReportBody(makeReport({ status: "error", error: "timeout" }));
+		const body = renderReportBody(makeReport({ status: "error", error: "timeout", result: undefined }));
 		expect(body).toBe("Error: timeout");
 	});
 
@@ -101,7 +105,7 @@ describe("formatAgentReport", () => {
 		);
 		expect(text).toBe(
 			"Agent: agent-1\n" +
-				"Type: General | Status: completed | Tool uses: 3 | 33.8k token | Context: 43% | Compactions: 1 | Duration: 12.3s\n" +
+				"Type: General | Model: anthropic/claude-sonnet | Status: completed | Tool uses: 3 | 33.8k token | Context: 43% | Compactions: 1 | Duration: 12.3s\n" +
 				"Description: Investigate the bug\n\n" +
 				"All done.",
 		);

@@ -27,29 +27,11 @@ import type { WorkspaceProvider } from "#src/lifecycle/workspace";
 import type { RunConfig } from "#src/runtime";
 import type { AgentInvocation, CompactionInfo, ParentSessionInfo, SubagentType, ThinkingLevel } from "#src/types";
 
-/**
- * A lightweight snapshot of a subagent evicted by the 10-minute cleanup sweep.
- *
- * The sweep frees the heavy in-memory session (its message history included);
- * this descriptor retains only the fields the session navigator needs to label
- * the agent in the picker, plus the persisted `outputFile` to source its
- * transcript from disk. Carries no messages, so memory stays bounded.
- */
-export interface EvictedSubagent {
-  readonly id: string;
-  readonly type: SubagentType;
-  readonly description: string;
-  readonly status: SubagentStatus;
-  readonly startedAt: number;
-  readonly completedAt: number | undefined;
-  readonly toolUses: number;
-  readonly outputFile: string;
-}
-
 /** Observer interface for agent lifecycle notifications. */
 export interface SubagentManagerObserver {
   onSubagentStarted(record: Subagent): void;
   onSubagentCompleted(record: Subagent): void;
+  onSubagentResumed?(record: Subagent): void;
   onSubagentCompacted(record: Subagent, info: CompactionInfo): void;
   /** Fires synchronously after a background agent record is created (before run). */
   onSubagentCreated(record: Subagent): void;
@@ -95,8 +77,6 @@ export interface AgentSpawnConfig {
 
 export class SubagentManager {
   private agents = new Map<string, Subagent>();
-  /** Descriptors of agents removed by the cleanup sweep, keyed by id — navigable from disk. */
-  private readonly evicted = new Map<string, EvictedSubagent>();
   private cleanupInterval: ReturnType<typeof setInterval>;
   private readonly observer?: SubagentManagerObserver;
   private readonly createSubagentSession: (params: CreateSubagentSessionParams) => Promise<SubagentSession>;
@@ -117,7 +97,7 @@ export class SubagentManager {
     this.baseCwd = options.baseCwd;
     this.observer = options.observer;
     this.getRunConfig = options.getRunConfig;
-    // Cleanup completed agents after 10 minutes (but keep sessions for resume)
+    // Periodically release heavy terminal sessions according to retention policy.
     this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
     this.cleanupInterval.unref();
   }
@@ -159,6 +139,9 @@ export class SubagentManager {
         if (options.isBackground) {
           try { this.observer?.onSubagentCompleted(agent); } catch (err) { debugLog("onSubagentCompleted observer", err); }
         }
+      },
+      onResumedFinished: (agent) => {
+        try { this.observer?.onSubagentResumed?.(agent); } catch (err) { debugLog("onSubagentResumed observer", err); }
       },
       onCompacted: (agent, info) => {
         this.observer?.onSubagentCompacted(agent, info);
@@ -271,19 +254,14 @@ export class SubagentManager {
     );
   }
 
-  /** Descriptors of agents evicted by the cleanup sweep, most recent first. */
-  listEvicted(): EvictedSubagent[] {
-    return [...this.evicted.values()].sort((a, b) => b.startedAt - a.startedAt);
-  }
-
   abort(id: string): boolean {
     const record = this.agents.get(id);
     if (!record) return false;
 
-    // A queued agent has not started; mark it stopped. Its scheduled thunk
-    // becomes a no-op (status guard) when its slot finally opens.
+    // A queued agent has not started; terminate it through the observer funnel.
+    // Its scheduled thunk becomes a no-op when its slot eventually opens.
     if (record.status === "queued") {
-      record.markStopped();
+      record.stopQueued();
       return true;
     }
 
@@ -297,14 +275,22 @@ export class SubagentManager {
   }
 
   private cleanup() {
-    const cutoff = Date.now() - 10 * 60_000;
-    for (const [id, record] of this.agents) {
-      if (record.status === "running" || record.status === "queued") continue;
-      if ((record.completedAt ?? 0) >= cutoff) continue;
-      // Retain a navigable descriptor before freeing the heavy session. Only an
-      // agent with a persisted file can be sourced from disk after eviction.
-      if (record.outputFile) this.evicted.set(id, toEvictedSubagent(record, record.outputFile));
-      this.removeRecord(id, record);
+    const now = Date.now();
+    const config = this.getRunConfig?.();
+    const consumedMinutes = config?.consumedSessionRetentionMinutes ?? 10;
+    const unconsumedMinutes = config?.unconsumedSessionRetentionMinutes ?? 720;
+
+    for (const record of this.agents.values()) {
+      if (record.isActive() || !record.isSessionReady()) continue;
+      const anchor = record.consumed
+        ? record.consumedAt ?? record.completedAt
+        : record.completedAt;
+      if (anchor == null) continue;
+      const retentionMinutes = record.consumed ? consumedMinutes : unconsumedMinutes;
+      if (anchor + retentionMinutes * 60_000 > now) continue;
+      // Keep the lightweight terminal record and result for the whole parent
+      // session; only release the heavy in-memory child session.
+      record.releaseSession();
     }
   }
 
@@ -317,8 +303,7 @@ export class SubagentManager {
       if (record.status === "running" || record.status === "queued") continue;
       this.removeRecord(id, record);
     }
-    // Evicted descriptors belong to the session that swept them — a new session starts empty.
-    this.evicted.clear();
+
   }
 
   /** Whether any agents are still running or queued. */
@@ -335,7 +320,7 @@ export class SubagentManager {
     let count = 0;
     for (const record of this.agents.values()) {
       if (record.status === "queued") {
-        record.markStopped();
+        record.stopQueued();
         count++;
       } else if (record.abort()) {
         count++;
@@ -378,20 +363,5 @@ export class SubagentManager {
       record.disposeSession();
     }
     this.agents.clear();
-    this.evicted.clear();
   }
-}
-
-/** Capture an evicted agent's navigable fields from its record. */
-function toEvictedSubagent(record: Subagent, outputFile: string): EvictedSubagent {
-  return {
-    id: record.id,
-    type: record.type,
-    description: record.description,
-    status: record.status,
-    startedAt: record.startedAt,
-    completedAt: record.completedAt,
-    toolUses: record.toolUses,
-    outputFile,
-  };
 }

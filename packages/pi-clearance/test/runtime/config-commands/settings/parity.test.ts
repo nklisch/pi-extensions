@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -138,6 +138,28 @@ async function readGlobalConfig(): Promise<Record<string, unknown>> {
   >;
 }
 
+describe("exact gated-tool settings actions", () => {
+  it("writes only exact non-Bash gated tools through confirmation and reload", async () => {
+    const ctx = fakeContext();
+    const deps = dependencies();
+    const added = await dispatchSettingsAction(
+      { id: "gated-tools.add", args: { toolName: "edit" } },
+      ctx,
+      deps,
+    );
+    expect(added.level).not.toBe("error");
+    expect(await readGlobalConfig()).toMatchObject({ gatedTools: ["edit"] });
+
+    const rejected = await dispatchSettingsAction(
+      { id: "gated-tools.add", args: { toolName: "*" } },
+      ctx,
+      deps,
+    );
+    expect(rejected.level).toBe("error");
+    expect(await readGlobalConfig()).toMatchObject({ gatedTools: ["edit"] });
+  });
+});
+
 describe("briefing display actions", () => {
   it("briefing.mode writes display.reviewNote.mode to global config", async () => {
     const ctx = fakeContext();
@@ -202,13 +224,21 @@ describe("scope preset settings action", () => {
     const overlay = JSON.parse(
       await readFile(paths.projectOverlayFile, "utf8"),
     ) as Record<string, unknown>;
-    expect(overlay).toMatchObject({
+    expect(overlay).toEqual({
+      version: 1,
       projectScope: {
         safeHomeUseDefaults: false,
         agentSupportUseDefaults: false,
         homePathBehavior: "review",
-        sensitivePathBehavior: "review",
       },
+    });
+    const normalized = await loadConfig({ cwd });
+    expect(normalized.sourceSnapshots?.project.projectScope).toMatchObject({
+      safeHomeUseDefaults: false,
+      agentSupportUseDefaults: false,
+      homePathBehavior: "review",
+      sensitivePathBehavior: "review",
+      unknownPathBehavior: "review",
     });
   });
 });
@@ -400,6 +430,8 @@ describe("buildSettingsReadModel", () => {
 
     expect(model.packs).toEqual([]);
     expect(model.reviewerModels).toEqual([]);
+    expect(model.gatedTools.names).toEqual([]);
+    expect(model.gatedTools.addableToolNames).toEqual([]);
     expect(model.briefing.configurable).toBe(true);
   });
 });

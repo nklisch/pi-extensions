@@ -545,6 +545,27 @@ describe("Subagent.run() — workspace provider", () => {
 		expect(workspace.dispose).toHaveBeenCalledWith({ status: "completed", description: "run test" });
 	});
 
+	it("disposes the workspace as error for a normally resolved provider failure", async () => {
+		const { factory, stub } = createFactory();
+		stub.runTurnLoop.mockResolvedValue({
+			responseText: "partial answer",
+			failure: "Provider error: overloaded",
+			aborted: false,
+			steered: false,
+		});
+		const workspace = makeWorkspace("/ws/dir");
+		const agent = createRunnableAgent({
+			createSubagentSession: factory,
+			workspaceProvider: makeWorkspaceProvider(workspace),
+		});
+
+		await agent.run();
+
+		expect(agent.status).toBe("error");
+		expect(agent.result).toBe("partial answer");
+		expect(workspace.dispose).toHaveBeenCalledWith({ status: "error", description: "run test" });
+	});
+
 	it("falls back to baseCwd (cwd undefined) when prepare returns undefined", async () => {
 		const { factory } = createFactory();
 		const provider = makeWorkspaceProvider(undefined);
@@ -712,13 +733,37 @@ describe("Subagent.resume() — happy path", () => {
 		expect(agent.result).toBe("resumed");
 	});
 
-	it("passes the prompt and signal straight through to resumeTurnLoop", async () => {
+	it("publishes the live resume through the promise getter", async () => {
+		const { agent } = createResumableAgent();
+		const resumed = agent.resume("continue");
+		expect(agent.promise).toBe(resumed);
+		await resumed;
+	});
+
+	it("combines parent cancellation with the resumed run's abort signal", async () => {
 		const { agent, stub } = createResumableAgent();
-		const signal = new AbortController().signal;
-		await agent.resume("continue", signal);
+		const parent = new AbortController();
+		await agent.resume("continue", parent.signal);
 		expect(stub.resumeTurnLoop).toHaveBeenCalledOnce();
 		expect(stub.resumeTurnLoop.mock.calls[0][0]).toBe("continue");
-		expect(stub.resumeTurnLoop.mock.calls[0][1]).toBe(signal);
+		const executionSignal = stub.resumeTurnLoop.mock.calls[0][1];
+		expect(executionSignal).not.toBe(parent.signal);
+		parent.abort();
+		expect(executionSignal?.aborted).toBe(true);
+	});
+
+	it("allows manager abort to stop a resumed turn", async () => {
+		const stub = createSubagentSessionStub();
+		stub.resumeTurnLoop.mockImplementation((_prompt, signal) => new Promise((resolve) => {
+			signal?.addEventListener("abort", () => resolve("ignored after stop"), { once: true });
+		}));
+		const { agent } = createResumableAgent({ stub });
+
+		const resumed = agent.resume("continue");
+		expect(agent.abort()).toBe(true);
+		await resumed;
+
+		expect(agent.status).toBe("stopped");
 	});
 
 	it("resets transition state before resuming", async () => {

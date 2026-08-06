@@ -81,7 +81,7 @@ describe("applyPackEnablementPlan", () => {
     expect(result.warnings).toEqual(["post-write ok"]);
 
     const written = await readJson(plan.targetPath);
-    expect(written).toMatchObject({
+    expect(written).toEqual({
       version: 1,
       packEnablement: { enabledPackagePacks: ["pack:pkg"] },
     });
@@ -111,11 +111,9 @@ describe("applyPackEnablementPlan", () => {
     await expect(readJson(`${paths.globalConfigFile}.bak`)).resolves.toEqual(
       original,
     );
-    await expect(readJson(paths.globalConfigFile)).resolves.toMatchObject({
-      packEnablement: {
-        enabledPackagePacks: ["pack:pkg"],
-        disabledPackagePacks: [],
-      },
+    await expect(readJson(paths.globalConfigFile)).resolves.toEqual({
+      version: 1,
+      packEnablement: { enabledPackagePacks: ["pack:pkg"] },
     });
     const leftovers = await readdir(path.dirname(paths.globalConfigFile));
     expect(leftovers.filter((entry) => entry.endsWith(".tmp"))).toEqual([]);

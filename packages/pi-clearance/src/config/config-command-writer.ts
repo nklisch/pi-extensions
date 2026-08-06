@@ -13,6 +13,10 @@ import type { TSchema } from "@sinclair/typebox";
 import type { JsonPatchOperation } from "../replay/proposal-schema.ts";
 import type { ResolvedConfig } from "./loader.ts";
 import {
+  type ConfigPersistenceKind,
+  serializeSparseConfigText,
+} from "./persistence.ts";
+import {
   type GlobalConfig,
   GlobalConfigSchema,
   normalizeConfig,
@@ -101,6 +105,7 @@ export type ConfigCommandApplyResult =
 interface AtomicConfigWriteInput {
   readonly planId: string;
   readonly targetPath: string;
+  readonly configKind: ConfigPersistenceKind;
   readonly value: GlobalConfig | ProjectOverlayConfig;
   readonly hadExistingFile: boolean;
   readonly reloadConfig: () => Promise<ResolvedConfig>;
@@ -184,6 +189,7 @@ export async function applyConfigCommandPlan(
   return await writeConfigTargetAndValidate({
     planId: plan.id,
     targetPath: plan.target.path,
+    configKind: plan.target.kind,
     value: patched.value,
     hadExistingFile: readResult.exists,
     reloadConfig: dependencies.reloadConfig,
@@ -207,7 +213,7 @@ export async function writeConfigTargetAndValidate(
     await mkdir(path.dirname(input.targetPath), { recursive: true });
     await writeFile(
       tempPath,
-      `${JSON.stringify(input.value, null, 2)}\n`,
+      serializeSparseConfigText(input.configKind, input.value),
       "utf8",
     );
     tempPresent = true;

@@ -65,6 +65,46 @@ describe("resolveSpawnConfig — type resolution", () => {
     expect(result.identity.fellBack).toBe(true);
   });
 
+  it("fails closed for unknown types when fallbackSubagent is disabled", () => {
+    const result = resolveSpawnConfig(
+      { subagent_type: "unknown-type", prompt: "test", description: "d" },
+      testRegistry,
+      makeModelInfo(),
+      { ...defaultSettings, fallbackSubagent: false },
+    );
+    expect(result).toEqual({
+      error: expect.stringContaining('Unknown agent type "unknown-type"'),
+    });
+  });
+
+  it("routes unknown types to a configured enabled custom fallback", () => {
+    const registry = new AgentTypeRegistry(() => new Map([
+      ["auditor", makeAgentConfig({ name: "auditor" })],
+    ]));
+    const result = resolveSpawnConfig(
+      { subagent_type: "unknown-type", prompt: "test", description: "d" },
+      registry,
+      makeModelInfo(),
+      { ...defaultSettings, fallbackSubagent: "auditor" },
+    );
+    if ("error" in result) throw new Error(result.error);
+    expect(result.identity).toMatchObject({ subagentType: "auditor", fellBack: true });
+  });
+
+  it("rejects a case-ambiguous non-exact name", () => {
+    const registry = new AgentTypeRegistry(() => new Map([
+      ["Review", makeAgentConfig({ name: "Review" })],
+      ["review", makeAgentConfig({ name: "review" })],
+    ]));
+    const result = resolveSpawnConfig(
+      { subagent_type: "REVIEW", prompt: "test", description: "d" },
+      registry,
+      makeModelInfo(),
+      defaultSettings,
+    );
+    expect(result).toEqual({ error: 'Agent type "REVIEW" is ambiguous. Use exact casing.' });
+  });
+
   it("sets displayName from registry", () => {
     const result = resolveSpawnConfig(
       { subagent_type: "Explore", prompt: "test", description: "d" },
@@ -128,8 +168,7 @@ describe("resolveSpawnConfig — model resolution", () => {
     );
     if ("error" in result) return;
     expect(result.execution.model).toBe(parentModel);
-    // modelName is undefined when same as parent
-    expect(result.presentation.modelName).toBeUndefined();
+    expect(result.presentation.modelName).toBe("anthropic/claude-sonnet");
   });
 
   it("returns error when user-specified model cannot be resolved", () => {
@@ -199,7 +238,7 @@ describe("resolveSpawnConfig — invocation fields", () => {
     );
     if ("error" in result) return;
     expect(result.execution.agentInvocation).toEqual({
-      modelName: undefined,
+      modelName: "anthropic/claude-sonnet",
       thinking: "high",
       maxTurns: undefined,
       inheritContext: false,

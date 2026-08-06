@@ -165,7 +165,7 @@ export interface DefaultPackListingDetails
 }
 
 /**
- * Human-facing default pack listing used by `/auto-reviewer packs` and
+ * Human-facing default pack listing used by `/clearance packs` and
  * settings drill-downs. Titles are the primary labels; stable pack ids stay as
  * secondary metadata so humans do not have to scan dot/colon-path identifiers.
  */
@@ -221,7 +221,7 @@ export async function handlePackMutationCommand(input: {
       reason:
         "Pack enable/disable requires interactive Pi UI confirmation; no config changes were written.",
       markdownLines: [
-        "- Mutating `/auto-reviewer packs enable|disable` commands require Pi UI confirmation.",
+        "- Mutating `/clearance packs enable|disable` commands require Pi UI confirmation.",
         "- No config changes were written.",
       ],
     });
@@ -338,7 +338,7 @@ export async function handlePackMutationCommand(input: {
   };
 
   return {
-    title: "Auto-reviewer pack enablement updated",
+    title: "Pi Clearance pack enablement updated",
     summary: `${packId} ${request.action} planned for ${target.target.scope}; effective state ${formatEffectiveState(effectivePack)}.`,
     markdown: formatPackMutationSuccessMarkdown(details),
     details,
@@ -1038,7 +1038,7 @@ function formatPackExplorerNameCell(
   const secondary = idsPrimary
     ? escapeCell(pack.title)
     : `\`${escapeCell(pack.id)}\``;
-  return `${primary}<br><small>${secondary}</small>`;
+  return `${primary} — ${secondary}`;
 }
 
 function formatPackExplorerScope(pack: AutoReviewerPackExplorerView): string {
@@ -1362,7 +1362,7 @@ function formatPackMutationSuccessMarkdown(
   details: PackMutationSuccessDetails,
 ): string {
   const lines = [
-    "# Auto-reviewer pack enablement updated",
+    "# Pi Clearance pack enablement updated",
     "",
     `- Pack: \`${details.request.packId}\``,
     `- Action: ${details.request.action}`,
@@ -1513,7 +1513,7 @@ function escapeCell(value: string): string {
 }
 
 function packConfirmationTitle(plan: PackEnablementPlan): string {
-  return `${capitalize(plan.request.action)} auto-reviewer pack?`;
+  return `${capitalize(plan.request.action)} Pi Clearance pack?`;
 }
 
 function yesNo(value: boolean): string {

@@ -45,13 +45,6 @@ describe("buildAgentPrompt", () => {
     expect(prompt).toContain("file search specialist");
   });
 
-  it("Plan prompt is read-only", () => {
-    const config = getDefaultConfig("Plan");
-    const prompt = buildAgentPrompt(config, "/workspace", env);
-    expect(prompt).toContain("READ-ONLY");
-    expect(prompt).toContain("software architect");
-  });
-
   it("general-purpose uses append mode (parent twin)", () => {
     const config = getDefaultConfig("general-purpose");
     const parentPrompt = "You are a parent coding agent with full powers.";
@@ -62,6 +55,20 @@ describe("buildAgentPrompt", () => {
     expect(prompt).not.toContain("READ-ONLY");
     // Empty systemPrompt means no <agent_instructions> section
     expect(prompt).not.toContain("<agent_instructions>");
+  });
+
+  it("removes a contradictory inherited cwd footer for workspace-backed children", () => {
+    const config = getDefaultConfig("general-purpose");
+    const parentPrompt = "Parent rules\nCurrent working directory: /workspace/main";
+    const prompt = buildAgentPrompt(
+      config,
+      "/workspace/worktree",
+      env,
+      parentPrompt,
+      "/workspace/main",
+    );
+    expect(prompt).not.toContain("Current working directory: /workspace/main");
+    expect(prompt).toContain("Working directory: /workspace/worktree");
   });
 
   it("general-purpose without parent prompt falls back to generic base", () => {

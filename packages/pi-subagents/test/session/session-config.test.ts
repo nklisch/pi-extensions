@@ -60,7 +60,9 @@ describe("assembleSessionConfig — default agent shape", () => {
 
     expect(result.effectiveCwd).toBe("/tmp");
     expect(result.systemPrompt).toBe("assembled system prompt");
-    expect(result.toolNames).toEqual(["read"]);
+    expect(result.excludedBuiltinToolNames).toEqual([
+      "bash", "edit", "write", "grep", "find", "ls",
+    ]);
     expect(result.model).toBeUndefined();
     expect(result.thinkingLevel).toBeUndefined();
   });

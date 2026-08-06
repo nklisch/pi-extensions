@@ -1,6 +1,6 @@
 // Persistence for pi-subagents operational settings.
 // - Global:  ~/.pi/agent/subagents.json (agentDir injected at construction) — manual defaults, never written here
-// - Project: <cwd>/.pi/subagents.json — written by /agents → Settings; overrides global on load
+// - Project: <cwd>/.pi/subagents.json — written by /subagents:settings; overrides global on load
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -14,6 +14,11 @@ export interface SubagentsSettings {
    */
   defaultMaxTurns?: number;
   graceTurns?: number;
+  consumedSessionRetentionMinutes?: number;
+  unconsumedSessionRetentionMinutes?: number;
+  abortAllOnInterrupt?: boolean;
+  /** false or "none" fails closed; an agent name selects an explicit fallback. */
+  fallbackSubagent?: string | false;
 }
 
 
@@ -22,15 +27,21 @@ export type SettingsEmit = (event: string, payload: unknown) => void;
 
 const DEFAULT_MAX_CONCURRENT = 4;
 const DEFAULT_GRACE_TURNS = 5;
+const DEFAULT_CONSUMED_RETENTION_MINUTES = 10;
+const DEFAULT_UNCONSUMED_RETENTION_MINUTES = 720;
 
 /**
- * Owns all three in-memory settings values and their load/save/persist cycle.
+ * Owns runtime settings and their load/save/persist cycle.
  * Replaces the scattered free-function + SettingsAppliers callback pattern.
  */
 export class SettingsManager {
   private _defaultMaxTurns: number | undefined = undefined;
   private _graceTurns: number = DEFAULT_GRACE_TURNS;
   private _maxConcurrent: number = DEFAULT_MAX_CONCURRENT;
+  private _consumedSessionRetentionMinutes = DEFAULT_CONSUMED_RETENTION_MINUTES;
+  private _unconsumedSessionRetentionMinutes = DEFAULT_UNCONSUMED_RETENTION_MINUTES;
+  private _abortAllOnInterrupt = true;
+  private _fallbackSubagent: string | false | undefined;
 
   private readonly emit: SettingsEmit;
   private readonly cwd: string;
@@ -78,6 +89,22 @@ export class SettingsManager {
     this._maxConcurrent = Math.max(1, n);
   }
 
+  get consumedSessionRetentionMinutes(): number { return this._consumedSessionRetentionMinutes; }
+  set consumedSessionRetentionMinutes(n: number) { this._consumedSessionRetentionMinutes = Math.max(0, n); }
+
+  get unconsumedSessionRetentionMinutes(): number { return this._unconsumedSessionRetentionMinutes; }
+  set unconsumedSessionRetentionMinutes(n: number) { this._unconsumedSessionRetentionMinutes = Math.max(0, n); }
+
+  get abortAllOnInterrupt(): boolean { return this._abortAllOnInterrupt; }
+  set abortAllOnInterrupt(value: boolean) { this._abortAllOnInterrupt = value; }
+
+  get fallbackSubagent(): string | false | undefined { return this._fallbackSubagent; }
+  set fallbackSubagent(value: string | false | undefined) {
+    this._fallbackSubagent = value === false || value === "none"
+      ? false
+      : typeof value === "string" && value.trim() ? value.trim() : undefined;
+  }
+
   // ── Lifecycle methods ──
 
   /**
@@ -90,6 +117,10 @@ export class SettingsManager {
     if (typeof settings.maxConcurrent === "number") this.maxConcurrent = settings.maxConcurrent;
     if (typeof settings.defaultMaxTurns === "number") this.defaultMaxTurns = settings.defaultMaxTurns;
     if (typeof settings.graceTurns === "number") this.graceTurns = settings.graceTurns;
+    if (typeof settings.consumedSessionRetentionMinutes === "number") this.consumedSessionRetentionMinutes = settings.consumedSessionRetentionMinutes;
+    if (typeof settings.unconsumedSessionRetentionMinutes === "number") this.unconsumedSessionRetentionMinutes = settings.unconsumedSessionRetentionMinutes;
+    if (typeof settings.abortAllOnInterrupt === "boolean") this.abortAllOnInterrupt = settings.abortAllOnInterrupt;
+    if (settings.fallbackSubagent !== undefined) this.fallbackSubagent = settings.fallbackSubagent;
     this.emit("subagents:settings_loaded", { settings });
     return settings;
   }
@@ -98,11 +129,15 @@ export class SettingsManager {
    * Snapshot current in-memory values for persistence.
    * `defaultMaxTurns` uses 0 as the on-disk marker for unlimited (undefined).
    */
-  snapshot(): { maxConcurrent: number; defaultMaxTurns: number; graceTurns: number } {
+  snapshot(): Required<SubagentsSettings> {
     return {
       maxConcurrent: this._maxConcurrent,
       defaultMaxTurns: this._defaultMaxTurns ?? 0,
       graceTurns: this._graceTurns,
+      consumedSessionRetentionMinutes: this._consumedSessionRetentionMinutes,
+      unconsumedSessionRetentionMinutes: this._unconsumedSessionRetentionMinutes,
+      abortAllOnInterrupt: this._abortAllOnInterrupt,
+      fallbackSubagent: this._fallbackSubagent ?? "general-purpose",
     };
   }
 
@@ -134,6 +169,27 @@ export class SettingsManager {
     return this.saveAndNotify(`Grace turns set to ${this.graceTurns}`);
   }
 
+  applyConsumedSessionRetention(n: number): { message: string; level: "info" | "warning" } {
+    this.consumedSessionRetentionMinutes = n;
+    return this.saveAndNotify(`Consumed session retention set to ${this.consumedSessionRetentionMinutes} minutes`);
+  }
+
+  applyUnconsumedSessionRetention(n: number): { message: string; level: "info" | "warning" } {
+    this.unconsumedSessionRetentionMinutes = n;
+    return this.saveAndNotify(`Unconsumed session retention set to ${this.unconsumedSessionRetentionMinutes} minutes`);
+  }
+
+  applyAbortAllOnInterrupt(value: boolean): { message: string; level: "info" | "warning" } {
+    this.abortAllOnInterrupt = value;
+    return this.saveAndNotify(`Abort all subagents on ESC ${value ? "enabled" : "disabled"}`);
+  }
+
+  applyFallbackSubagent(value: string | false | undefined): { message: string; level: "info" | "warning" } {
+    this.fallbackSubagent = value;
+    const label = this.fallbackSubagent === false ? "none (fail closed)" : this.fallbackSubagent ?? "general-purpose";
+    return this.saveAndNotify(`Unknown agent fallback set to ${label}`);
+  }
+
   /**
    * Persist the current snapshot, emit `subagents:settings_changed`,
    * and return the toast the UI should display.
@@ -152,6 +208,7 @@ export class SettingsManager {
 const MAX_CONCURRENT_CEILING = 1024;
 const MAX_TURNS_CEILING = 10_000;
 const GRACE_TURNS_CEILING = 1_000;
+const RETENTION_MINUTES_CEILING = 60 * 24 * 365;
 
 /** Drop fields that don't match the expected shape. Silent — garbage becomes absent. */
 function sanitize(raw: unknown): SubagentsSettings {
@@ -178,6 +235,16 @@ function sanitize(raw: unknown): SubagentsSettings {
     (r.graceTurns as number) <= GRACE_TURNS_CEILING
   ) {
     out.graceTurns = r.graceTurns as number;
+  }
+  for (const key of ["consumedSessionRetentionMinutes", "unconsumedSessionRetentionMinutes"] as const) {
+    if (Number.isInteger(r[key]) && (r[key] as number) >= 0 && (r[key] as number) <= RETENTION_MINUTES_CEILING) {
+      out[key] = r[key] as number;
+    }
+  }
+  if (typeof r.abortAllOnInterrupt === "boolean") out.abortAllOnInterrupt = r.abortAllOnInterrupt;
+  if (r.fallbackSubagent === false || r.fallbackSubagent === "none") out.fallbackSubagent = false;
+  else if (typeof r.fallbackSubagent === "string" && r.fallbackSubagent.trim()) {
+    out.fallbackSubagent = r.fallbackSubagent.trim();
   }
   return out;
 }

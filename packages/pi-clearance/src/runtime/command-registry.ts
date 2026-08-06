@@ -101,7 +101,7 @@ export async function handleClearanceCommand(
 ): Promise<CommandReport> {
   const tokens = parseCommandArgs(args);
   if (tokens.length === 0) {
-    return await handleSettingsCommand([], ctx, deps);
+    return await handleSetupCommand([], ctx, pi, deps);
   }
 
   const command = tokens[0] as string;

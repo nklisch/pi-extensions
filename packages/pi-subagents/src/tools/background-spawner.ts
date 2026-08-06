@@ -52,13 +52,17 @@ export function spawnBackground(
     `Agent ${isQueued ? "queued" : "started"} in background.\n` +
       `Agent ID: ${id}\n` +
       `Type: ${identity.displayName}\n` +
+      `Model: ${presentation.modelName}\n` +
+      `Runtime: 0.0s\n` +
       `Description: ${execution.description}\n` +
+      (identity.fellBack ? `Fallback: requested ${identity.rawType}; using ${identity.subagentType}\n` : "") +
       (record?.outputFile ? `Output file: ${record.outputFile}\n` : "") +
       (isQueued
         ? `Position: queued (max ${params.settings.maxConcurrent} concurrent)\n`
         : "") +
-      `\nYou will be notified when this agent completes.\n` +
-      `Use get_subagent_result to retrieve full results, or steer_subagent to send it messages.\n` +
+      `\nCompletion will automatically notify and wake you with a result preview. Continue other work; do not poll.\n` +
+      `Use steer_subagent to redirect this agent while it runs.\n` +
+      `Use get_subagent_result only for full output, verbose conversation, an explicit status check or synchronization point, or recovery after a missed notification.\n` +
       `Do not duplicate this agent's work.`,
     {
       ...presentation.detailBase,

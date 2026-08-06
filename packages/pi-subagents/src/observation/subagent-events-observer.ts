@@ -68,6 +68,21 @@ export class SubagentEventsObserver implements SubagentManagerObserver {
 		this.notifications.sendCompletion(record);
 	}
 
+	onSubagentResumed(record: Subagent): void {
+		const eventData = buildEventData(record);
+		this.emit("subagents:resumed", eventData);
+		this.appendEntry("subagents:record", {
+			id: record.id,
+			type: record.type,
+			description: record.description,
+			status: record.status,
+			result: record.result,
+			error: record.error,
+			startedAt: record.startedAt,
+			completedAt: record.completedAt,
+		});
+	}
+
 	onSubagentCompacted(record: Subagent, info: CompactionInfo): void {
 		// Emit compacted event when agent's session compacts (preserves count on record).
 		this.emit("subagents:compacted", {

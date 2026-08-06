@@ -12,12 +12,18 @@ export interface ConfigPaths {
 }
 
 export function resolveUserConfigRoot(): string {
-  const home = homedir();
+  // Read the environment explicitly so package install repair and isolated
+  // callers honor the process environment even when os.homedir() is cached.
+  const home = firstNonEmpty(
+    process.env.HOME,
+    process.env.USERPROFILE,
+  ) ?? homedir();
 
   switch (process.platform) {
     case "win32":
       return path.join(
-        process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"),
+        firstNonEmpty(process.env.LOCALAPPDATA) ??
+          path.join(home, "AppData", "Local"),
         "pi",
         "pi-clearance",
       );
@@ -31,11 +37,16 @@ export function resolveUserConfigRoot(): string {
       );
     default:
       return path.join(
-        process.env.XDG_CONFIG_HOME ?? path.join(home, ".config"),
+        firstNonEmpty(process.env.XDG_CONFIG_HOME) ??
+          path.join(home, ".config"),
         "pi",
         "pi-clearance",
       );
   }
+}
+
+function firstNonEmpty(...values: readonly (string | undefined)[]): string | undefined {
+  return values.find((value) => value !== undefined && value.length > 0);
 }
 
 export function projectKeyFor(cwd: string): string {

@@ -22,6 +22,7 @@ function makeDetails(overrides: Partial<AgentDetails> = {}): AgentDetails {
 		displayName: "TestAgent",
 		description: "test task",
 		subagentType: "general-purpose",
+		modelName: "anthropic/claude-sonnet",
 		toolUses: 0,
 		tokens: "",
 		durationMs: 2000,
@@ -33,9 +34,9 @@ function makeDetails(overrides: Partial<AgentDetails> = {}): AgentDetails {
 describe("renderStats", () => {
 	const theme = makeTheme();
 
-	it("returns empty string when all fields are absent or zero", () => {
+	it("always includes the effective model when other stats are absent", () => {
 		const details = makeDetails({ toolUses: 0, tokens: "" });
-		expect(renderStats(details, theme)).toBe("");
+		expect(renderStats(details, theme)).toBe("[dim:anthropic/claude-sonnet]");
 	});
 
 	it("includes model name", () => {
@@ -52,12 +53,12 @@ describe("renderStats", () => {
 
 	it("includes turn count with max turns", () => {
 		const details = makeDetails({ turnCount: 5, maxTurns: 30 });
-		expect(renderStats(details, theme)).toContain("[dim:⟳5≤30]");
+		expect(renderStats(details, theme)).toContain("[dim:↻5≤30]");
 	});
 
 	it("includes turn count without max turns", () => {
 		const details = makeDetails({ turnCount: 5 });
-		expect(renderStats(details, theme)).toContain("[dim:⟳5]");
+		expect(renderStats(details, theme)).toContain("[dim:↻5]");
 	});
 
 	it("excludes turn count when turnCount is 0", () => {
@@ -142,7 +143,7 @@ describe("renderBackground", () => {
 	it("wraps entire message in dim styling with agent ID", () => {
 		const details = makeDetails({ status: "background", agentId: "agent-42" });
 		expect(renderBackground(details, theme)).toBe(
-			"[dim:  \u23BF  Running in background (ID: agent-42)]",
+			"[dim:  \u23BF  Running in background (ID: agent-42) · anthropic/claude-sonnet · 2.0s]",
 		);
 	});
 });

@@ -7,13 +7,18 @@ import {
   getStatusLabel,
   NotificationManager,
 } from "#src/observation/notification";
-import { createTestSubagent } from "#test/helpers/make-subagent";
+import { makeModel } from "#test/helpers/make-model";
+import { createTestSubagent, makeStubExecution } from "#test/helpers/make-subagent";
 
 // ---- Pure helper tests ----
 
 describe("escapeXml", () => {
   it("escapes &, <, >", () => {
     expect(escapeXml("a & b < c > d")).toBe("a &amp; b &lt; c &gt; d");
+  });
+
+  it("escapes quotes for safe future attribute use", () => {
+    expect(escapeXml(`say "hi" it's fine`)).toBe("say &quot;hi&quot; it&apos;s fine");
   });
 
   it("returns unchanged string with no special chars", () => {
@@ -44,7 +49,9 @@ describe("getStatusLabel", () => {
 });
 
 describe("formatTaskNotification", () => {
-  const baseRecord = createTestSubagent();
+  const baseRecord = createTestSubagent({
+    execution: makeStubExecution({ model: makeModel() }),
+  });
 
   it("produces valid XML structure", () => {
     const xml = formatTaskNotification(baseRecord, 500);
@@ -52,6 +59,7 @@ describe("formatTaskNotification", () => {
     expect(xml).toContain("</task-notification>");
     expect(xml).toContain("<task-id>agent-1</task-id>");
     expect(xml).toContain("<status>Done</status>");
+    expect(xml).toContain("<model>anthropic/test-model</model>");
   });
 
   it("truncates long results", () => {
@@ -180,57 +188,64 @@ describe("NotificationManager", () => {
     return new NotificationManager(args.sendMessage);
   }
 
-  const baseRecord = createTestSubagent({
-    description: "Test",
-    result: "Done.",
-    toolUses: 2,
-    lifetimeUsage: { input: 100, output: 200, cacheWrite: 0 },
-  });
+  function makeRecord() {
+    return createTestSubagent({
+      description: "Test",
+      result: "Done.",
+      toolUses: 2,
+      lifetimeUsage: { input: 100, output: 200, cacheWrite: 0 },
+    });
+  }
 
-  it("sendCompletion schedules a nudge after the hold delay", () => {
+  it("sends immediately while the parent is idle and marks the outcome consumed", () => {
     const args = makeArgs();
     const system = makeManager(args);
-    system.sendCompletion(baseRecord);
-    vi.advanceTimersByTime(300);
+    const record = makeRecord();
+    system.sendCompletion(record);
+    expect(args.sendMessage).toHaveBeenCalledOnce();
+    expect(record.consumed).toBe(true);
+  });
+
+  it("skips a result the parent already consumed", () => {
+    const args = makeArgs();
+    const system = makeManager(args);
+    const record = makeRecord();
+    record.markConsumed();
+    system.sendCompletion(record);
+    expect(args.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("withholds during a parent run and rechecks consumption before flushing", () => {
+    const args = makeArgs();
+    const system = makeManager(args);
+    const record = makeRecord();
+    system.onParentAgentStart();
+    system.sendCompletion(record);
+    record.markConsumed();
+    system.onParentAgentSettled();
+    expect(args.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("flushes an unconsumed result when the parent settles", () => {
+    const args = makeArgs();
+    const system = makeManager(args);
+    const record = makeRecord();
+    system.onParentAgentStart();
+    system.sendCompletion(record);
+    expect(args.sendMessage).not.toHaveBeenCalled();
+    system.onParentAgentSettled();
     expect(args.sendMessage).toHaveBeenCalledOnce();
   });
 
-  it("sendCompletion skips nudge when the record was already consumed", () => {
+  it("never sends after disposal", () => {
     const args = makeArgs();
     const system = makeManager(args);
-    system.consume(baseRecord.id);
-    system.sendCompletion(baseRecord);
-    vi.advanceTimersByTime(300);
-    expect(args.sendMessage).not.toHaveBeenCalled();
-  });
-
-  it("consume cancels an already-scheduled nudge", () => {
-    const args = makeArgs();
-    const system = makeManager(args);
-    system.sendCompletion(baseRecord);
-    system.consume(baseRecord.id);
-    vi.advanceTimersByTime(300);
-    expect(args.sendMessage).not.toHaveBeenCalled();
-  });
-
-  it("dispose clears all pending timers", () => {
-    const args = makeArgs();
-    const system = makeManager(args);
-    system.sendCompletion(baseRecord);
+    const record = makeRecord();
+    system.onParentAgentStart();
+    system.sendCompletion(record);
     system.dispose();
-    vi.advanceTimersByTime(300);
+    system.onParentAgentSettled();
+    system.sendCompletion(makeRecord());
     expect(args.sendMessage).not.toHaveBeenCalled();
-  });
-
-  it("dispose clears consumed state", () => {
-    const args = makeArgs();
-    const system = makeManager(args);
-    system.consume(baseRecord.id);
-    system.dispose();
-    // After dispose, a fresh sendCompletion for the same id is no longer
-    // suppressed — consumed state does not leak across sessions.
-    system.sendCompletion(baseRecord);
-    vi.advanceTimersByTime(300);
-    expect(args.sendMessage).toHaveBeenCalledOnce();
   });
 });

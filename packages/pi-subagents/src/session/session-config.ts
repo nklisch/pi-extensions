@@ -10,7 +10,7 @@
  * before invoking this function, keeping the assembler synchronous.
  */
 
-import type { AgentConfigLookup } from "#src/config/agent-types";
+import { type AgentConfigLookup, BUILTIN_TOOL_NAMES } from "#src/config/agent-types";
 import type { EnvInfo } from "#src/session/env";
 import type { AgentPromptConfig, SubagentType, ThinkingLevel } from "#src/types";
 
@@ -30,6 +30,7 @@ export interface AssemblerIO {
     cwd: string,
     env: EnvInfo,
     parentPrompt?: string,
+    parentCwd?: string,
   ) => string;
 }
 
@@ -79,8 +80,8 @@ export interface SessionConfig {
   effectiveCwd: string;
   /** Fully-assembled system prompt string (ready for `systemPromptOverride`). */
   systemPrompt: string;
-  /** Built-in tool name allowlist for this agent type. */
-  toolNames: string[];
+  /** Built-in tools denied to this agent; extension tools remain inheritable. */
+  excludedBuiltinToolNames: string[];
   /**
    * Resolved model instance (undefined → use parent model as passed to SDK).
    * Opaque handle — the assembler passes it through without inspection.
@@ -102,7 +103,7 @@ export interface SessionConfig {
  * string that resolves against the registry AND is in the available set, return
  * that model instead.
  */
-function resolveDefaultModel(
+export function resolveDefaultModel(
   parentModel: unknown,
   registry: AssemblerContext["modelRegistry"],
   configModel?: string,
@@ -155,7 +156,10 @@ export function assembleSessionConfig(
 
   const effectiveCwd = options.cwd ?? ctx.cwd;
 
-  const toolNames = registry.getToolNamesForType(type);
+  const enabledBuiltinTools = new Set(registry.getToolNamesForType(type));
+  const excludedBuiltinToolNames = BUILTIN_TOOL_NAMES.filter(
+    (name) => !enabledBuiltinTools.has(name),
+  );
 
   // Build system prompt from the resolved agent config
   const systemPrompt = io.buildAgentPrompt(
@@ -163,6 +167,7 @@ export function assembleSessionConfig(
     effectiveCwd,
     env,
     ctx.parentSystemPrompt,
+    ctx.cwd,
   );
 
   // Model resolution: explicit option > config model string > parent model
@@ -179,7 +184,7 @@ export function assembleSessionConfig(
   return {
     effectiveCwd,
     systemPrompt,
-    toolNames,
+    excludedBuiltinToolNames,
     model,
     thinkingLevel,
     agentMaxTurns,

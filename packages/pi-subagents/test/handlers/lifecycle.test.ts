@@ -104,10 +104,26 @@ describe("SessionLifecycleHandler", () => {
       expect(callOrder).toEqual([
         "unpublishService",
         "clearSessionContext",
-        "abortAll",
         "disposeNotifications",
+        "abortAll",
         "dispose",
       ]);
+    });
+
+    it("suppresses queued-agent follow-ups before aborting during shutdown", async () => {
+      let notificationsActive = true;
+      const sendFollowUp = vi.fn();
+      mockDisposeNotifications.mockImplementation(() => {
+        notificationsActive = false;
+      });
+      mockAbortAll.mockImplementation(() => {
+        if (notificationsActive) sendFollowUp();
+      });
+
+      await handler.handleSessionShutdown();
+
+      expect(sendFollowUp).not.toHaveBeenCalled();
+      expect(mockAbortAll).toHaveBeenCalledOnce();
     });
   });
 });

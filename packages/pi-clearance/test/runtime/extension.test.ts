@@ -52,6 +52,7 @@ describe("pi-clearance extension entry point", () => {
     expect(api.__handlers.tool_call).toBeTypeOf("function");
     expect(api.__commands.get("clearance")?.description).toContain("settings");
     expect(api.__commands.has("auto-reviewer")).toBe(false);
+    expect(api.__messageRenderers.has("clearance.allow-request")).toBe(true);
   });
 
   it("allows routine default-posture development commands through the real runtime pipeline", async () => {
@@ -166,8 +167,41 @@ describe("pi-clearance extension entry point", () => {
     ).resolves.toEqual({});
   });
 
+  it("bypasses analyzed non-Bash tools by default and gates them only by exact opt-in", async () => {
+    const defaultRuntime = await registeredHandlers();
+    await expect(
+      defaultRuntime.toolCall(
+        customEvent("edit", { path: "/etc/passwd", edits: [] }),
+        fakeContext({ cwd, sessionId: "typed-bypass" }),
+      ),
+    ).resolves.toEqual({});
+    await expect(readAuditEntries(cwd)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          entryType: "policy.decision",
+          decision: expect.objectContaining({
+            effect: "allow",
+            reason: expect.stringContaining("bypassed Clearance"),
+          }),
+        }),
+      ]),
+    );
+
+    await writeGlobalConfig(cwd, { gatedTools: ["edit"] });
+    const gatedRuntime = await registeredHandlers();
+    await expect(
+      gatedRuntime.toolCall(
+        customEvent("edit", { path: "/etc/passwd", edits: [] }),
+        fakeContext({ cwd, sessionId: "typed-gated" }),
+      ),
+    ).resolves.toMatchObject({ block: true });
+  });
+
   it("routes unsupported non-bash tools through the review fallback when configured", async () => {
-    await writeGlobalConfig(cwd, { unknownToolPosture: "review" });
+    await writeGlobalConfig(cwd, {
+      gatedTools: ["custom_tool"],
+      unknownToolPosture: "review",
+    });
     const { toolCall } = await registeredHandlers();
 
     await expect(
@@ -447,6 +481,7 @@ function createTestEventBus(): TestEventBus {
 type FakeExtensionApi = ExtensionAPI & {
   readonly __handlers: CapturedHandlers;
   readonly __commands: CapturedCommands;
+  readonly __messageRenderers: Map<string, unknown>;
   readonly __events?: TestEventBus;
 };
 
@@ -455,6 +490,7 @@ function fakeExtensionApi(
 ): FakeExtensionApi {
   const handlers: CapturedHandlers = {};
   const commands: CapturedCommands = new Map();
+  const messageRenderers = new Map<string, unknown>();
   const tools: unknown[] = [];
   let activeTools: string[] = [];
   const events =
@@ -494,6 +530,9 @@ function fakeExtensionApi(
     registerTool(tool: unknown): void {
       tools.push(tool);
     },
+    registerMessageRenderer(customType: string, renderer: unknown): void {
+      messageRenderers.set(customType, renderer);
+    },
     getActiveTools(): readonly string[] {
       return activeTools.length > 0
         ? activeTools
@@ -506,6 +545,7 @@ function fakeExtensionApi(
     },
     __handlers: handlers,
     __commands: commands,
+    __messageRenderers: messageRenderers,
     ...(events === undefined ? {} : { events }),
     ...(events === undefined ? {} : { __events: events }),
   } as unknown as FakeExtensionApi;

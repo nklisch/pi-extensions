@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import type { Static, TSchema } from "@sinclair/typebox";
 import type { DecisionEffect } from "../policy/core.ts";
+import { DEFAULT_UNKNOWN_TOOL_POSTURE } from "./defaults.ts";
 import {
   isHighCostReviewerModel,
   parseModelSpec,
@@ -69,6 +70,7 @@ export interface ResolvedReviewerConfig {
     readonly decisionLimit: number;
     readonly decisionWindow: string;
     readonly conversationTurns: number;
+    readonly userTurns?: number;
     readonly conversationCharLimit: number;
   };
   readonly escalation: {
@@ -133,6 +135,8 @@ export interface ResolvedConfig {
    */
   readonly sourceSnapshots?: ResolvedConfigSourceSnapshots;
   readonly mode: ClearanceMode;
+  /** Exact non-Bash tool names explicitly opted into Clearance gating. */
+  readonly gatedTools?: readonly string[];
   readonly unknownToolPosture: DecisionEffect;
   readonly projectScope: ResolvedProjectScope;
   readonly packEnablement: ResolvedPackEnablement;
@@ -250,7 +254,9 @@ export async function loadConfig(
       repository: repositoryPolicy,
     },
     mode,
-    unknownToolPosture: globalConfig.unknownToolPosture ?? "allow",
+    gatedTools: [...globalConfig.gatedTools],
+    unknownToolPosture:
+      globalConfig.unknownToolPosture ?? DEFAULT_UNKNOWN_TOOL_POSTURE,
     projectScope: projectScopeResolution.scope,
     packEnablement,
     globalPacks: withPackSource(globalConfig.packs, "user-global"),

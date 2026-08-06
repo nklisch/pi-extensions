@@ -29,6 +29,8 @@ import type { SessionMessage } from "#src/types";
 /** Outcome of one turn loop. */
 export interface TurnLoopResult {
   responseText: string;
+  /** Normally-resolved provider failure from the final assistant turn. */
+  failure?: string;
   /** True if the agent was hard-aborted (max turns + grace exceeded). */
   aborted: boolean;
   /** True if the agent was steered to wrap up (soft turn limit) but finished in time. */
@@ -121,6 +123,7 @@ export class SubagentSession {
       }
     });
 
+    const startIndex = session.messages.length;
     const collector = collectResponseText(session);
     const cleanupAbort = forwardAbortSignal(session, opts.signal);
 
@@ -135,13 +138,19 @@ export class SubagentSession {
         // published immediately after prompt resolution and before extraction.
         await session.prompt(effectivePrompt);
         this.publishCompleted(aborted, softLimitReached);
-        const responseText = collector.getText().trim() || getLastAssistantText(session);
-        return { responseText, aborted, steered: softLimitReached };
+        const responseText = collector.getText().trim() || getLastAssistantText(session, startIndex);
+        return {
+          responseText,
+          failure: finalTurnError(session, startIndex),
+          aborted,
+          steered: softLimitReached,
+        };
       }
       return await this.driveLifecycleTurns(
         effectivePrompt,
         opts.lifecycle,
-        () => collector.getText().trim() || getLastAssistantText(session),
+        () => collector.getText().trim() || getLastAssistantText(session, startIndex),
+        () => finalTurnError(session, startIndex),
         () => ({ aborted, steered: softLimitReached }),
       );
     } finally {
@@ -152,14 +161,21 @@ export class SubagentSession {
   }
 
   /** Re-prompt the same session (resume); preserves the released no-provider path. */
-  async resumeTurnLoop(prompt: string, signal?: AbortSignal): Promise<string> {
+  async resumeTurnLoop(
+    prompt: string,
+    signal?: AbortSignal,
+  ): Promise<{ text: string; failure?: string }> {
     const session = this._session;
+    const startIndex = session.messages.length;
     const collector = collectResponseText(session);
     const cleanupAbort = forwardAbortSignal(session, signal);
 
     try {
       await session.prompt(prompt);
-      return collector.getText().trim() || getLastAssistantText(session);
+      return {
+        text: collector.getText().trim() || getLastAssistantText(session, startIndex),
+        failure: finalTurnError(session, startIndex),
+      };
     } finally {
       collector.unsubscribe();
       cleanupAbort();
@@ -175,13 +191,15 @@ export class SubagentSession {
     signal: AbortSignal | undefined,
     lifecycle: SubagentTurnLifecycle,
   ): Promise<TurnLoopResult> {
+    const startIndex = this._session.messages.length;
     const collector = collectResponseText(this._session);
     const cleanupAbort = forwardAbortSignal(this._session, signal);
     try {
       return await this.driveLifecycleTurns(
         prompt,
         lifecycle,
-        () => collector.getText().trim() || getLastAssistantText(this._session),
+        () => collector.getText().trim() || getLastAssistantText(this._session, startIndex),
+        () => finalTurnError(this._session, startIndex),
         () => ({ aborted: false, steered: false }),
       );
     } finally {
@@ -194,6 +212,7 @@ export class SubagentSession {
     initialPrompt: string,
     lifecycle: SubagentTurnLifecycle,
     responseText: () => string,
+    failure: () => string | undefined,
     outcome: () => Readonly<{ aborted: boolean; steered: boolean }>,
   ): Promise<TurnLoopResult> {
     const start = await lifecycle.beforeStart(initialPrompt);
@@ -208,6 +227,10 @@ export class SubagentSession {
       await this._session.prompt(prompt);
       const turnOutcome = outcome();
       const proposedResult = responseText();
+      const turnFailure = failure();
+      if (turnFailure) {
+        return { responseText: proposedResult, failure: turnFailure, ...turnOutcome };
+      }
       const completion = await lifecycle.beforeComplete(
         proposedResult,
         toLifecycleOutcome(turnOutcome),
@@ -327,7 +350,7 @@ function toLifecycleOutcome(
 function collectResponseText(session: AgentSession) {
   let text = "";
   const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-    if (event.type === "message_start") {
+    if (event.type === "message_start" && event.message?.role === "assistant") {
       text = "";
     }
     if (
@@ -341,14 +364,30 @@ function collectResponseText(session: AgentSession) {
 }
 
 /** Get the last assistant text from the completed session history. */
-function getLastAssistantText(session: AgentSession): string {
-  for (let i = session.messages.length - 1; i >= 0; i--) {
+function getLastAssistantText(session: AgentSession, startIndex = 0): string {
+  for (let i = session.messages.length - 1; i >= startIndex; i--) {
     const msg = session.messages[i];
     if (msg.role !== "assistant") continue;
     const text = extractText(msg.content).trim();
     if (text) return text;
   }
   return "";
+}
+
+/** Classify a normally-resolved failure from this invocation's final assistant turn. */
+function finalTurnError(session: AgentSession, startIndex = 0): string | undefined {
+  for (let i = session.messages.length - 1; i >= startIndex; i--) {
+    const msg = session.messages[i];
+    if (msg.role !== "assistant") continue;
+    if (msg.stopReason === "error") {
+      return msg.errorMessage?.trim() || "provider error with no output";
+    }
+    if (msg.stopReason === "length" && !extractText(msg.content).trim()) {
+      return "run hit the output token limit before producing any text";
+    }
+    return undefined;
+  }
+  return undefined;
 }
 
 /**

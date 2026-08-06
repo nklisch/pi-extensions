@@ -12,23 +12,18 @@ export interface GetResultToolManager {
 	getRecord(id: string): Subagent | undefined;
 }
 
-export interface GetResultToolNotifications {
-	consume(id: string): void;
-}
-
 // ---- Class ----
 
 export class GetResultTool {
 	constructor(
 		private readonly manager: GetResultToolManager,
-		private readonly notifications: GetResultToolNotifications,
 		private readonly registry: AgentConfigLookup,
 	) {}
 
 	async execute(
 		_toolCallId: string,
 		params: { agent_id: string; wait?: boolean; verbose?: boolean },
-		_signal: AbortSignal,
+		signal: AbortSignal,
 		_onUpdate: unknown,
 		_ctx: unknown,
 	) {
@@ -37,19 +32,12 @@ export class GetResultTool {
 			return textResult(`Agent not found: "${params.agent_id}". It may have been cleaned up.`);
 		}
 
-		// Wait for completion if requested.
-		// Consume BEFORE awaiting: onComplete fires inside .then() (attached
-		// earlier at spawn time) and always runs before this await resumes.
-		// Consuming here prevents a redundant follow-up notification.
-		if (params.wait && record.status === "running" && record.promise) {
-			this.notifications.consume(params.agent_id);
-			await record.promise;
-		}
+		// A queued record is awaitable from spawn, and a resumed record republishes
+		// its live promise. Interrupting this tool stops only the wait.
+		if (params.wait) await record.waitUntilSettled(signal);
 
-		// Consume the settled result — suppresses the completion notification.
-		if (record.status !== "running" && record.status !== "queued") {
-			this.notifications.consume(params.agent_id);
-		}
+		// Pull delivery: only a terminal result was actually collected.
+		if (!record.isActive()) record.markConsumed();
 
 		return textResult(formatAgentReport(this.buildReport(record, params.verbose)));
 	}
@@ -58,6 +46,7 @@ export class GetResultTool {
 		return {
 			id: record.id,
 			displayName: getDisplayName(record.type, this.registry),
+			modelLabel: record.modelLabel,
 			status: record.status,
 			toolUses: record.toolUses,
 			tokens: formatLifetimeTokens(record),
@@ -67,7 +56,9 @@ export class GetResultTool {
 			description: record.description,
 			result: record.result,
 			error: record.error,
+			stoppedWhileQueued: record.stoppedWhileQueued,
 			conversation: verbose ? record.getConversation() : undefined,
+			transcriptPath: record.outputFile,
 		};
 	}
 
@@ -76,9 +67,11 @@ export class GetResultTool {
 			name: "get_subagent_result" as const,
 			label: "Get Agent Result",
 			promptSnippet:
-				"get_subagent_result: Check status and retrieve results from a background agent.",
+				"get_subagent_result: Inspect status or retrieve full results from a background agent.",
 			description:
-				"Check status and retrieve results from a background agent. Use the agent ID returned by Agent with run_in_background.",
+				"Background completion automatically wakes you with a result preview, so do not poll. " +
+				"Use this tool only for full output, verbose conversation, an explicit status check or synchronization point, " +
+				"or recovery after a missed notification.",
 			parameters: Type.Object({
 				agent_id: Type.String({
 					description: "The agent ID to check.",

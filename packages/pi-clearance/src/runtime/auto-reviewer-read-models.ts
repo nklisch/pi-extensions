@@ -5,6 +5,16 @@ import type {
   ResolvedConfig,
   ResolvedReviewerConfig,
 } from "../config/loader.ts";
+import {
+  DEFAULT_PROJECT_SCOPE_BEHAVIOR,
+  DEFAULT_REVIEWER_CONTEXT_MODE,
+  DEFAULT_REVIEWER_ESCALATION,
+  DEFAULT_REVIEWER_PROMPT_POSTURE,
+  DEFAULT_REVIEWER_RECENT_CONTEXT,
+  DEFAULT_REVIEWER_TOKEN_BUDGET,
+  DEFAULT_REVIEW_NOTE_DISPLAY,
+  DEFAULT_UNKNOWN_TOOL_POSTURE,
+} from "../config/defaults.ts";
 import { shippedPackActivationCondition } from "../packs/activation.ts";
 import type { PackageRegistrationSnapshot } from "../packs/package-registration.ts";
 import {
@@ -49,6 +59,9 @@ export interface AutoReviewerStatusView {
     readonly cwd: string;
   };
   readonly mode: ResolvedPolicy["config"]["mode"];
+  readonly gatedTools?: readonly string[];
+  /** Concise category labels for non-default user-owned settings. */
+  readonly customizations?: readonly string[];
   readonly reviewer: {
     readonly promptPosture: string;
     readonly configuredModel: string | null;
@@ -63,7 +76,10 @@ export interface AutoReviewerStatusView {
       readonly global: number;
       readonly globalProjectConfigured: number;
       readonly projectOverlayConfigured: number;
+      readonly repositoryConfigured: number;
       readonly activeProject: number;
+      /** Configured or active append count, whichever is more informative. */
+      readonly total: number;
     };
     readonly promptOverrideConfigured?: boolean;
     /** Plain-language current reviewer path for gray-area calls. */
@@ -149,7 +165,6 @@ export function buildAutoReviewerStatusView(input: {
   const entries = input.policy.registry.entries;
   const enabled = entries.filter((entry) => entry.availability.enabled).length;
   const reviewer = input.policy.config.reviewer;
-  const snapshots = input.policy.config.sourceSnapshots;
   const resolvedReviewerModel = resolveReviewerModel({
     registry: reviewerModelRegistry(input.ctx),
     spec: reviewer.model,
@@ -158,6 +173,7 @@ export function buildAutoReviewerStatusView(input: {
   const modelHighCost =
     resolvedReviewerModel.model !== undefined &&
     isHighCostReviewerModel(resolvedReviewerModel.model.id);
+  const promptAppendCounts = reviewerPromptAppendCounts(input.policy.config);
   const reviewerPath = resolveReviewerPath({
     config: input.policy.config,
     hasUI: hasHumanReviewUi(input.ctx),
@@ -170,6 +186,8 @@ export function buildAutoReviewerStatusView(input: {
       cwd: projectCwd(input.ctx, input.policy),
     },
     mode: input.policy.config.mode,
+    gatedTools: [...(input.policy.config.gatedTools ?? [])],
+    customizations: customizationCategories(input.policy.config),
     reviewer: {
       promptPosture: reviewer.promptPosture,
       configuredModel: reviewer.model,
@@ -185,13 +203,7 @@ export function buildAutoReviewerStatusView(input: {
       contextMode: reviewer.contextMode,
       tokenBudget: { ...reviewer.tokenBudget },
       escalation: { ...reviewer.escalation },
-      promptAppends: {
-        global: reviewer.promptAppends.length,
-        globalProjectConfigured:
-          snapshots?.global.reviewer.projectPromptAppends.length ?? 0,
-        projectOverlayConfigured: snapshots?.project.promptAppends.length ?? 0,
-        activeProject: reviewer.projectPromptAppends.length,
-      },
+      promptAppends: promptAppendCounts,
       promptOverrideConfigured: reviewer.promptOverride !== null,
       path: reviewerPath,
       consequence: reviewerConsequence(reviewerPath),
@@ -458,6 +470,151 @@ function syntheticPackageRow(
     metadataComplete: false,
     synthetic: true,
   };
+}
+
+function customizationCategories(
+  config: ResolvedPolicy["config"],
+): readonly string[] {
+  const categories: string[] = [];
+  const snapshots = config.sourceSnapshots;
+  const reviewer = config.reviewer;
+  const promptAppendCounts = reviewerPromptAppendCounts(config);
+
+  if (reviewer.promptOverride !== null) categories.push("prompt override");
+  if (promptAppendCounts.total > 0) {
+    categories.push(`prompt appends (${promptAppendCounts.total})`);
+  }
+  if (reviewer.promptPosture !== DEFAULT_REVIEWER_PROMPT_POSTURE) {
+    categories.push("posture");
+  }
+  if (reviewer.model !== null) categories.push("model pin");
+  if (config.unknownToolPosture !== DEFAULT_UNKNOWN_TOOL_POSTURE) {
+    categories.push("unknown-tool posture");
+  }
+  const recentContext = reviewer.recentContext;
+  if (
+    reviewer.contextMode !== DEFAULT_REVIEWER_CONTEXT_MODE ||
+    recentContext.decisionLimit !== DEFAULT_REVIEWER_RECENT_CONTEXT.decisionLimit ||
+    recentContext.decisionWindow !== DEFAULT_REVIEWER_RECENT_CONTEXT.decisionWindow ||
+    (recentContext.conversationTurns ??
+      DEFAULT_REVIEWER_RECENT_CONTEXT.conversationTurns) !==
+      DEFAULT_REVIEWER_RECENT_CONTEXT.conversationTurns ||
+    (recentContext.userTurns ?? DEFAULT_REVIEWER_RECENT_CONTEXT.userTurns) !==
+      DEFAULT_REVIEWER_RECENT_CONTEXT.userTurns ||
+    recentContext.conversationCharLimit !==
+      DEFAULT_REVIEWER_RECENT_CONTEXT.conversationCharLimit
+  ) {
+    categories.push("context");
+  }
+  if (
+    reviewer.tokenBudget.window !== DEFAULT_REVIEWER_TOKEN_BUDGET.window ||
+    reviewer.tokenBudget.limit !== DEFAULT_REVIEWER_TOKEN_BUDGET.limit
+  ) {
+    categories.push("budget");
+  }
+  if (
+    reviewer.escalation.enabled !== DEFAULT_REVIEWER_ESCALATION.enabled ||
+    reviewer.escalation.denialLimit !==
+      DEFAULT_REVIEWER_ESCALATION.denialLimit ||
+    reviewer.escalation.window !== DEFAULT_REVIEWER_ESCALATION.window
+  ) {
+    categories.push("escalation");
+  }
+  const gatedTools = config.gatedTools ?? [];
+  if (gatedTools.length > 0) {
+    categories.push(`gated tools (${gatedTools.length})`);
+  }
+  if (scopeIsCustomized(snapshots?.project.projectScope)) {
+    categories.push("scope");
+  }
+  const packCount = customizedPackCount(snapshots);
+  if (packCount > 0) categories.push(`packs (${packCount})`);
+  if (
+    config.display.reviewNote.mode !== DEFAULT_REVIEW_NOTE_DISPLAY.mode ||
+    config.display.reviewNote.showModelLabel !==
+      DEFAULT_REVIEW_NOTE_DISPLAY.showModelLabel ||
+    config.display.reviewNote.accent !== DEFAULT_REVIEW_NOTE_DISPLAY.accent
+  ) {
+    categories.push("display");
+  }
+
+  return categories;
+}
+
+function reviewerPromptAppendCounts(
+  config: ResolvedPolicy["config"],
+): NonNullable<AutoReviewerStatusView["reviewer"]["promptAppends"]> {
+  const snapshots = config.sourceSnapshots;
+  const global = config.reviewer.promptAppends.length;
+  const globalProjectConfigured =
+    snapshots?.global.reviewer.projectPromptAppends.length ?? 0;
+  const projectOverlayConfigured = snapshots?.project.promptAppends.length ?? 0;
+  const repositoryConfigured = snapshots?.repository.promptAppends.length ?? 0;
+  const activeProject = config.reviewer.projectPromptAppends.length;
+  const configuredTotal =
+    global +
+    globalProjectConfigured +
+    projectOverlayConfigured +
+    repositoryConfigured;
+  const activeTotal = global + activeProject;
+
+  return {
+    global,
+    globalProjectConfigured,
+    projectOverlayConfigured,
+    repositoryConfigured,
+    activeProject,
+    total: Math.max(configuredTotal, activeTotal),
+  };
+}
+
+function scopeIsCustomized(scope: unknown): boolean {
+  if (scope === undefined || typeof scope !== "object" || scope === null) {
+    return false;
+  }
+  const value = scope as Record<string, unknown>;
+  return (
+    [
+      "roots",
+      "writableDirectories",
+      "tempDirectories",
+      "deniedDirectories",
+      "safeHomeDirectories",
+      "agentSupportDirectories",
+    ].some((key) => Array.isArray(value[key]) && value[key].length > 0) ||
+    (value.safeHomeUseDefaults !== undefined &&
+      value.safeHomeUseDefaults !==
+        DEFAULT_PROJECT_SCOPE_BEHAVIOR.safeHomeUseDefaults) ||
+    (value.agentSupportUseDefaults !== undefined &&
+      value.agentSupportUseDefaults !==
+        DEFAULT_PROJECT_SCOPE_BEHAVIOR.agentSupportUseDefaults) ||
+    (value.unknownPathBehavior !== undefined &&
+      value.unknownPathBehavior !==
+        DEFAULT_PROJECT_SCOPE_BEHAVIOR.unknownPathBehavior) ||
+    (value.sensitivePathBehavior !== undefined &&
+      value.sensitivePathBehavior !==
+        DEFAULT_PROJECT_SCOPE_BEHAVIOR.sensitivePathBehavior) ||
+    (value.homePathBehavior !== undefined &&
+      value.homePathBehavior !== DEFAULT_PROJECT_SCOPE_BEHAVIOR.homePathBehavior)
+  );
+}
+
+function customizedPackCount(
+  snapshots: ResolvedPolicy["config"]["sourceSnapshots"],
+): number {
+  if (snapshots === undefined) return 0;
+  const { global, project, repository } = snapshots;
+  return [
+    global.packs.length,
+    project.packs.length,
+    repository.packs.length,
+    global.packEnablement.enabledPackagePacks.length,
+    global.packEnablement.disabledPackagePacks.length,
+    global.packEnablement.disabledConfigPacks.length,
+    project.packEnablement.enabledPackagePacks.length,
+    project.packEnablement.disabledPackagePacks.length,
+    project.packEnablement.disabledConfigPacks.length,
+  ].reduce((total, count) => total + count, 0);
 }
 
 function effectCopy(effect: PackEffectSummary): string {

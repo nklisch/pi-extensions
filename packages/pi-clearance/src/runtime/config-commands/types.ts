@@ -15,11 +15,20 @@ export type {
   RecentDecisionSource,
 } from "../reviewer-context.ts";
 
+export interface CommandToolMetadata {
+  /** Currently active tool names, when the host exposes them. */
+  readonly activeToolNames: readonly string[];
+  /** All configured tool names, when the host exposes them. */
+  readonly allToolNames: readonly string[];
+}
+
 export interface AutoReviewerCommandDependencies {
   readonly manager: RatchetModeManager;
   readonly policyResolver: PolicyResolver;
   readonly packageRegistration: () => PackageRegistrationSnapshot;
   readonly audit: AuditLogger;
+  /** Optional host tool catalog used by the exact gated-tools settings control. */
+  readonly toolMetadata?: () => CommandToolMetadata;
   /** Bounded recent audit decisions used by `/clearance allow` with no text. */
   readonly recentDecisionSource: RecentDecisionSource;
   /** Structural analyzer used only to summarize the recent command for the agent. */
@@ -46,7 +55,7 @@ export type CommandPi = Pick<
   | "getAllTools"
   | "setActiveTools"
   | "registerTool"
-  | "sendUserMessage"
+  | "sendMessage"
 >;
 
 export const USAGE_MARKDOWN = [
@@ -66,7 +75,7 @@ export const USAGE_MARKDOWN = [
   "",
   "Tune analysis tools are available only while `/clearance tune` is active; proposal tools remain available in every mode.",
   "",
-  "Advanced settings such as reviewer prompt posture, context mode, token budget, and escalation are edited in user-owned global config; reviewer model selection remains available in settings.",
+  "Reviewer prompt posture and model pinning are available as confirm-backed settings selectors; context mode, token budget, escalation, and other advanced fields are edited in user-owned global config.",
 ].join("\n");
 
 export async function resolvePolicyForCommand(
@@ -75,7 +84,7 @@ export async function resolvePolicyForCommand(
 ): Promise<ResolvedPolicy> {
   const result = await deps.policyResolver.resolve(ctx);
   if (!result.ok) {
-    throw new Error(`auto-reviewer policy resolution failed: ${result.reason}`);
+    throw new Error(`Pi Clearance policy resolution failed: ${result.reason}`);
   }
 
   return result.policy;
@@ -98,10 +107,10 @@ export async function resolvePolicyReport(
     return {
       ok: false,
       report: {
-        title: "Auto-reviewer command failed",
+        title: "Pi Clearance command failed",
         summary: message,
         markdown: [
-          "# Auto-reviewer command failed",
+          "# Pi Clearance command failed",
           "",
           `- Error: ${message}`,
           "- No config changes were written.",

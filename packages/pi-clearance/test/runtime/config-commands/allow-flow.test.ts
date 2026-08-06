@@ -78,10 +78,17 @@ describe("/clearance allow end-to-end flow", () => {
     };
 
     // Step 1: the command hands a deterministic brief to the agent.
-    const sendUserMessage = vi.fn(
-      async (_brief: string, _options?: unknown) => {},
+    const sendMessage = vi.fn(
+      async (
+        _message: {
+          readonly customType: string;
+          readonly content: string;
+          readonly display: boolean;
+        },
+        _options?: unknown,
+      ) => {},
     );
-    const pi = { sendUserMessage } as unknown as CommandPi;
+    const pi = { sendMessage } as unknown as CommandPi;
     const allowDeps = {
       policyResolver: {
         async resolve() {
@@ -101,8 +108,15 @@ describe("/clearance allow end-to-end flow", () => {
       "pnpm test",
     );
     expect(report.details.kind).toBe("handoff");
-    expect(sendUserMessage).toHaveBeenCalledTimes(1);
-    const brief = sendUserMessage.mock.calls[0]?.[0] as string;
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const sentMessage = sendMessage.mock.calls[0]?.[0] as {
+      customType: string;
+      content: string;
+      display: boolean;
+    };
+    expect(sentMessage.customType).toBe("clearance.allow-request");
+    expect(sentMessage.display).toBe(true);
+    const brief = sentMessage.content;
     expect(brief).toContain("pnpm test");
     expect(brief).toContain("clearance_propose");
 

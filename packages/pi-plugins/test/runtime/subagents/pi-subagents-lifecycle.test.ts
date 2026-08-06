@@ -103,7 +103,7 @@ describe("published pi-subagents lifecycle adapter", () => {
       commit: "43efffb459f64e2f5f9aaee50d8ae5afa564f4f3",
       license: "MIT",
       nodeEngine: ">=22",
-      piPeerRange: ">=0.75.0",
+      piPeerRange: ">=0.80.5",
     });
     expect(capabilities.semantics).toSatisfy((values) => Object.values(values).every(Boolean));
     expect(capabilities.coverage).toSatisfy((values) => Object.values(values).every(Boolean));

@@ -35,7 +35,7 @@ const PACKAGE_INTEGRITY =
 const PACKAGE_RELEASE_TAG = "pi-subagents-v18.0.4-nklisch.1";
 const PACKAGE_COMMIT = "43efffb459f64e2f5f9aaee50d8ae5afa564f4f3";
 const PACKAGE_NODE_ENGINE = ">=22";
-const PACKAGE_PI_PEER_RANGE = ">=0.75.0";
+const PACKAGE_PI_PEER_RANGE = ">=0.80.5";
 const PACKAGE_CONTINUATION_BUDGET = 3;
 
 // This digest covers the three unchanged portable conformance vectors: the

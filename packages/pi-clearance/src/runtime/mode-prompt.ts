@@ -9,7 +9,6 @@ import type { RatchetModeManager } from "./ratchet-mode.ts";
 const PROPOSAL_FLOW_GUIDANCE = [
   "## Clearance proposal flow guidance",
   "- Agent-authored policy batches are always available: call clearance_propose, then call clearance_present to show the deterministic summary card.",
-  "- Only an explicit user approval from the presented card may write user-owned config; never apply proposals or write policy directly.",
 ].join("\n");
 
 function formatRatchetToolGuidance(toolNames: readonly string[]): string {

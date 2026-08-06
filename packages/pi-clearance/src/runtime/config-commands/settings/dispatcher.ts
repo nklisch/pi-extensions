@@ -2,10 +2,12 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 import {
   type ProjectScopeListField,
+  planGatedToolCommandChange,
   planModeCommandChange,
   planProjectScopeCommandChange,
   planReviewerCommandChange,
   planReviewNoteDisplayCommandChange,
+  type GatedToolCommandChange,
   type ReviewerCommandChange,
   type ReviewNoteDisplayCommandChange,
   type ScopeCommandChange,
@@ -15,9 +17,17 @@ import {
   type ConfigCommandApplyResult,
   type ConfigCommandPlan,
 } from "../../../config/config-command-writer.ts";
-import type { ClearanceMode } from "../../../config/schema.ts";
+import {
+  CLEARANCE_MODES,
+  type ClearanceMode,
+  REVIEW_NOTE_MODES,
+} from "../../../config/schema.ts";
 import type { JsonPatchOperation } from "../../../replay/proposal-schema.ts";
 import { detectReviewDecisionDisplayCapability } from "../../review-decision-display.ts";
+import {
+  isShippedReviewerPostureId,
+  SHIPPED_REVIEWER_POSTURE_OPTIONS,
+} from "../../reviewer-prompts.ts";
 import {
   handlePackMutationCommand,
   type PackMutationRequest,
@@ -36,6 +46,11 @@ import {
   type SettingsActionId,
 } from "./actions.ts";
 import { renderPacksOpenDrill, renderPacksShowDrill } from "./panels/packs.ts";
+import {
+  ACTIVE_SESSION_MODEL_LABEL,
+  availableReviewerModels,
+  type ReviewerModelOption,
+} from "./model-options.ts";
 
 export interface SettingsDispatchDependencies
   extends AutoReviewerCommandDependencies {}
@@ -83,6 +98,10 @@ export async function dispatchSettingsAction(
   ctx: ExtensionCommandContext,
   deps: SettingsDispatchDependencies,
 ): Promise<CommandReport<SettingsDispatchDetails | unknown>> {
+  const selected = await resolveSelectorAction(action, ctx, deps);
+  if (!selected.ok) return selected.report;
+  action = selected.action;
+
   if (isDrillAction(action.id)) {
     if (action.id === "packs.open") {
       return await renderPacksOpenDrill({ action, ctx, deps });
@@ -131,6 +150,11 @@ export async function dispatchSettingsAction(
       case "mode":
         return planModeCommandChange({
           mode: change.mode,
+          resolvedConfig: policy.policy.config,
+        });
+      case "gated-tools":
+        return planGatedToolCommandChange({
+          change: change.change,
           resolvedConfig: policy.policy.config,
         });
       case "reviewer":
@@ -236,8 +260,217 @@ export function settingsUiRequiredReport(
   };
 }
 
+async function resolveSelectorAction(
+  action: SettingsAction,
+  ctx: ExtensionCommandContext,
+  deps: SettingsDispatchDependencies,
+): Promise<
+  | { readonly ok: true; readonly action: SettingsAction }
+  | { readonly ok: false; readonly report: CommandReport }
+> {
+  const isSelector =
+    action.id === "mode.select" ||
+    (action.id === "reviewer.model" && !Object.hasOwn(action.args, "model")) ||
+    action.id === "reviewer.posture.select" ||
+    action.id === "scope.preset.select" ||
+    action.id === "scope.unknown-path.select" ||
+    action.id === "briefing.mode.select" ||
+    (action.id === "gated-tools.add" &&
+      !Object.hasOwn(action.args, "toolName"));
+  if (!isSelector) return { ok: true, action };
+  if (ctx.hasUI !== true)
+    return { ok: false, report: settingsUiRequiredReport(action) };
+
+  const policy = await resolvePolicyReport(ctx, deps);
+  if (!policy.ok) return { ok: false, report: policy.report };
+  const reviewerModelOptions =
+    action.id === "reviewer.model" ? availableReviewerModels(ctx) : [];
+  const options = selectorOptions(
+    action,
+    deps,
+    reviewerModelOptions,
+    policy.policy.config.gatedTools ?? [],
+  );
+  if (options.length === 0) {
+    return {
+      ok: false,
+      report: invalidActionReport(
+        action,
+        "No choices are available in the current Pi session.",
+      ),
+    };
+  }
+
+  let selected: string | undefined;
+  try {
+    selected = await ctx.ui.select(selectorTitle(action), [...options]);
+  } catch {
+    selected = undefined;
+  }
+  if (selected === undefined) {
+    return {
+      ok: false,
+      report: {
+        title: "Settings selection cancelled",
+        summary: "No setting was selected; no config changes were written.",
+        markdown:
+          "# Settings selection cancelled\n\nNo config changes were written.",
+        details: { reason: "cancelled", action },
+        level: "warning",
+      },
+    };
+  }
+
+  const selectedAction = selectorSelection(
+    action,
+    selected,
+    reviewerModelOptions,
+  );
+  return selectedAction === undefined
+    ? {
+        ok: false,
+        report: invalidActionReport(action, "Unknown settings selection."),
+      }
+    : { ok: true, action: selectedAction };
+}
+
+function selectorOptions(
+  action: SettingsAction,
+  deps: SettingsDispatchDependencies,
+  reviewerModelOptions: readonly ReviewerModelOption[],
+  gatedTools: readonly string[],
+): readonly string[] {
+  switch (action.id) {
+    case "mode.select":
+      return CLEARANCE_MODES.map((mode) => modeLabel(mode));
+    case "reviewer.model":
+      return [
+        ACTIVE_SESSION_MODEL_LABEL,
+        ...reviewerModelOptions.map((model) => model.label),
+      ];
+    case "reviewer.posture.select":
+      return SHIPPED_REVIEWER_POSTURE_OPTIONS.map((option) => option.label);
+    case "scope.preset.select":
+      return ["Project only", "Home + project", "Full minus danger list"];
+    case "scope.unknown-path.select":
+      return ["Review unknown paths", "Deny unknown paths"];
+    case "briefing.mode.select":
+      return REVIEW_NOTE_MODES.map((mode) => `Note mode: ${mode}`);
+    case "gated-tools.add": {
+      const metadata = deps.toolMetadata?.();
+      return metadata === undefined
+        ? []
+        : activeToolNames(metadata)
+            .filter((name) => name !== "bash")
+            .filter((name) => !gatedTools.includes(name));
+    }
+    default:
+      return [];
+  }
+}
+
+function selectorTitle(action: SettingsAction): string {
+  switch (action.id) {
+    case "mode.select":
+      return "Choose Clearance mode";
+    case "reviewer.model":
+      return "Choose reviewer model";
+    case "reviewer.posture.select":
+      return "Choose reviewer posture";
+    case "scope.preset.select":
+      return "Choose scope preset";
+    case "scope.unknown-path.select":
+      return "Choose unknown-path behavior";
+    case "briefing.mode.select":
+      return "Choose briefing mode";
+    case "gated-tools.add":
+      return "Add exact gated non-Bash tool";
+    default:
+      return "Choose setting";
+  }
+}
+
+function selectorSelection(
+  action: SettingsAction,
+  selected: string,
+  reviewerModelOptions: readonly ReviewerModelOption[],
+): SettingsAction | undefined {
+  switch (action.id) {
+    case "mode.select": {
+      const mode = CLEARANCE_MODES.find(
+        (candidate) => selected === modeLabel(candidate),
+      );
+      return mode === undefined
+        ? undefined
+        : { id: "mode.set", args: { mode } };
+    }
+    case "reviewer.model": {
+      if (selected === ACTIVE_SESSION_MODEL_LABEL)
+        return { id: "reviewer.model", args: { model: null } };
+      const model = reviewerModelOptions.find(
+        (candidate) => candidate.label === selected,
+      );
+      return model === undefined
+        ? undefined
+        : { id: "reviewer.model", args: { model: model.spec } };
+    }
+    case "reviewer.posture.select": {
+      const posture = SHIPPED_REVIEWER_POSTURE_OPTIONS.find(
+        (option) => option.label === selected,
+      )?.id;
+      return posture === undefined
+        ? undefined
+        : { id: "reviewer.posture.set", args: { promptPosture: posture } };
+    }
+    case "scope.preset.select": {
+      const preset = {
+        "Project only": "project",
+        "Home + project": "home",
+        "Full minus danger list": "unrestricted",
+      }[selected];
+      return preset === undefined
+        ? undefined
+        : { id: "scope.preset", args: { preset } };
+    }
+    case "scope.unknown-path.select":
+      return selected === "Review unknown paths"
+        ? { id: "scope.unknown-path", args: { behavior: "review" } }
+        : selected === "Deny unknown paths"
+          ? { id: "scope.unknown-path", args: { behavior: "deny" } }
+          : undefined;
+    case "briefing.mode.select": {
+      const mode = selected.replace(/^Note mode: /, "");
+      return (REVIEW_NOTE_MODES as readonly string[]).includes(mode)
+        ? { id: "briefing.mode", args: { mode } }
+        : undefined;
+    }
+    case "gated-tools.add":
+      return { id: "gated-tools.add", args: { toolName: selected } };
+    default:
+      return undefined;
+  }
+}
+
+function modeLabel(mode: ClearanceMode): string {
+  return mode[0]?.toUpperCase() + mode.slice(1);
+}
+
+function activeToolNames(metadata: {
+  readonly activeToolNames: readonly string[];
+  readonly allToolNames: readonly string[];
+}): readonly string[] {
+  return metadata.activeToolNames.length > 0
+    ? metadata.activeToolNames
+    : metadata.allToolNames;
+}
+
 type MaterializedSettingsChange =
   | { readonly ok: true; readonly kind: "mode"; readonly mode: ClearanceMode }
+  | {
+      readonly ok: true;
+      readonly kind: "gated-tools";
+      readonly change: GatedToolCommandChange;
+    }
   | {
       readonly ok: true;
       readonly kind: "reviewer";
@@ -265,6 +498,41 @@ function materializeSettingsAction(
         return invalidArg(action, "mode", "off, ask, or auto");
       }
       return { ok: true, kind: "mode", mode };
+    }
+    case "gated-tools.add":
+    case "gated-tools.remove": {
+      const toolName = stringArg(action, "toolName");
+      if (toolName === undefined) {
+        return invalidArg(action, "toolName", "an exact non-Bash tool name");
+      }
+      return {
+        ok: true,
+        kind: "gated-tools",
+        change: {
+          kind: action.id === "gated-tools.add" ? "add" : "remove",
+          toolName,
+        },
+      };
+    }
+    case "reviewer.posture.set": {
+      const promptPosture = stringArg(action, "promptPosture");
+      if (
+        promptPosture === undefined ||
+        !isShippedReviewerPostureId(promptPosture)
+      ) {
+        return invalidArg(
+          action,
+          "promptPosture",
+          SHIPPED_REVIEWER_POSTURE_OPTIONS.map((option) => option.id).join(
+            ", ",
+          ),
+        );
+      }
+      return {
+        ok: true,
+        kind: "reviewer",
+        change: { kind: "prompt-posture", promptPosture },
+      };
     }
     case "reviewer.model": {
       const model = nullableStringArg(action, "model");
@@ -383,6 +651,11 @@ function materializeSettingsAction(
         change: { kind: "accent", enabled },
       };
     }
+    case "mode.select":
+    case "reviewer.posture.select":
+    case "scope.preset.select":
+    case "scope.unknown-path.select":
+    case "briefing.mode.select":
     case "reviewer.open":
     case "scope.open":
     case "packs.open":

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { DEFAULT_PROJECT_SCOPE_BEHAVIOR } from "./defaults.ts";
+import { isExactNonBashToolName } from "./gated-tools.ts";
 import type { JsonPatchOperation } from "../replay/proposal-schema.ts";
 import { isHighCostReviewerModel } from "../runtime/reviewer-model.ts";
 import type {
@@ -91,10 +93,12 @@ export function inferScopePreset(
     const fields = SCOPE_PRESET_FIELDS[preset];
     if (
       scope.safeHomeUseDefaults === fields.safeHomeUseDefaults &&
-      (scope.agentSupportUseDefaults ?? true) ===
+      (scope.agentSupportUseDefaults !== false) ===
         fields.agentSupportUseDefaults &&
-      (scope.homePathBehavior ?? "allow") === fields.homePathBehavior &&
-      (scope.sensitivePathBehavior ?? "review") ===
+      (scope.homePathBehavior ?? DEFAULT_PROJECT_SCOPE_BEHAVIOR.homePathBehavior) ===
+        fields.homePathBehavior &&
+      (scope.sensitivePathBehavior ??
+        DEFAULT_PROJECT_SCOPE_BEHAVIOR.sensitivePathBehavior) ===
         fields.sensitivePathBehavior &&
       scope.unknownPathBehavior === fields.unknownPathBehavior
     ) {
@@ -136,6 +140,10 @@ export type ReviewNoteDisplayCommandChange =
   | { readonly kind: "mode"; readonly mode: ReviewNoteMode }
   | { readonly kind: "show-model-label"; readonly enabled: boolean }
   | { readonly kind: "accent"; readonly enabled: boolean };
+
+export type GatedToolCommandChange =
+  | { readonly kind: "add"; readonly toolName: string }
+  | { readonly kind: "remove"; readonly toolName: string };
 
 export type ReviewerCommandChange =
   | { readonly kind: "prompt-posture"; readonly promptPosture: string }
@@ -180,6 +188,74 @@ export type PlanProjectScopeCommandChangeResult =
       readonly resolvedAfter: ResolvedProjectScope;
     }
   | { readonly ok: false; readonly reason: string };
+
+export function planGatedToolCommandChange(input: {
+  readonly change: GatedToolCommandChange;
+  readonly resolvedConfig: ResolvedConfig;
+}):
+  | { readonly ok: true; readonly plan: ConfigCommandPlan }
+  | { readonly ok: false; readonly reason: string } {
+  const toolName = input.change.toolName;
+  if (!isExactNonBashToolName(toolName)) {
+    return {
+      ok: false,
+      reason:
+        "gatedTools accepts exact non-Bash tool names only; wildcards, whitespace, and bash are not allowed",
+    };
+  }
+
+  const snapshots = input.resolvedConfig.sourceSnapshots;
+  if (snapshots === undefined) {
+    return {
+      ok: false,
+      reason:
+        "resolved config did not include source snapshots; reload config before planning a gated-tool write",
+    };
+  }
+
+  const before = cloneJsonish({
+    ...snapshots.global,
+    gatedTools: [...(snapshots.global.gatedTools ?? [])],
+  });
+  const after = cloneJsonish(before) as Mutable<GlobalConfig>;
+  const current = [...before.gatedTools];
+  const next =
+    input.change.kind === "add"
+      ? current.includes(toolName)
+        ? current
+        : [...current, toolName]
+      : current.filter((candidate) => candidate !== toolName);
+  after.gatedTools = next;
+  const patch = fieldPatch("/gatedTools", current, next);
+  const title =
+    input.change.kind === "add"
+      ? `Gate non-Bash tool ${toolName}`
+      : `Stop gating non-Bash tool ${toolName}`;
+  const planWithoutId = {
+    target: { kind: "global", path: snapshots.paths.globalConfigFile },
+    title,
+    summary:
+      patch.length === 0
+        ? `${title}; no config write is needed.`
+        : `${title}; only this exact tool name will use Clearance analysis and policy.`,
+    patch,
+    before,
+    after,
+    requiredAcknowledgementCodes: [],
+    warnings: [],
+  } satisfies Omit<ConfigCommandPlan, "id">;
+
+  return {
+    ok: true,
+    plan: {
+      id: deterministicPlanId({
+        gatedToolChange: input.change,
+        ...planWithoutId,
+      }),
+      ...planWithoutId,
+    },
+  };
+}
 
 export function planModeCommandChange(input: {
   readonly mode: ClearanceMode;

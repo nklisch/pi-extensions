@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-clearance",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Configurable auto-reviewer Pi extension for parsed, structural command policy",
   "type": "module",
   "license": "MIT",
@@ -15,7 +15,7 @@
     "tree-sitter"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18"
   },
   "napi": {
     "binaryName": "clearance-core",
@@ -45,6 +45,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "postinstall": "node --experimental-strip-types src/config/postinstall.ts",
     "typecheck": "tsc --noEmit",
     "contracts:generate": "tsx scripts/contracts.ts generate",
     "contracts:check": "tsx scripts/contracts.ts check",

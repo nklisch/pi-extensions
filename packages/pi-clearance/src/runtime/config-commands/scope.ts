@@ -146,7 +146,7 @@ export async function handleScopeCommand(
       reason:
         "Project scope changes require interactive Pi UI confirmation; no config changes were written.",
       markdownLines: [
-        "- Mutating `/auto-reviewer scope` commands require Pi UI confirmation.",
+        "- Mutating `/clearance scope` commands require Pi UI confirmation.",
         "- No config changes were written.",
       ],
       change: parsed.change,
@@ -232,7 +232,7 @@ export async function handleScopeCommand(
   };
 
   return {
-    title: "Auto-reviewer project scope updated",
+    title: "Pi Clearance project scope updated",
     summary: `${planned.plan.title}; changed ${apply.changed ? "yes" : "no"}.`,
     markdown: formatScopeMutationSuccessMarkdown(details),
     details,
@@ -292,7 +292,7 @@ async function handleScopeStatus(
 
   const details = scopeStatusFromConfig(policy.policy.config);
   return {
-    title: "Auto-reviewer project scope",
+    title: "Pi Clearance project scope",
     summary: `Project scope has ${details.raw.roots.length} configured root(s), ${details.raw.writableDirectories.length} configured writable path(s), and unknown paths ${details.raw.unknownPathBehavior}.`,
     markdown: formatScopeStatusMarkdown(details),
     details,
@@ -476,7 +476,7 @@ function scopeStatusFromConfig(config: ResolvedConfig): ScopeStatusDetails {
 
 function formatScopeStatusMarkdown(details: ScopeStatusDetails): string {
   const lines = [
-    "# Auto-reviewer project scope",
+    "# Pi Clearance project scope",
     "",
     "Project scope is lexical-only: it normalizes strings but does not follow symlinks, check filesystem existence, or provide sandbox containment.",
     "",
@@ -618,7 +618,7 @@ function formatScopeMutationSuccessMarkdown(
   details: ScopeMutationSuccessDetails,
 ): string {
   const lines = [
-    "# Auto-reviewer project scope updated",
+    "# Pi Clearance project scope updated",
     "",
     `- Change: ${details.plan.title}`,
     `- Target file: \`${details.plan.target.path}\``,

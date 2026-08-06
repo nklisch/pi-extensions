@@ -13,8 +13,13 @@ import type {
   ResolvedReviewNotePreference,
 } from "../config/loader.ts";
 import type { ClearanceMode } from "../config/schema.ts";
+import { DEFAULT_REVIEW_NOTE_DISPLAY } from "../config/defaults.ts";
 import type { ToolShape } from "../parse/shape.ts";
-import type { Decision, DecisionEffect } from "../policy/core.ts";
+import type {
+  Decision,
+  DecisionEffect,
+  DecisionProvenance,
+} from "../policy/core.ts";
 import { type EscalationTracker, escalationFamily } from "./escalation.ts";
 import {
   buildCompactReviewSummary,
@@ -57,6 +62,11 @@ export interface ReviewerModelAdapter {
   readonly review: (options: {
     readonly prompt: string;
     readonly shape: ToolShape;
+    /** Required fact/data supplied separately from prompt fragment assembly. */
+    readonly deterministicEvidence?: {
+      readonly reason: string;
+      readonly provenance: DecisionProvenance;
+    };
     readonly signal?: AbortSignal;
   }) => Promise<ReviewerModelResponse>;
 }
@@ -110,6 +120,11 @@ export interface ReviewDispatchRequest {
   readonly toolName: string;
   readonly toolInput: unknown;
   readonly shape: ToolShape;
+  /** Current deterministic review reason/provenance; never derived from prompt text. */
+  readonly deterministicEvidence?: {
+    readonly reason: string;
+    readonly provenance: DecisionProvenance;
+  };
   readonly reviewerConfig: ResolvedReviewerConfig;
   /** Full resolved config supplies the global mode and display settings. */
   readonly resolvedConfig?: ResolvedConfig;
@@ -130,11 +145,8 @@ export interface ReviewDispatchRequest {
 }
 
 const shownReviewerConfigSessionIds = new Set<string>();
-const DEFAULT_REVIEW_NOTE_PREFERENCE = {
-  mode: "reason+accent",
-  showModelLabel: false,
-  accent: true,
-} as const satisfies ResolvedReviewNotePreference;
+const DEFAULT_REVIEW_NOTE_PREFERENCE =
+  DEFAULT_REVIEW_NOTE_DISPLAY satisfies ResolvedReviewNotePreference;
 
 export async function dispatchReview(
   request: ReviewDispatchRequest,
@@ -476,6 +488,14 @@ async function tryModelReview(
     const response = await request.modelAdapter.review({
       prompt,
       shape: request.shape,
+      deterministicEvidence: {
+        reason:
+          request.deterministicEvidence?.reason ??
+          request.originalDecision.reason,
+        provenance:
+          request.deterministicEvidence?.provenance ??
+          request.originalDecision.provenance,
+      },
       ...signalOption(request),
     });
     if (response.usage !== undefined) {

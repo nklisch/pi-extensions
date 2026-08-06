@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { SteerTool, type SteerToolEvents, type SteerToolManager } from "#src/tools/steer-tool";
 import type { Subagent } from "#src/types";
-import { createTestSubagent } from "#test/helpers/make-subagent";
+import { makeModel } from "#test/helpers/make-model";
+import { createTestSubagent, makeStubExecution } from "#test/helpers/make-subagent";
 import { createMockSession, createSubagentSessionStub, toSubagentSession } from "#test/helpers/mock-session";
 import { STUB_CTX } from "#test/helpers/stub-ctx";
 
@@ -65,7 +66,11 @@ describe("SteerTool", () => {
 	});
 
 	it("sends steer and emits event on success", async () => {
-		const record = createTestSubagent({ status: "running" });
+		const record = createTestSubagent({
+			status: "running",
+			completedAt: undefined,
+			execution: makeStubExecution({ model: makeModel({ provider: "zai", id: "glm-5.2" }) }),
+		});
 		const mockSession = createMockSession();
 		record.subagentSession = toSubagentSession(createSubagentSessionStub(mockSession));
 		const records = new Map([["agent-1", record]]);
@@ -78,6 +83,8 @@ describe("SteerTool", () => {
 			message: "change plan",
 		});
 		expect(result.content[0].text).toContain("Steering message sent");
+		expect(result.content[0].text).toContain("zai/glm-5.2");
+		expect(result.content[0].text).toContain("(running)");
 		expect(result.content[0].text).toContain("3 tool uses");
 	});
 

@@ -7,10 +7,12 @@
  */
 
 import type { Model } from "@earendil-works/pi-ai";
+import { resolveDispatchAgentType } from "#src/config/agent-type-resolution";
 import type { AgentTypeRegistry } from "#src/config/agent-types";
 import { resolveAgentInvocationConfig } from "#src/config/invocation-config";
 import { normalizeMaxTurns } from "#src/lifecycle/turn-limits";
 import type { ModelRegistry } from "#src/session/model-resolver";
+import { formatModelLabel } from "#src/session/model-label";
 import { resolveInvocationModel } from "#src/session/model-resolver";
 import type { AgentInvocation, SubagentType, ThinkingLevel } from "#src/types";
 import {
@@ -75,18 +77,21 @@ export function resolveSpawnConfig(
   params: Record<string, unknown>,
   registry: AgentTypeRegistry,
   modelInfo: ModelInfo,
-  settings: { readonly defaultMaxTurns: number | undefined },
+  settings: {
+    readonly defaultMaxTurns: number | undefined;
+    readonly fallbackSubagent?: string | false;
+  },
 ): ResolvedSpawnConfig | SpawnConfigError {
   const rawType = params.subagent_type as SubagentType;
-  const resolved = registry.resolveType(rawType);
+  const typeResolution = resolveDispatchAgentType(
+    rawType,
+    registry,
+    settings.fallbackSubagent,
+  );
+  if ("error" in typeResolution) return typeResolution;
 
-  // A known-but-disabled type is an explicit error, not a silent unknown-type fallback.
-  if (resolved !== undefined && !registry.isValidType(resolved)) {
-    return { error: `Agent type "${resolved}" is disabled` };
-  }
-
-  const subagentType = resolved ?? "general-purpose";
-  const fellBack = resolved === undefined;
+  const subagentType = typeResolution.type;
+  const fellBack = typeResolution.fellBack;
 
   const displayName = getDisplayName(subagentType, registry);
 
@@ -108,13 +113,8 @@ export function resolveSpawnConfig(
   const inheritContext = resolvedConfig.inheritContext;
   const runInBackground = resolvedConfig.runInBackground;
 
-  // Compute display model name (only shown when different from parent)
-  const parentModelId = modelInfo.parentModel?.id;
-  const effectiveModelId = model?.id;
-  const modelName =
-    effectiveModelId && effectiveModelId !== parentModelId
-      ? model.name.replace(/^Claude\s+/i, "").toLowerCase()
-      : undefined;
+  // Every status surface shows the exact effective model, including inheritance.
+  const modelName = formatModelLabel(model);
 
   const effectiveMaxTurns = normalizeMaxTurns(
     resolvedConfig.maxTurns ?? settings.defaultMaxTurns,

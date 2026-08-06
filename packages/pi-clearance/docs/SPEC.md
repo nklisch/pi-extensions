@@ -6,21 +6,22 @@ Pi Clearance is a Pi extension that structurally analyzes tool calls, evaluates 
 
 - The sealed deny floor always evaluates first and cannot be loosened.
 - The Rust policy interpreter is pure and total: every call resolves to `allow`, `deny`, or `review`.
-- Parser/analyzer uncertainty, unknown tools, invalid config, and ambiguous conflicts fail closed.
+- Parser/analyzer uncertainty, opted-in unknown tools, invalid config, and ambiguous conflicts fail closed; non-Bash tools absent from exact `gatedTools` bypass Clearance and are audit-logged as allow/bypass.
 - Mode is global-only and is the single behavioral dial: `off`, `ask`, or `auto`.
 - Mode changes only dispatch of `review`: Off passes through and audits; Ask prompts a human; Auto uses model-first review with human/block fallback.
 - Off still honors floor, user, shipped, repository, and package deny rules.
 - Model output resolves one call and cannot edit policy or loosen the floor.
 - User-owned global/project config may add policy; repository policy is tighten-only unless Pi reports the project as trusted.
-- Package installation makes packs available, not active. Explicit user-owned enablement is required.
+- Package installation makes packs available, not active. Explicit user-owned enablement is required. Its npm `postinstall` repairs only existing platform-specific Clearance config files and never creates absent files. It does not follow or replace symlinked global files, overlays, or project directories; deliberate skips are reported as warnings and do not fail installation.
+- Persisted global and project config is sparse: `version` plus recursively retained non-default user choices. Defaults remain runtime-only; valid materialized files are compacted, while invalid or obsolete files are backed up and replaced with `{ "version": 1 }` without a compatibility translator.
 - Pre-public migrations are clean cutovers. Removed keys fail strict schema validation; there are no translators or aliases. Trusted TypeScript rule modules are deliberately cut and are never loaded.
 - The native engine is distributed as prebuilt Node-API artifacts for Linux x64 glibc and macOS arm64. Installation never runs Cargo; a missing or unsupported artifact fails closed.
 
 ## Config
 
-`GlobalConfigSchema` contains `version`, `mode` (default `ask`), `unknownToolPosture`, packs, package/config enablement, reviewer advanced fields, and display preferences. Project overlays contain packs, enablement, project scope, and trusted prompt appends. Repository policy has no mode or posture.
+`GlobalConfigSchema` contains `version`, `mode` (default `ask`), exact `gatedTools` (default empty; Bash and wildcards rejected), `unknownToolPosture`, packs, package/config enablement, reviewer advanced fields, and display preferences. Project overlays contain packs, enablement, project scope, and trusted prompt appends. Repository policy has no mode or posture. The complete schemas normalize runtime views; `src/config/persistence.ts` owns the sparse persisted representation.
 
-The former policy posture system and reviewer `enabled`/`mode` fields are removed. Reviewer model pinning remains an interactive settings action; other reviewer advanced knobs are config-file-only. The separate reviewer consent schema/file is removed; explicit `mode: "auto"` is the acknowledgment.
+The former policy posture system and reviewer `enabled`/`mode` fields are removed. Reviewer model pinning and the compact selector/toggle settings controls remain confirm-backed. The separate reviewer consent schema/file is removed; explicit `mode: "auto"` is the acknowledgment. The next minor release must communicate the intentional typed-tool bypass behavior break.
 
 ## Native boundary
 
@@ -42,4 +43,4 @@ The baseline is the former default pack set plus `bash.network.read`, `pi.extens
 
 ## Commands
 
-`/clearance setup`, `/clearance mode [off|ask|auto]`, `/clearance settings`, `/clearance status`, `/clearance packs`, `/clearance scope`, `/clearance tune`, `/clearance why`, `/clearance allow <plain language>`, and `/clearance allow`. The allow handler only hands a deterministic brief to the agent; it does not construct policy or call the reviewer. `/clearance profile` and `/clearance auto` are removed.
+`/clearance`, `/clearance setup`, `/clearance mode [off|ask|auto]`, `/clearance settings`, `/clearance status`, `/clearance packs`, `/clearance scope`, `/clearance tune`, `/clearance why`, `/clearance allow <plain language>`, and `/clearance allow`. The allow handler only hands a deterministic brief to the agent; it does not construct policy or call the reviewer. `/clearance profile` and `/clearance auto` are removed.

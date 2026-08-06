@@ -68,7 +68,7 @@
   ],
   "dependencies": {
     "@nklisch/pi-mcp-adapter": "2.20.1-nklisch.0",
-    "@nklisch/pi-subagents": "18.0.4-nklisch.1",
+    "@nklisch/pi-subagents": "18.1.0-nklisch.0",
     "jiti": "2.7.0",
     "semver": "7.8.1",
     "smol-toml": "^1.7.0",

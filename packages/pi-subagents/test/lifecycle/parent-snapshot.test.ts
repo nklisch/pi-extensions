@@ -45,6 +45,13 @@ describe("buildParentSnapshot", () => {
     expect(snapshot.modelRegistry).toBe(registry);
   });
 
+  it("captures the modern model runtime from Pi's compatibility facade", () => {
+    const runtime = { marker: "runtime" };
+    const registry = { runtime, find: vi.fn(), getAvailable: vi.fn(() => []) };
+    const snapshot = buildParentSnapshot(makeCtx({ modelRegistry: registry }));
+    expect(snapshot.modelRuntime).toBe(runtime);
+  });
+
   it("sets parentContext to undefined when inheritContext is false", () => {
     const snapshot = buildParentSnapshot(makeCtx(), false);
     expect(snapshot.parentContext).toBeUndefined();

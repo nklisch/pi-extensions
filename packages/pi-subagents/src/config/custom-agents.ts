@@ -1,5 +1,5 @@
 /**
- * custom-agents.ts — Load user-defined agents from project (.pi/agents/) and global ($PI_CODING_AGENT_DIR/agents/, default ~/.pi/agent/agents/) locations.
+ * custom-agents.ts — Load user-defined agents from global, shared project, and Pi project locations.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -12,24 +12,31 @@ import type { AgentConfig, ThinkingLevel } from "#src/types";
 /**
  * Scan for custom agent .md files from multiple locations.
  * Discovery hierarchy (higher priority wins):
- *   1. Project: <cwd>/.pi/agents/*.md
- *   2. Global:  $PI_CODING_AGENT_DIR/agents/*.md (default: ~/.pi/agent/agents/*.md)
+ *   1. Pi project:     <cwd>/.pi/agents/*.md
+ *   2. Shared project: <cwd>/.agents/agents/*.md
+ *   3. Global:         $PI_CODING_AGENT_DIR/agents/*.md
  *
  * Project-level agents override global ones with the same name.
  * Any name is allowed — names matching defaults (e.g. "Explore") override them.
  */
 export function loadCustomAgents(cwd: string): Map<string, AgentConfig> {
   const globalDir = join(getAgentDir(), "agents");
+  const sharedProjectDir = join(cwd, ".agents", "agents");
   const projectDir = join(cwd, ".pi", "agents");
 
   const agents = new Map<string, AgentConfig>();
-  loadFromDir(globalDir, agents, "global");   // lower priority
-  loadFromDir(projectDir, agents, "project");  // higher priority (overwrites)
+  loadFromDir(globalDir, agents, "global");
+  loadFromDir(sharedProjectDir, agents, "shared-project");
+  loadFromDir(projectDir, agents, "project");
   return agents;
 }
 
 /** Load agent configs from a directory into the map. */
-function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "project" | "global"): void {
+function loadFromDir(
+  dir: string,
+  agents: Map<string, AgentConfig>,
+  source: "project" | "shared-project" | "global",
+): void {
   if (!existsSync(dir)) return;
 
   let files: string[];
