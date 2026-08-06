@@ -55,6 +55,28 @@ describe("cli init helper", () => {
     expect(logs.join("\n")).toContain("Updated");
   });
 
+  it("detects current Codex user and project TOML as one compatibility import", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-mcp-cli-codex-home-"));
+    const project = mkdtempSync(join(tmpdir(), "pi-mcp-cli-codex-project-"));
+    process.env.HOME = home;
+    process.chdir(project);
+
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    writeFileSync(join(home, ".codex", "config.toml"), '[mcp_servers.user]\ncommand = "user-server"\n');
+    mkdirSync(join(project, ".codex"), { recursive: true });
+    writeFileSync(join(project, ".codex", "config.toml"), '[mcp_servers.project]\ncommand = "project-server"\n');
+
+    const logs: string[] = [];
+    const { main } = await import("../cli.js");
+    const exitCode = await main(["init"], (line) => logs.push(line));
+
+    expect(exitCode).toBe(0);
+    const config = JSON.parse(readFileSync(join(home, ".pi", "agent", "mcp.json"), "utf-8"));
+    expect(config.imports.filter((kind: string) => kind === "codex")).toEqual(["codex"]);
+    expect(logs.join("\n")).toContain(join(home, ".codex", "config.toml"));
+    expect(logs.join("\n")).toContain(resolve(project, ".codex", "config.toml"));
+  });
+
   it("writes detected host imports to PI_CODING_AGENT_DIR when set", async () => {
     const home = mkdtempSync(join(tmpdir(), "pi-mcp-cli-home-"));
     const agentDir = mkdtempSync(join(tmpdir(), "pi-mcp-cli-agent-"));

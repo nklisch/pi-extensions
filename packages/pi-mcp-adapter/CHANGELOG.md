@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.0-nklisch.10] - 2026-08-05
+
+### Added
+- The `codex` compatibility import now reads current Codex MCP configuration from `~/.codex/config.toml` and project `.codex/config.toml`, with project precedence. Standard-I/O and HTTP launch fields, headers, bearer-token environment variables, tool timeouts, disabled servers, and denied tools normalize into the adapter's existing runtime model; the legacy `~/.codex/config.json` reader remains as a lower-precedence fallback.
+
 ## [2.11.0-nklisch.9] - 2026-08-03
 
 ### Fixed

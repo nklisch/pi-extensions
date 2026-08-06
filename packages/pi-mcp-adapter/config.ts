@@ -2,6 +2,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { parse as parseToml } from "smol-toml";
 import { getAgentPath } from "./agent-dir.ts";
 import type { McpConfig, ServerEntry, McpSettings, ImportKind, ServerProvenance } from "./types.ts";
 
@@ -21,6 +22,8 @@ const IMPORT_PATHS: Record<ImportKind, string[]> = {
     join(homedir(), ".claude", "claude_desktop_config.json"),
   ],
   "claude-desktop": [join(homedir(), "Library", "Application Support", "Claude", "claude_desktop_config.json")],
+  // Retained as a fallback for older adapter users. Current Codex uses TOML;
+  // resolveImportPaths adds its user and project files with higher precedence.
   codex: [join(homedir(), ".codex", "config.json")],
   windsurf: [join(homedir(), ".windsurf", "mcp.json")],
   vscode: [".vscode/mcp.json"],
@@ -117,8 +120,7 @@ export function findAvailableImportConfigs(cwd = process.cwd()): DiscoveredImpor
   const discovered: DiscoveredImportConfig[] = [];
 
   for (const importKind of Object.keys(IMPORT_PATHS) as ImportKind[]) {
-    const importPath = resolveImportPath(importKind, cwd);
-    if (importPath) {
+    for (const importPath of resolveImportPaths(importKind, cwd)) {
       discovered.push({ kind: importKind, path: importPath });
     }
   }
@@ -140,17 +142,13 @@ export function getMcpDiscoverySummary(overridePath?: string, cwd = process.cwd(
     } satisfies ConfigDiscoverySource;
   });
 
-  const imports = (Object.keys(IMPORT_PATHS) as ImportKind[])
-    .map((kind) => {
-      const path = resolveImportPath(kind, cwd);
-      if (!path) return null;
-      return {
-        kind,
-        path,
-        serverCount: getImportServerCount(kind, path),
-      } satisfies ImportConfigSummary;
-    })
-    .filter((value): value is ImportConfigSummary => value !== null);
+  const imports = (Object.keys(IMPORT_PATHS) as ImportKind[]).flatMap((kind) =>
+    resolveImportPaths(kind, cwd).map((path) => ({
+      kind,
+      path,
+      serverCount: getImportServerCount(kind, path),
+    } satisfies ImportConfigSummary)),
+  );
 
   const totalServerCount = sources.reduce((sum, source) => sum + source.serverCount, 0);
   const hasSharedServers = sources.some((source) => source.kind === "shared" && source.serverCount > 0);
@@ -278,19 +276,17 @@ function expandImports(config: McpConfig, cwd = process.cwd()): McpConfig {
 
   const importedServers: Record<string, ServerEntry> = {};
   for (const importKind of config.imports) {
-    const importPath = resolveImportPath(importKind, cwd);
-    if (!importPath) continue;
-
-    try {
-      const imported = JSON.parse(readFileSync(importPath, "utf-8"));
-      const servers = extractServers(imported, importKind);
-      for (const [name, definition] of Object.entries(servers)) {
-        if (!importedServers[name]) {
-          importedServers[name] = definition;
+    for (const importPath of resolveImportPaths(importKind, cwd)) {
+      try {
+        const servers = readImportServers(importPath, importKind);
+        // Paths are ordered from broad/legacy to current project scope. Later
+        // Codex layers therefore override earlier fields just as local config does.
+        for (const [name, definition] of Object.entries(servers)) {
+          importedServers[name] = { ...(importedServers[name] ?? {}), ...definition };
         }
+      } catch (error) {
+        console.warn(`Failed to import MCP config from ${importKind} at ${importPath}:`, error);
       }
-    } catch (error) {
-      console.warn(`Failed to import MCP config from ${importKind}:`, error);
     }
   }
 
@@ -301,21 +297,26 @@ function expandImports(config: McpConfig, cwd = process.cwd()): McpConfig {
   };
 }
 
-function resolveImportPath(importKind: ImportKind, cwd = process.cwd()): string | null {
-  const candidates = IMPORT_PATHS[importKind] ?? [];
-  for (const candidate of candidates) {
-    const fullPath = candidate.startsWith(".") ? resolve(cwd, candidate) : candidate;
-    if (existsSync(fullPath)) {
-      return fullPath;
-    }
+function resolveImportPaths(importKind: ImportKind, cwd = process.cwd()): string[] {
+  if (importKind === "codex") {
+    const candidates = [
+      ...IMPORT_PATHS.codex,
+      join(homedir(), ".codex", "config.toml"),
+      resolve(cwd, ".codex", "config.toml"),
+    ];
+    return [...new Set(candidates.map((candidate) => resolve(candidate)))].filter((path) => existsSync(path));
   }
-  return null;
+
+  for (const candidate of IMPORT_PATHS[importKind] ?? []) {
+    const fullPath = candidate.startsWith(".") ? resolve(cwd, candidate) : candidate;
+    if (existsSync(fullPath)) return [fullPath];
+  }
+  return [];
 }
 
 function getImportServerCount(importKind: ImportKind, path: string): number {
   try {
-    const raw = JSON.parse(readFileSync(path, "utf-8"));
-    return Object.keys(extractServers(raw, importKind)).length;
+    return Object.keys(readImportServers(path, importKind)).length;
   } catch {
     return 0;
   }
@@ -349,6 +350,75 @@ function validateConfig(raw: unknown): McpConfig {
     imports: Array.isArray(obj.imports) ? (obj.imports as ImportKind[]) : undefined,
     settings: obj.settings as McpSettings | undefined,
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringRecord(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value) || Object.values(value).some((entry) => typeof entry !== "string")) return undefined;
+  return { ...value } as Record<string, string>;
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) return undefined;
+  return [...value] as string[];
+}
+
+function normalizeCodexServers(config: unknown): Record<string, ServerEntry> {
+  if (!isRecord(config) || !isRecord(config.mcp_servers)) return {};
+
+  const servers: Record<string, ServerEntry> = {};
+  for (const [name, raw] of Object.entries(config.mcp_servers)) {
+    if (!isRecord(raw) || raw.enabled === false) continue;
+
+    const command = typeof raw.command === "string" ? raw.command : undefined;
+    const url = typeof raw.url === "string" ? raw.url : undefined;
+    if (!command && !url) continue;
+
+    const declaredEnv = stringRecord(raw.env);
+    const forwardedEnv = Object.fromEntries(
+      (stringArray(raw.env_vars) ?? [])
+        .filter((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
+        .map((name) => [name, `\${${name}}`]),
+    );
+    const env = { ...forwardedEnv, ...(declaredEnv ?? {}) };
+    const args = stringArray(raw.args);
+    const staticHeaders = stringRecord(raw.http_headers);
+    const environmentHeaders = stringRecord(raw.env_http_headers);
+    const headers = {
+      ...(staticHeaders ?? {}),
+      ...Object.fromEntries(Object.entries(environmentHeaders ?? {}).map(([header, variable]) => [header, `\${${variable}}`])),
+    };
+    const bearerTokenEnv = typeof raw.bearer_token_env_var === "string" ? raw.bearer_token_env_var : undefined;
+    const toolTimeoutSeconds = typeof raw.tool_timeout_sec === "number" && Number.isFinite(raw.tool_timeout_sec) && raw.tool_timeout_sec > 0
+      ? raw.tool_timeout_sec
+      : undefined;
+    const disabledTools = stringArray(raw.disabled_tools);
+
+    servers[name] = {
+      ...(command === undefined ? {} : { command }),
+      ...(args === undefined ? {} : { args }),
+      ...(Object.keys(env).length === 0 ? {} : { env }),
+      ...(typeof raw.cwd === "string" ? { cwd: raw.cwd } : {}),
+      ...(url === undefined ? {} : { url }),
+      ...(Object.keys(headers).length === 0 ? {} : { headers }),
+      ...(bearerTokenEnv === undefined ? {} : { auth: "bearer" as const, bearerTokenEnv }),
+      ...(bearerTokenEnv === undefined && raw.auth === "oauth" ? { auth: "oauth" as const } : {}),
+      ...(toolTimeoutSeconds === undefined ? {} : { requestTimeoutMs: toolTimeoutSeconds * 1000 }),
+      ...(disabledTools === undefined ? {} : { excludeTools: disabledTools }),
+    };
+  }
+  return servers;
+}
+
+function readImportServers(path: string, kind: ImportKind): Record<string, ServerEntry> {
+  const source = readFileSync(path, "utf-8");
+  if (kind === "codex" && path.endsWith(".toml")) {
+    return normalizeCodexServers(parseToml(source));
+  }
+  return extractServers(JSON.parse(source), kind);
 }
 
 function extractServers(config: unknown, kind: ImportKind): Record<string, ServerEntry> {
@@ -612,18 +682,14 @@ export function getServerProvenance(overridePath?: string, cwd = process.cwd()):
 
     if (loaded.imports?.length) {
       for (const importKind of loaded.imports) {
-        const importPath = resolveImportPath(importKind, cwd);
-        if (!importPath) continue;
-
-        try {
-          const imported = JSON.parse(readFileSync(importPath, "utf-8"));
-          const servers = extractServers(imported, importKind);
-          for (const name of Object.keys(servers)) {
-            if (!provenance.has(name)) {
+        for (const importPath of resolveImportPaths(importKind, cwd)) {
+          try {
+            const servers = readImportServers(importPath, importKind);
+            for (const name of Object.keys(servers)) {
               provenance.set(name, { path: userPath, kind: "import", importKind });
             }
-          }
-        } catch {}
+          } catch {}
+        }
       }
     }
 

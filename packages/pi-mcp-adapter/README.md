@@ -441,12 +441,14 @@ Shared MCP files are loaded automatically. Use `imports` only for host-specific 
 
 ```json
 {
-  "imports": ["cursor", "claude-code", "claude-desktop"],
+  "imports": ["cursor", "claude-code", "claude-desktop", "codex"],
   "mcpServers": { }
 }
 ```
 
-Supported compatibility imports: `cursor`, `claude-code`, `claude-desktop`, `vscode`, `windsurf`, `codex`
+Supported compatibility imports: `cursor`, `claude-code`, `claude-desktop`, `vscode`, `windsurf`, `codex`.
+
+The `codex` import reads the current user and project files (`~/.codex/config.toml` followed by `.codex/config.toml`) and preserves the older `~/.codex/config.json` reader as a lower-precedence fallback. It maps standard-I/O and HTTP launch fields, explicit and forwarded environment variables, static and environment-backed headers, bearer-token environment variables, tool timeouts, disabled servers, and denied tools. Codex-only startup requirements, tool allowlists, approval modes, and remote-executor options remain Codex-specific and are ignored.
 
 `pi-mcp-adapter init` detects these host-specific configs and adds missing imports to the Pi agent dir config for you.
 

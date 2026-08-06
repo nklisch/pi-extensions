@@ -99,6 +99,100 @@ describe("config discovery", () => {
     );
   });
 
+  it("imports current Codex user and project TOML with project precedence", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-mcp-codex-home-"));
+    const project = mkdtempSync(join(tmpdir(), "pi-mcp-codex-project-"));
+    process.env.HOME = home;
+    process.chdir(project);
+
+    writeJson(join(home, ".pi", "agent", "mcp.json"), { imports: ["codex"], mcpServers: {} });
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    writeFileSync(join(home, ".codex", "config.toml"), `
+[mcp_servers.shared]
+command = "user-command"
+args = ["--user"]
+env = { USER_VALUE = "yes", SHARED_VALUE = "declared" }
+env_vars = ["FORWARDED_TOKEN", "SHARED_VALUE"]
+
+[mcp_servers.remote]
+url = "https://example.test/mcp"
+bearer_token_env_var = "MCP_TOKEN"
+http_headers = { "X-Static" = "static" }
+env_http_headers = { "X-Dynamic" = "DYNAMIC_HEADER" }
+tool_timeout_sec = 45
+disabled_tools = ["dangerous"]
+
+[mcp_servers.disabled]
+command = "disabled-command"
+enabled = false
+`);
+    mkdirSync(join(project, ".codex"), { recursive: true });
+    writeFileSync(join(project, ".codex", "config.toml"), `
+[mcp_servers.shared]
+command = "project-command"
+args = ["--project"]
+cwd = "./server"
+`);
+
+    const { findAvailableImportConfigs, loadMcpConfig } = await import("../config.ts");
+    const imports = findAvailableImportConfigs();
+    expect(imports.filter((entry) => entry.kind === "codex").map((entry) => entry.path)).toEqual([
+      join(home, ".codex", "config.toml"),
+      resolve(project, ".codex", "config.toml"),
+    ]);
+
+    const config = loadMcpConfig();
+    expect(config.mcpServers.shared).toEqual({
+      command: "project-command",
+      args: ["--project"],
+      env: {
+        FORWARDED_TOKEN: "${FORWARDED_TOKEN}",
+        SHARED_VALUE: "declared",
+        USER_VALUE: "yes",
+      },
+      cwd: "./server",
+    });
+    expect(config.mcpServers.remote).toEqual({
+      url: "https://example.test/mcp",
+      headers: { "X-Static": "static", "X-Dynamic": "${DYNAMIC_HEADER}" },
+      auth: "bearer",
+      bearerTokenEnv: "MCP_TOKEN",
+      requestTimeoutMs: 45_000,
+      excludeTools: ["dangerous"],
+    });
+    expect(config.mcpServers.disabled).toBeUndefined();
+  });
+
+  it("isolates malformed Codex TOML and preserves the legacy JSON fallback", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-mcp-codex-legacy-home-"));
+    const project = mkdtempSync(join(tmpdir(), "pi-mcp-codex-legacy-project-"));
+    process.env.HOME = home;
+    process.chdir(project);
+
+    writeJson(join(home, ".pi", "agent", "mcp.json"), { imports: ["codex"], mcpServers: {} });
+    writeJson(join(home, ".codex", "config.json"), {
+      mcpServers: { legacy: { command: "legacy-command" } },
+    });
+    writeFileSync(join(home, ".codex", "config.toml"), "[mcp_servers.broken\n");
+    mkdirSync(join(project, ".codex"), { recursive: true });
+    writeFileSync(join(project, ".codex", "config.toml"), `
+[mcp_servers.project]
+command = "project-command"
+`);
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { loadMcpConfig } = await import("../config.ts");
+    const config = loadMcpConfig();
+
+    expect(config.mcpServers.legacy).toEqual({ command: "legacy-command" });
+    expect(config.mcpServers.project).toEqual({ command: "project-command" });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to import MCP config from codex"),
+      expect.anything(),
+    );
+    warn.mockRestore();
+  });
+
   it("merges partial Pi overrides into shared and imported server definitions", async () => {
     const home = mkdtempSync(join(tmpdir(), "pi-mcp-merge-home-"));
     const project = mkdtempSync(join(tmpdir(), "pi-mcp-merge-project-"));

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.2
+
+### Changed
+
+- Bump the pinned `@nklisch/pi-mcp-adapter` sibling to `2.11.0-nklisch.10`, carrying current Codex user and project TOML MCP configuration support into the release bundle.
+
 ## v0.3.1
 
 ### Fixes

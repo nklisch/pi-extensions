@@ -29,7 +29,11 @@ const IMPORT_PATHS = {
     path.join(HOME, ".claude", "claude_desktop_config.json"),
   ],
   "claude-desktop": [path.join(HOME, "Library", "Application Support", "Claude", "claude_desktop_config.json")],
-  codex: [path.join(HOME, ".codex", "config.json")],
+  codex: [
+    path.join(HOME, ".codex", "config.toml"),
+    path.resolve(process.cwd(), ".codex", "config.toml"),
+    path.join(HOME, ".codex", "config.json"),
+  ],
   windsurf: [path.join(HOME, ".windsurf", "mcp.json")],
   vscode: [path.resolve(process.cwd(), ".vscode", "mcp.json")],
 };
@@ -73,8 +77,7 @@ function findAvailableImports() {
   const found = [];
 
   for (const [kind, candidates] of Object.entries(IMPORT_PATHS)) {
-    const existing = candidates.find((candidate) => fs.existsSync(candidate));
-    if (existing) {
+    for (const existing of [...new Set(candidates)].filter((candidate) => fs.existsSync(candidate))) {
       found.push({ kind, path: existing });
     }
   }
@@ -118,8 +121,7 @@ async function runInit(argv, log = console.log) {
   const foundImports = findAvailableImports();
   const existingConfig = loadPiConfig();
   const existingImports = new Set(existingConfig.imports ?? []);
-  const importsToAdd = foundImports
-    .map((entry) => entry.kind)
+  const importsToAdd = [...new Set(foundImports.map((entry) => entry.kind))]
     .filter((kind) => !existingImports.has(kind));
 
   printDiscovery(log, foundImports);

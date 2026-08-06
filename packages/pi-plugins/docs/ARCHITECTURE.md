@@ -676,27 +676,21 @@ observation are local and offline-safe; remote connection, authentication,
 tool-discovery, and launch failures remain redacted per-server health rather
 than activation identity.
 
-Production composition uses the exact published
-`@nklisch/pi-mcp-adapter@2.11.0-nklisch.0` package through its documented
+Production composition uses the exact sibling
+`@nklisch/pi-mcp-adapter@2.11.0-nklisch.10` package through its documented
 `@nklisch/pi-mcp-adapter/programmatic` export, with initial plugin sources
 registered before MCP tools and foreign file discovery disabled. Before package
-code executes, the wrapper verifies registry SRI
-`sha512-kkMQwrNbggAhSCJCJUxVLKKiMswKjYaEbOLNSZrZlYY2teoxrtKld2+3MQpvsHDJYFypi1PPHuAS2YC/0z+7tg==`,
-installed-tree digest
-`sha256:4f427e1aae57a5b7738a07df7311f4a758e13c61b8b1d50924fd70599e3b3bf5`,
-release tag object `39c0c367db35ecb125b05ad0b9b639bc6b09b97d`, release commit
-`1c1cd71fd069bc65cc06bf49399d83ff9e3d008b`, upstream base
-`82724dccc13a49310530898f922bafff12b7f3fe`, MIT license digest
-`2d20dfacd9742706e564470dc77438608a1e54b0ed46959f080709389209093c`, manifest
-exports (`.` and `./programmatic`) and Pi resource (`./index.ts`), Node
-`>=22.19.0`, and Pi peer range `>=0.79.1 <1`.
+code executes, the wrapper verifies the package name and version, MIT license,
+manifest exports (`.` and `./programmatic`), Pi resource (`./index.ts`), Node
+`>=22.19.0`, and Pi peer range `>=0.79.1 <1`. npm lockfile integrity protects
+installed bytes, while the release bundle ships the repository-owned sibling
+under the same delivery boundary.
 Package-specific ordering, source isolation, replace/remove cleanup,
 cancellation, redaction, late-value disposal, unchanged standalone behavior,
-and portable plus real-Pi conformance must also remain exact. Any version,
-tree, manifest, API, license, range, or conformance drift leaves MCP unavailable
-before the drifted package is imported or executed; dependent plugins fail
-closed while unrelated plugins continue. The standalone package extension and
-file/cache discovery remain outside host composition.
+and portable plus real-Pi conformance remain contract-tested. Manifest or
+behavioral drift leaves MCP unavailable before the incompatible export executes;
+dependent plugins fail closed while unrelated plugins continue. The standalone
+package extension and file/cache discovery remain outside host composition.
 
 MCP server names derive from plugin identity and the native server key.
 Compatibility aliases preserve foreign tool references where the MCP runtime
@@ -908,8 +902,8 @@ reload behavior, project trust, and non-interactive degradation.
 Final acceptance starts with an empty consumer `node_modules` tree, installs the
 packed `@nklisch/pi-plugins` candidate from the replayed lock/SRI registry
 snapshot, and verifies exact receipts for
-`@nklisch/pi-mcp-adapter@2.11.0-nklisch.0` and
-`@nklisch/pi-subagents@18.0.4-nklisch.0`. In a clean Pi environment with no
+`@nklisch/pi-mcp-adapter@2.11.0-nklisch.10` and
+`@nklisch/pi-subagents@18.0.4-nklisch.1`. In a clean Pi environment with no
 Claude or Codex state, one revision-bound production fixture carries a skill,
 ordinary hooks, subagent interception, and canonical MCP through install,
 disable, enable, V1-to-V2 update, restart, and uninstall. Real Pi processes
