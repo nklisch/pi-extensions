@@ -11,3 +11,5 @@ coverage/
 .pi/
 .peeragent/
 *.tgz
+packages/pi-clearance/native/clearance-core.*.node
+packages/pi-clearance-*/clearance-core.*.node

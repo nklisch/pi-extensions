@@ -8,25 +8,26 @@ For product behavior, start with [README.md](../README.md) and [USER_GUIDE.md](U
 
 ## Requirements
 
-- Node.js 22 or newer
-- pnpm 11
+- Node.js 24 or newer
+- npm 11
+- a stable Rust toolchain for native builds and tests
 - Pi, when testing the extension in a real session
 
-Install dependencies:
+Install dependencies from the repository root:
 
 ```bash
-pnpm install
+npm install
 ```
 
 ## Main commands
 
 ```bash
-pnpm check
-pnpm test
-pnpm --dir . run-script lint
+npm run check
+npm test --workspace @nklisch/pi-clearance
+npm run cargo:test --workspace @nklisch/pi-clearance
 ```
 
-Use the scoped lint command. In some local environments, bare `pnpm lint` can be shadowed by a wrapper that is not this package's script.
+The repository check builds the host native engine before running the package suites. Release CI separately builds and exercises every declared target.
 
 ## Package shape
 
@@ -43,17 +44,18 @@ Node-API addon, not a package-install build:
       "./src/skill/clearance-pack-authoring/SKILL.md"
     ]
   },
-  "files": ["src", "native", "README.md", "docs", "LICENSE"]
+  "files": ["src", "native/index.d.ts", "README.md", "docs", "LICENSE"]
 }
 ```
 
 Pi loads `src/index.ts` as the extension composition root. `src/native/loader.ts`
-resolves the local development artifact or the matching napi-rs optional package
-(`pi-clearance-linux-x64-gnu` or `pi-clearance-darwin-arm64`). A missing
-artifact refuses to arm the extension; no install script or Cargo fallback exists.
-`pnpm build:native` is contributor-only. Release preparation builds both targets,
-stages them with `pnpm native:prepare`, and publishes the platform packages before
-the root package.
+resolves the local development artifact or the matching scoped optional package
+(`@nklisch/pi-clearance-linux-x64-gnu` or
+`@nklisch/pi-clearance-darwin-arm64`). A missing artifact refuses to arm the
+extension; no install script or Cargo fallback exists. Native builds are
+contributor- and release-only. Release CI builds every declared target, and the
+shared publisher stages and publishes exact-version platform packages before the
+root package.
 
 Shipped interfaces:
 
@@ -75,7 +77,7 @@ remain the source of truth.
 Run focused helper-harness tests with:
 
 ```bash
-pnpm exec vitest run test/skill/apply-cli.test.ts test/skill/apply-presentation.test.ts test/skill/apply-verify.test.ts test/skill/apply-writer.test.ts
+npm exec --workspace @nklisch/pi-clearance -- vitest run test/skill/apply-cli.test.ts test/skill/apply-presentation.test.ts test/skill/apply-verify.test.ts test/skill/apply-writer.test.ts
 ```
 
 ## Pack package structure
@@ -225,19 +227,17 @@ When changing tune behavior, run the replay and skill tests, not only the focuse
 Useful slices:
 
 ```bash
-pnpm exec vitest run test/parse-structure.test.ts test/parse-bash-projection.test.ts
-pnpm exec vitest run test/policy test/packs
-pnpm exec vitest run test/runtime
-pnpm exec vitest run test/replay
-pnpm exec vitest run test/skill
+npm exec --workspace @nklisch/pi-clearance -- vitest run test/parse-structure.test.ts test/parse-bash-projection.test.ts
+npm exec --workspace @nklisch/pi-clearance -- vitest run test/policy test/packs
+npm exec --workspace @nklisch/pi-clearance -- vitest run test/runtime
+npm exec --workspace @nklisch/pi-clearance -- vitest run test/replay
+npm exec --workspace @nklisch/pi-clearance -- vitest run test/skill
 ```
 
-Run the full suite before committing:
+Run the authoritative repository gate before committing:
 
 ```bash
-pnpm check
-pnpm test
-pnpm --dir . run-script lint
+npm run check
 ```
 
 Do not broad-stage `test/`. Fixture corpora are part of the safety contract; review fixture diffs carefully.

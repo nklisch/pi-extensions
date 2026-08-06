@@ -12,10 +12,10 @@
   },
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "check": "node scripts/validate-packages.mjs && npm run build --workspace @nklisch/pi-subagents --workspace @nklisch/pi-mcp-adapter --workspace @nklisch/pi-plugins && npm run typecheck --workspaces --if-present && npm test && npm run build --workspaces --if-present && node scripts/check-packs.mjs",
+    "check": "node scripts/validate-packages.mjs && npm run build:native --workspace @nklisch/pi-clearance && npm run build --workspace @nklisch/pi-subagents --workspace @nklisch/pi-mcp-adapter --workspace @nklisch/pi-plugins && npm run typecheck --workspaces --if-present && npm test && npm run build --workspaces --if-present && node scripts/check-packs.mjs",
     "create:extension": "node scripts/create-extension.mjs",
-    "publish:package": "node scripts/validate-packages.mjs && node scripts/publish-package.mjs",
-    "test": "npm run test --workspaces --if-present",
+    "publish:package": "npm run check && node scripts/publish-package.mjs",
+    "test": "node --test scripts/*.test.mjs && npm run test --workspaces --if-present",
     "validate": "node scripts/validate-packages.mjs"
   },
   "devDependencies": {

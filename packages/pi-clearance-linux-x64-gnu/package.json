@@ -1,0 +1,37 @@
+{
+  "name": "@nklisch/pi-clearance-linux-x64-gnu",
+  "version": "0.1.1",
+  "description": "Pi Clearance native engine for Linux x64 glibc",
+  "license": "MIT",
+  "author": "Nathan Klisch",
+  "keywords": [
+    "napi-rs",
+    "native-addon",
+    "linux",
+    "x64",
+    "glibc"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "clearance-core.linux-x64-gnu.node",
+  "files": [
+    "clearance-core.linux-x64-gnu.node",
+    "README.md",
+    "LICENSE"
+  ],
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nklisch/pi-extensions.git",
+    "directory": "packages/pi-clearance-linux-x64-gnu"
+  },
+  "bugs": {
+    "url": "https://github.com/nklisch/pi-extensions/issues"
+  },
+  "homepage": "https://github.com/nklisch/pi-extensions/tree/main/packages/pi-clearance#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

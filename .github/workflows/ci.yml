@@ -32,3 +32,34 @@ jobs:
           npm install --prefix packages/pi-mcp-adapter/examples/interactive-visualizer --package-lock=false --ignore-scripts
           npm run build --prefix packages/pi-mcp-adapter/examples/interactive-visualizer
       - run: npm run check
+
+  clearance-native:
+    name: Pi Clearance native (${{ matrix.artifact }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: linux-x64-gnu
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            artifact: darwin-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: npm ci
+      - name: Build native engine
+        run: npm run build:native:target --workspace @nklisch/pi-clearance -- ${{ matrix.target }}
+      - name: Exercise installed optional-package fallback
+        run: |
+          cp packages/pi-clearance/native/clearance-core.${{ matrix.artifact }}.node packages/pi-clearance-${{ matrix.artifact }}/
+          rm packages/pi-clearance/native/clearance-core.${{ matrix.artifact }}.node
+          npm test --workspace @nklisch/pi-clearance -- test/native-loader.test.ts

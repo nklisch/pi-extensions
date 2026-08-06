@@ -21,6 +21,9 @@ worst failure mode this repo can have — worse than any bug in any package.
   new packages must satisfy it before they can exist in the tree.
 - Tarball inspection (`scripts/check-packs.mjs`) runs on every check; what
   ships is reviewed as a first-class artifact, not an afterthought.
+- Platform-specific packages are derived from their root manifest, versioned
+  exactly with it, built for every declared target, and published before any
+  root package that references them.
 - Publishing is a manual workflow dispatch from `main`, never a side effect
   of merging or committing.
 

@@ -13,6 +13,9 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+const clearanceManifest = JSON.parse(
+  readFileSync(join(root, "../pi-clearance/package.json"), "utf8"),
+);
 
 // Pack through the repo's bundle-aware packer; npm pack alone drops
 // bundleDependencies inside workspaces.
@@ -43,6 +46,26 @@ for (const declaredPath of declared) {
 for (const dep of manifest.bundledDependencies ?? []) {
   const hit = [...files].some((f) => f.startsWith(`node_modules/${dep}/package.json`));
   if (!hit) failures.push(`node_modules/${dep}/package.json (bundled dependency missing)`);
+}
+
+const clearancePrefix = "node_modules/@nklisch/pi-clearance/";
+const expectedNativePackages = [
+  "@nklisch/pi-clearance-darwin-arm64",
+  "@nklisch/pi-clearance-linux-x64-gnu",
+];
+for (const nativePackage of expectedNativePackages) {
+  if (clearanceManifest.optionalDependencies?.[nativePackage] !== clearanceManifest.version) {
+    failures.push(`${nativePackage} must exactly match bundled pi-clearance ${clearanceManifest.version}`);
+  }
+  if (manifest.optionalDependencies?.[nativePackage] !== clearanceManifest.version) {
+    failures.push(`${nativePackage} must be forwarded by pi-enhanced at ${clearanceManifest.version}`);
+  }
+}
+const leakedNativeBinaries = [...files].filter(
+  (file) => file.startsWith(clearancePrefix) && file.endsWith(".node"),
+);
+if (leakedNativeBinaries.length > 0) {
+  failures.push(`pi-clearance bundle leaked host binaries: ${leakedNativeBinaries.join(", ")}`);
 }
 
 if (failures.length > 0) {

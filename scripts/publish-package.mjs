@@ -3,6 +3,11 @@ import { rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPackages } from "./package-catalog.mjs";
+import {
+  isNativePlatformPackage,
+  nativePackageDescriptors,
+  stageNativePackages,
+} from "./native-packages.mjs";
 
 const selector = process.argv[2];
 const local = process.argv.includes("--local");
@@ -14,22 +19,75 @@ if (!selector) {
 }
 
 const catalog = await loadPackages();
+const roots = catalog.filter((pkg) => !isNativePlatformPackage(pkg.manifest));
 const selected = selector === "all"
-  ? catalog
-  : catalog.filter((pkg) => pkg.directoryName === selector || pkg.manifest.name === selector);
+  ? roots
+  : roots.filter((pkg) => pkg.directoryName === selector || pkg.manifest.name === selector);
 
 if (selected.length === 0) {
-  console.error(`Unknown package: ${selector}`);
-  console.error(`Available: all, ${catalog.map((pkg) => pkg.directoryName).join(", ")}`);
+  const nativeMatch = catalog.find(
+    (pkg) =>
+      isNativePlatformPackage(pkg.manifest) &&
+      (pkg.directoryName === selector || pkg.manifest.name === selector),
+  );
+  if (nativeMatch) {
+    console.error(
+      `${selector} is published through its Pi Clearance root package so every target stays synchronized.`,
+    );
+  } else {
+    console.error(`Unknown package: ${selector}`);
+  }
+  console.error(`Available: all, ${roots.map((pkg) => pkg.directoryName).join(", ")}`);
   process.exit(2);
 }
 
 for (const pkg of selected) {
+  // Platform packages must exist before the root package advertises them as
+  // optional dependencies. Stage all targets as one set, but publish only the
+  // versions that are not already present in the registry.
+  const missingNativeNames = nativePackageDescriptors(pkg)
+    .map(({ name, version }) => ({ name, version }))
+    .filter(({ name, version }) => !isPublished(`${name}@${version}`));
+
+  let staged;
+  try {
+    if (missingNativeNames.length > 0) {
+      staged = stageNativePackages(pkg);
+      const missing = new Set(missingNativeNames.map(({ name }) => name));
+      for (const nativePkg of staged.packages) {
+        if (missing.has(nativePkg.manifest.name)) publishOne(nativePkg);
+      }
+    }
+    assertOptionalDependenciesPublished(pkg);
+    publishOne(pkg);
+  } finally {
+    staged?.cleanup();
+  }
+}
+
+function isPublished(spec) {
+  const view = spawnSync("npm", ["view", spec, "version"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return view.status === 0;
+}
+
+function assertOptionalDependenciesPublished(pkg) {
+  for (const [name, range] of Object.entries(pkg.manifest.optionalDependencies ?? {})) {
+    if (!isPublished(`${name}@${range}`)) {
+      throw new Error(
+        `${pkg.manifest.name}: optional dependency ${name}@${range} must be published first`,
+      );
+    }
+  }
+}
+
+function publishOne(pkg) {
   const spec = `${pkg.manifest.name}@${pkg.manifest.version}`;
-  const view = spawnSync("npm", ["view", spec, "version"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  if (view.status === 0) {
+  if (isPublished(spec)) {
     console.log(`${spec} is already published; skipping.`);
-    continue;
+    return;
   }
 
   console.log(`Packing ${spec} (bundle-aware)...`);
@@ -38,26 +96,31 @@ for (const pkg of selected) {
   if (pack.status !== 0) {
     process.stderr.write(pack.stdout);
     process.stderr.write(pack.stderr);
-    process.exit(pack.status ?? 1);
+    throw new Error(`packing ${spec} failed with status ${pack.status ?? 1}`);
   }
   const report = JSON.parse(pack.stdout);
   const tarball = join(pkg.directory, report[0].filename);
 
-  console.log(`Publishing ${spec} from ${pkg.directoryName}...`);
-  // Provenance statements are only generated in CI (OIDC); local first-time
-  // publishes authenticate interactively and ship without them. The flag
-  // must be explicit both ways: every package carries publishConfig
-  // .provenance=true in its manifest (validator policy for CI), which npm
-  // honors even for local publishes unless negated. --tag is explicit so
-  // prerelease versions (the forks' -nklisch.N suffixes) publish cleanly.
-  const publishArgs = ["publish", tarball, "--access", "public", "--tag", "latest"];
-  publishArgs.push(local ? "--no-provenance" : "--provenance");
-  const publish = spawnSync("npm", publishArgs, {
-    cwd: pkg.directory,
-    stdio: "inherit",
-  });
-  rmSync(tarball, { force: true });
-  if (publish.status !== 0) process.exit(publish.status ?? 1);
+  try {
+    console.log(`Publishing ${spec} from ${pkg.directoryName}...`);
+    // Provenance statements are only generated in CI (OIDC); local first-time
+    // publishes authenticate interactively and ship without them. The flag
+    // must be explicit both ways: every package carries publishConfig
+    // .provenance=true in its manifest (validator policy for CI), which npm
+    // honors even for local publishes unless negated. --tag is explicit so
+    // prerelease versions (the forks' -nklisch.N suffixes) publish cleanly.
+    const publishArgs = ["publish", tarball, "--access", "public", "--tag", "latest"];
+    publishArgs.push(local ? "--no-provenance" : "--provenance");
+    const publish = spawnSync("npm", publishArgs, {
+      cwd: pkg.directory,
+      stdio: "inherit",
+    });
+    if (publish.status !== 0) {
+      throw new Error(`publishing ${spec} failed with status ${publish.status ?? 1}`);
+    }
+  } finally {
+    rmSync(tarball, { force: true });
+  }
 
   // Fork convention: maintained-fork prereleases also carry the `maintained`
   // dist-tag (see pi-subagents/pi-mcp-adapter MAINTAINING docs). OIDC trusted
@@ -66,6 +129,8 @@ for (const pkg of selected) {
   // can be applied by hand afterward.
   if (local && pkg.manifest.version.includes("-nklisch.")) {
     const tag = spawnSync("npm", ["dist-tag", "add", spec, "maintained"], { stdio: "inherit" });
-    if (tag.status !== 0) process.exit(tag.status ?? 1);
+    if (tag.status !== 0) {
+      throw new Error(`tagging ${spec} failed with status ${tag.status ?? 1}`);
+    }
   }
 }

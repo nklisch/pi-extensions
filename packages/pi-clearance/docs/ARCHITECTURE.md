@@ -27,10 +27,14 @@ TypeScript owns Pi lifecycle, config I/O, package discovery, settings, audit, an
 - `src/runtime/config-commands/` — `/clearance mode`, setup, status, settings, packs, scope, Tune, and why.
 - `src/replay/` — TypeScript corpus acquisition and proposal/presentation adapters; replay computation is delegated to native kernels.
 
-At publish time, napi-rs stages `clearance-core.<platform>.node` into the
-`pi-clearance-linux-x64-gnu` and `pi-clearance-darwin-arm64` optional
-packages. The loader first supports the repository-local artifact for builds and
-then resolves the matching optional package. It never builds Rust during install.
+Release CI builds every declared native target on an appropriate runner, then the
+shared publishing pipeline stages `clearance-core.<platform>.node` into exact-version
+`@nklisch/pi-clearance-linux-x64-gnu` and
+`@nklisch/pi-clearance-darwin-arm64` optional packages. It publishes those
+platform packages before the root package. The root tarball contains no host-specific
+binary: the loader first supports a repository-local artifact for contributors and
+then resolves the matching scoped optional package for consumers. Installation never
+builds Rust.
 
 ## Policy and dispatch
 

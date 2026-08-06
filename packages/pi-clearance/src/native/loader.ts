@@ -186,7 +186,7 @@ export type NativeEngineStatus =
 
 const require = createRequire(import.meta.url);
 const NATIVE_MODULE_BASENAME = "clearance-core";
-const NATIVE_PACKAGE_NAME = "pi-clearance";
+const NATIVE_PACKAGE_NAME = "@nklisch/pi-clearance";
 let cachedStatus: NativeEngineStatus | undefined;
 
 /**
@@ -203,6 +203,11 @@ export function nativePlatformTriple(): string | undefined {
     return "darwin-arm64";
   }
   return undefined;
+}
+
+/** Resolve the scoped optional package produced for one supported target. */
+export function nativePlatformPackageName(triple: string): string {
+  return `${NATIVE_PACKAGE_NAME}-${triple}`;
 }
 
 /**
@@ -230,7 +235,7 @@ export function loadNativeEngine(): NativeEngineStatus {
   // the platform package without a source build or an install hook.
   const attemptedPaths = [
     join(packageRoot, "native", `${NATIVE_MODULE_BASENAME}.${triple}.node`),
-    `${NATIVE_PACKAGE_NAME}-${triple}`,
+    nativePlatformPackageName(triple),
   ];
 
   for (const modulePath of attemptedPaths) {

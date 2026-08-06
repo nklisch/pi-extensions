@@ -9,8 +9,9 @@ search, model-aware prompting, and a curated daily-driver UX set.
 pi install npm:@nklisch/pi-enhanced
 ```
 
-That's the whole setup. Everything below arrives bundled in the tarball —
-no separate installs, no version hunting.
+That's the whole setup. The Pi packages below arrive bundled, and npm installs
+the matching Pi Clearance native engine automatically. There are no separate
+install commands or versions to coordinate.
 
 ## What's inside
 

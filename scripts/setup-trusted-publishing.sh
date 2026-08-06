@@ -18,20 +18,15 @@
 # re-run this script — thereafter only the workflow publishes.
 set -u
 
+REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "${REPO_ROOT}"
+
 REPO="nklisch/pi-extensions"
 WORKFLOW_FILE="publish.yml"
-PACKAGES=(
-  "@nklisch/pi-background-tasks"
-  "@nklisch/pi-clearance"
-  "@nklisch/pi-conveniences"
-  "@nklisch/pi-enhanced"
-  "@nklisch/pi-fff-compat"
-  "@nklisch/pi-mcp-adapter"
-  "@nklisch/pi-model-modes"
-  "@nklisch/pi-plugins"
-  "@nklisch/pi-subagents"
-  "@nklisch/pi-zai-research"
-)
+# Derive the list from the same catalog and native-target model as publishing.
+# A hand-maintained list previously omitted pi-legible and every platform
+# package, leaving otherwise valid releases unable to use the workflow.
+mapfile -t PACKAGES < <(node scripts/list-publish-package-names.mjs)
 
 # Print the trust ids currently registered for a package, one per line.
 # Warns loudly when the list call itself fails (usually a fresh-2FA wall),

@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-enhanced",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Pi, enhanced — one install for nklisch's full harness: policy-gated command review, plugin marketplace, subagents, background tasks, research tools, search, model modes, and a curated UX set.",
   "author": {
     "name": "nklisch"
@@ -68,6 +68,10 @@
     "pi-catppuccin-tui": "^0.1.3",
     "pi-tool-display": "^0.5.0",
     "pi-web-access": "^0.13.0"
+  },
+  "optionalDependencies": {
+    "@nklisch/pi-clearance-darwin-arm64": "0.1.1",
+    "@nklisch/pi-clearance-linux-x64-gnu": "0.1.1"
   },
   "bundledDependencies": [
     "@ff-labs/pi-fff",
