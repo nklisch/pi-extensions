@@ -649,17 +649,6 @@
       "relationships": []
     },
     {
-      "path": ".work/active/feature-all-packages-minor-release.md",
-      "namespace": "work",
-      "kind": "feature",
-      "id": "feature-all-packages-minor-release",
-      "title": "Publish the prepared repository release",
-      "summary": null,
-      "updated": "2026-08-06",
-      "status": "active",
-      "relationships": []
-    },
-    {
       "path": ".work/active/feature-mcp-agent-surface.md",
       "namespace": "work",
       "kind": "feature",

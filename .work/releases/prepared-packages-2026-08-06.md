@@ -7,6 +7,7 @@ packages:
   - "@nklisch/pi-plugins@0.3.3"
   - "@nklisch/pi-subagents@18.1.0-nklisch.0"
 items:
+  - feature-all-packages-minor-release
   - epic-clearance-control-coherence
   - feature-clearance-control-surface
   - feature-clearance-non-bash-opt-in
@@ -51,4 +52,7 @@ The prepared adapter includes current Codex TOML MCP discovery and normalization
 - Pi plugins: 346 test files, 1,792 tests
 - package validation, native builds, bundle checks, npm pack inspection, contract generation checks, and Workbench validation
 
-Publishing uses the repository's GitHub Actions trusted-publishing workflow with npm OIDC provenance. Already-published workspace versions are skipped.
+Publishing completed through the repository's GitHub Actions trusted-publishing workflow with npm OIDC provenance. Already-published workspace versions were skipped.
+
+- Workflow run: https://github.com/nklisch/pi-extensions/actions/runs/31073493403
+- Published and registry-verified: `@nklisch/pi-clearance@0.2.0`, `@nklisch/pi-mcp-adapter@2.20.1-nklisch.0`, `@nklisch/pi-plugins@0.3.3`, and `@nklisch/pi-subagents@18.1.0-nklisch.0`.
