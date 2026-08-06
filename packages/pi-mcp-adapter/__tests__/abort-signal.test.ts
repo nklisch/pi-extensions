@@ -31,6 +31,7 @@ function connectedState(client: Record<string, unknown>) {
         ],
       ],
     ]),
+    serverInstructions: new Map(),
     failureTracker: new Map(),
     ui: undefined,
   } as any;
@@ -67,12 +68,8 @@ describe("AbortSignal propagation", () => {
 
     const result = await inFlight;
     expect(result.content[0].text).toContain("Failed to call tool: user cancelled");
-    expect(result.details.error).toBe("call_failed");
-    expect(callTool).toHaveBeenCalledWith(
-      { name: "slow", arguments: {}, _meta: undefined },
-      undefined,
-      { signal: controller.signal },
-    );
+    expect(result.details.error).toBe("aborted");
+    expect(callTool).toHaveBeenCalledWith({ name: "slow", arguments: {}, _meta: undefined }, { signal: controller.signal });
     expect(state.manager.decrementInFlight).toHaveBeenCalledWith("demo");
   });
 
@@ -87,12 +84,8 @@ describe("AbortSignal propagation", () => {
 
     const result = await inFlight;
     expect(result.content[0].text).toContain("Failed to call tool: user cancelled");
-    expect(result.details.error).toBe("call_failed");
-    expect(callTool).toHaveBeenCalledWith(
-      { name: "slow", arguments: {}, _meta: undefined },
-      undefined,
-      { signal: controller.signal },
-    );
+    expect(result.details.error).toBe("aborted");
+    expect(callTool).toHaveBeenCalledWith({ name: "slow", arguments: {}, _meta: undefined }, { signal: controller.signal });
     expect(state.manager.decrementInFlight).toHaveBeenCalledWith("demo");
   });
 
@@ -101,6 +94,7 @@ describe("AbortSignal propagation", () => {
     const state = {
       config: { mcpServers: { demo: { command: "node", args: ["server.js"] } } },
       manager: {
+        getConnection: vi.fn(() => undefined),
         connect: vi.fn(async (_name, _definition, signal?: AbortSignal) => {
           controller.abort(new Error("user cancelled"));
           signal?.throwIfAborted();
@@ -145,6 +139,9 @@ describe("AbortSignal propagation", () => {
   it("server-manager resource discovery does not swallow host aborts", async () => {
     const controller = new AbortController();
     const client = {
+      // Resource discovery is capability-gated, so the abort path is only
+      // reachable for a server that advertises `resources`.
+      getServerCapabilities: () => ({ resources: {} }),
       listResources: vi.fn(async (_params, options?: { signal?: AbortSignal }) => {
         options?.signal?.throwIfAborted();
         return { resources: [] };

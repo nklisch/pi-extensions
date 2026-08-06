@@ -2,9 +2,11 @@ import type { UiHostContext, UiResourceContent, UiResourceCsp } from "./types.ts
 
 // Use locally bundled AppBridge to avoid CDN Zod bundling issues
 const DEFAULT_APP_BRIDGE_MODULE_URL = "/app-bridge.bundle.js";
+const APP_SANDBOX = "allow-scripts allow-forms allow-modals allow-popups allow-downloads";
 
 export interface HostHtmlTemplateInput {
   sessionToken: string;
+  uiResourceToken: string;
   serverName: string;
   toolName: string;
   toolArgs: Record<string, unknown>;
@@ -17,13 +19,11 @@ export interface HostHtmlTemplateInput {
 }
 
 export function buildHostHtmlTemplate(input: HostHtmlTemplateInput): string {
-  const cspContent = buildCspMetaContent(input.resource.meta.csp);
-  const resourceHtml = applyCspMeta(input.resource.html, cspContent);
   const hostContext = input.hostContext ?? {};
 
   const sessionToken = safeInlineJSON(input.sessionToken);
+  const uiResourceToken = safeInlineJSON(input.uiResourceToken);
   const toolArgs = safeInlineJSON(input.toolArgs);
-  const uiHtml = safeInlineJSON(resourceHtml);
   const serverName = safeInlineJSON(input.serverName);
   const toolName = safeInlineJSON(input.toolName);
   const hostContextJson = safeInlineJSON(hostContext);
@@ -66,8 +66,8 @@ export function buildHostHtmlTemplate(input: HostHtmlTemplateInput): string {
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; height: 100%; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
-    body { display: flex; flex-direction: column; min-height: 100vh; }
-    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    body { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: calc(10px + env(safe-area-inset-top, 0px)) calc(14px + env(safe-area-inset-right, 0px)) 10px calc(14px + env(safe-area-inset-left, 0px)); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .title { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
     .server { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; white-space: nowrap; }
     .tool { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -78,13 +78,24 @@ export function buildHostHtmlTemplate(input: HostHtmlTemplateInput): string {
     button.primary { border-color: color-mix(in srgb, var(--good) 40%, var(--border) 60%); color: var(--good); }
     button.danger { border-color: color-mix(in srgb, var(--bad) 40%, var(--border) 60%); color: var(--bad); }
     button:hover { background: color-mix(in srgb, var(--surface) 75%, var(--accent) 25%); }
-    main { flex: 1; min-height: 0; padding: 10px; display: flex; }
+    main { flex: 1; min-height: 0; padding: 10px; padding-inline: calc(10px + env(safe-area-inset-left, 0px)) calc(10px + env(safe-area-inset-right, 0px)); padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; }
     iframe { width: 100%; height: 100%; border: 1px solid var(--border); border-radius: 10px; background: white; }
-    .overlay { position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 90%, black 10%); display: none; align-items: center; justify-content: center; z-index: 2; }
+    .overlay { position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 90%, black 10%); display: none; align-items: center; justify-content: center; z-index: 2; padding: 16px; }
     .overlay.visible { display: flex; }
     .panel { width: min(680px, calc(100vw - 40px)); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
     .panel h2 { margin: 0 0 8px; font-size: 16px; }
     .panel p { margin: 0; color: var(--muted); line-height: 1.4; font-size: 14px; white-space: pre-wrap; }
+    @media (max-width: 640px) {
+      header { align-items: stretch; flex-direction: column; gap: 8px; }
+      .title { flex-wrap: wrap; row-gap: 4px; }
+      .server { flex-basis: 100%; }
+      .controls { width: 100%; }
+      .status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      button { min-height: 44px; padding: 10px 14px; }
+      main { padding: 6px; padding-inline: calc(6px + env(safe-area-inset-left, 0px)) calc(6px + env(safe-area-inset-right, 0px)); padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); }
+      iframe { border-radius: 6px; }
+      .panel { width: 100%; }
+    }
   </style>
 </head>
 <body>
@@ -101,7 +112,7 @@ export function buildHostHtmlTemplate(input: HostHtmlTemplateInput): string {
     </div>
   </header>
   <main>
-    <iframe id="mcp-app" referrerpolicy="no-referrer"></iframe>
+    <iframe id="mcp-app" sandbox="${APP_SANDBOX}" referrerpolicy="no-referrer"></iframe>
   </main>
   <div class="overlay" id="error-overlay">
     <div class="panel">
@@ -109,10 +120,17 @@ export function buildHostHtmlTemplate(input: HostHtmlTemplateInput): string {
       <p id="error-message"></p>
     </div>
   </div>
+  <div class="overlay" id="completion-overlay">
+    <div class="panel">
+      <h2>Done</h2>
+      <p>MCP UI session finished. You can close this page and return to Pi.</p>
+    </div>
+  </div>
   <script type="module">
     import { AppBridge, PostMessageTransport } from ${moduleUrl};
 
     const SESSION_TOKEN = ${sessionToken};
+    const UI_RESOURCE_TOKEN = ${uiResourceToken};
     const SERVER_NAME = ${serverName};
     const TOOL_NAME = ${toolName};
     const TOOL_ARGS = ${toolArgs};
@@ -128,6 +146,7 @@ export function buildHostHtmlTemplate(input: HostHtmlTemplateInput): string {
     const doneBtn = document.getElementById("done-btn");
     const cancelBtn = document.getElementById("cancel-btn");
     const errorOverlay = document.getElementById("error-overlay");
+    const completionOverlay = document.getElementById("completion-overlay");
     const errorMessage = document.getElementById("error-message");
 
     document.getElementById("server-name").textContent = SERVER_NAME;
@@ -143,6 +162,26 @@ export function buildHostHtmlTemplate(input: HostHtmlTemplateInput): string {
       errorOverlay.classList.add("visible");
       setStatus("Error", true);
     };
+
+    let completionPending = false;
+    const showCompletion = () => {
+      completionOverlay.classList.add("visible");
+      setStatus("Complete");
+    };
+    const closeOrShowDone = () => {
+      completionPending = true;
+      window.close();
+      setTimeout(() => {
+        if (!document.hidden) {
+          showCompletion();
+        }
+      }, 1000);
+    };
+    document.addEventListener("visibilitychange", () => {
+      if (completionPending && !document.hidden) {
+        showCompletion();
+      }
+    });
 
     const post = async (endpoint, params) => {
       const response = await fetch(endpoint, {
@@ -201,6 +240,7 @@ export function buildHostHtmlTemplate(input: HostHtmlTemplateInput): string {
     // Also listen for raw postMessage events with custom types (notify, prompt, intent, etc.)
     // These bypass the AppBridge protocol but are used by some MCP UI implementations
     window.addEventListener("message", async (event) => {
+      if (event.source !== iframe.contentWindow) return;
       const data = event.data;
       if (!data || typeof data !== "object") return;
       
@@ -265,7 +305,7 @@ export function buildHostHtmlTemplate(input: HostHtmlTemplateInput): string {
 
     // Connect bridge BEFORE loading iframe to ensure we're listening when the app sends ui/initialize
     try {
-      const transport = new PostMessageTransport(iframe.contentWindow, null);
+      const transport = new PostMessageTransport(iframe.contentWindow, iframe.contentWindow);
       await bridge.connect(transport);
     } catch (error) {
       console.error("[host] Bridge connection failed:", error);
@@ -275,7 +315,7 @@ export function buildHostHtmlTemplate(input: HostHtmlTemplateInput): string {
     const iframeLoaded = new Promise((resolve) => {
       iframe.onload = resolve;
     });
-    iframe.src = "/ui-app?session=" + encodeURIComponent(SESSION_TOKEN);
+    iframe.src = "/ui-app?resource=" + encodeURIComponent(UI_RESOURCE_TOKEN);
     await iframeLoaded;
 
     const eventSource = new EventSource("/events?session=" + encodeURIComponent(SESSION_TOKEN));
@@ -318,7 +358,7 @@ export function buildHostHtmlTemplate(input: HostHtmlTemplateInput): string {
     eventSource.addEventListener("session-complete", async () => {
       await bridge.teardownResource({}).catch(() => {});
       eventSource.close();
-      window.close();
+      closeOrShowDone();
     });
     eventSource.onerror = () => {
       setStatus("Connection lost", true);
@@ -337,7 +377,7 @@ export function buildHostHtmlTemplate(input: HostHtmlTemplateInput): string {
       } catch {}
       clearInterval(heartbeat);
       eventSource.close();
-      window.close();
+      closeOrShowDone();
     };
 
     doneBtn.addEventListener("click", () => complete("done"));
@@ -356,48 +396,50 @@ export function buildHostHtmlTemplate(input: HostHtmlTemplateInput): string {
 </html>`;
 }
 
-export function buildCspMetaContent(csp: UiResourceCsp | undefined): string | undefined {
-  if (!csp) return undefined;
+export function buildCspMetaContent(csp: UiResourceCsp | undefined): string {
+  const resourceDomains = sanitizeCspDomains(csp?.resourceDomains);
+  const connectDomains = sanitizeCspDomains(csp?.connectDomains);
+  const frameDomains = sanitizeCspDomains(csp?.frameDomains);
+  const baseUriDomains = sanitizeCspDomains(csp?.baseUriDomains);
 
-  const directives: string[] = [];
-  directives.push("default-src 'none'");
-
-  const scriptSrc = toDirective("script-src", csp.scriptDomains);
-  const styleSrc = toDirective("style-src", csp.styleDomains);
-  const fontSrc = toDirective("font-src", csp.fontDomains);
-  const imgSrc = toDirective("img-src", csp.imgDomains);
-  const mediaSrc = toDirective("media-src", csp.mediaDomains);
-  const connectSrc = toDirective("connect-src", csp.connectDomains);
-  const frameSrc = toDirective("frame-src", csp.frameDomains);
-  const workerSrc = toDirective("worker-src", csp.workerDomains);
-  const baseUri = toDirective("base-uri", csp.baseUriDomains);
-
-  if (scriptSrc) directives.push(scriptSrc);
-  if (styleSrc) directives.push(styleSrc);
-  if (fontSrc) directives.push(fontSrc);
-  if (imgSrc) directives.push(imgSrc);
-  if (mediaSrc) directives.push(mediaSrc);
-  if (connectSrc) directives.push(connectSrc);
-  if (frameSrc) directives.push(frameSrc);
-  if (workerSrc) directives.push(workerSrc);
-  if (baseUri) directives.push(baseUri);
-
-  return directives.join("; ");
+  return [
+    "default-src 'none'",
+    `sandbox ${APP_SANDBOX}`,
+    toDirective("script-src", ["'self'", "'unsafe-inline'"], resourceDomains),
+    toDirective("style-src", ["'self'", "'unsafe-inline'"], resourceDomains),
+    toDirective("font-src", ["'self'"], resourceDomains),
+    toDirective("img-src", ["'self'", "data:"], resourceDomains),
+    toDirective("media-src", ["'self'", "data:"], resourceDomains),
+    connectDomains.length > 0
+      ? `connect-src ${connectDomains.join(" ")}`
+      : "connect-src 'none'",
+    frameDomains.length > 0
+      ? `frame-src ${frameDomains.join(" ")}`
+      : "frame-src 'none'",
+    "worker-src 'none'",
+    "object-src 'none'",
+    baseUriDomains.length > 0
+      ? `base-uri ${baseUriDomains.join(" ")}`
+      : "base-uri 'self'",
+  ].join("; ");
 }
 
-function toDirective(name: string, domains: string[] | undefined): string | null {
-  if (!domains || domains.length === 0) return null;
-  return `${name} ${domains.join(" ")}`;
+function toDirective(name: string, trustedSources: string[], domains: string[]): string {
+  return `${name} ${[...new Set([...trustedSources, ...domains])].join(" ")}`;
 }
 
-export function applyCspMeta(html: string, cspContent: string | undefined): string {
-  if (!cspContent) return html;
-  if (/http-equiv=["']Content-Security-Policy["']/i.test(html)) return html;
-  const metaTag = `<meta http-equiv="Content-Security-Policy" content="${escapeHtmlAttribute(cspContent)}">`;
-  if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/<head[^>]*>/i, (match) => `${match}\n${metaTag}`);
-  }
-  return `${metaTag}\n${html}`;
+function sanitizeCspDomains(domains: unknown): string[] {
+  if (!Array.isArray(domains)) return [];
+
+  return [...new Set(domains.filter(
+    (domain): domain is string =>
+      typeof domain === "string" &&
+      domain.length > 0 &&
+      // HTTP headers must be printable ASCII; rejecting all other code points also
+      // excludes every C0/C1 control character before Node serializes the policy.
+      /^[\x21-\x7E]+$/.test(domain) &&
+      !/[;'"]/.test(domain),
+  ))];
 }
 
 function safeInlineJSON(value: unknown): string {

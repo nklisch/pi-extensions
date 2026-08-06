@@ -4,6 +4,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    env: {
+      PI_MCP_ADAPTER_TEST_AUTH_STORE: "memory",
+    },
     include: ["__tests__/**/*.test.ts"],
     coverage: {
       provider: "v8",

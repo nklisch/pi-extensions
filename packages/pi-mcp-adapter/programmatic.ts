@@ -1,3 +1,4 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import mcpAdapter from "./index.ts";
 import { registerProgrammaticExtension } from "./programmatic-extension.ts";
 import { ProgrammaticMcpRuntime } from "./programmatic-runtime.ts";
@@ -23,7 +24,7 @@ export function createMcpAdapter(options: McpAdapterOptions = {}): McpAdapterIns
 
   return Object.freeze({
     runtime,
-    extension(pi) {
+    extension(pi: ExtensionAPI) {
       if (fileDiscovery === "enabled") {
         mcpAdapter(pi);
         registerProgrammaticExtension(pi, runtime, "mcp_sources");

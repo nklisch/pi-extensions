@@ -7,8 +7,10 @@ const mocks = vi.hoisted(() => ({
   lazyConnect: vi.fn(),
   updateServerMetadata: vi.fn(),
   updateMetadataCache: vi.fn(),
+  markKeepAliveAfterConnect: vi.fn(),
   getFailureAgeSeconds: vi.fn(),
   updateStatusBar: vi.fn(),
+  clearFailure: vi.fn(),
 }));
 
 vi.mock("../mcp-auth-flow.ts", () => ({
@@ -22,8 +24,10 @@ vi.mock("../init.ts", () => ({
   lazyConnect: mocks.lazyConnect,
   updateServerMetadata: mocks.updateServerMetadata,
   updateMetadataCache: mocks.updateMetadataCache,
+  markKeepAliveAfterConnect: mocks.markKeepAliveAfterConnect,
   getFailureAgeSeconds: mocks.getFailureAgeSeconds,
   updateStatusBar: mocks.updateStatusBar,
+  clearFailure: mocks.clearFailure,
 }));
 
 function createState(overrides: Record<string, unknown> = {}) {
@@ -36,8 +40,10 @@ function createState(overrides: Record<string, unknown> = {}) {
       },
     },
     manager: { close: vi.fn(async () => {}) },
+    oauthRuntime: { signal: new AbortController().signal },
     toolMetadata: new Map(),
     failureTracker: new Map([["demo", Date.now()]]),
+    failureMessages: new Map([["demo", "stale failure"]]),
     ...overrides,
   } as any;
 }
@@ -51,6 +57,10 @@ describe("manual OAuth proxy actions", () => {
     });
     mocks.supportsOAuth.mockReset().mockImplementation((definition) => definition.auth === "oauth");
     mocks.updateStatusBar.mockReset();
+    mocks.clearFailure.mockReset().mockImplementation((state: any, serverName: string) => {
+      state.failureTracker.delete(serverName);
+      state.failureMessages?.delete(serverName);
+    });
   });
 
   it("returns copyable instructions and authorization URL", async () => {
@@ -59,10 +69,18 @@ describe("manual OAuth proxy actions", () => {
 
     const result = await executeAuthStart(state, "demo");
 
-    expect(mocks.startAuth).toHaveBeenCalledWith("demo", "https://api.example.com/mcp", state.config.mcpServers.demo);
+    expect(mocks.startAuth).toHaveBeenCalledWith(
+      "demo",
+      "https://api.example.com/mcp",
+      state.config.mcpServers.demo,
+      { runtime: state.oauthRuntime },
+    );
     expect(result.content[0].text).toContain("Open this URL in your local browser");
     expect(result.content[0].text).toContain("https://auth.example.com/authorize");
     expect(result.content[0].text).toContain("auth-complete");
+    expect(result.content[0].text).toContain('args: { redirectUrl: "PASTE_REDIRECT_URL_HERE" }');
+    expect(result.content[0].text).toContain('args: { code: "PASTE_CODE_HERE" }');
+    expect(result.content[0].text).toContain("JSON-string args remain supported");
     expect(result.details).toMatchObject({ mode: "auth-start", server: "demo" });
   });
 
@@ -82,7 +100,11 @@ describe("manual OAuth proxy actions", () => {
 
     const result = await executeAuthComplete(state, "demo", "http://localhost:19876/callback?code=abc&state=state");
 
-    expect(mocks.completeAuthFromInput).toHaveBeenCalledWith("demo", "http://localhost:19876/callback?code=abc&state=state");
+    expect(mocks.completeAuthFromInput).toHaveBeenCalledWith(
+      "demo",
+      "http://localhost:19876/callback?code=abc&state=state",
+      { runtime: state.oauthRuntime },
+    );
     expect(state.manager.close).toHaveBeenCalledWith("demo");
     expect(state.failureTracker.has("demo")).toBe(false);
     expect(mocks.updateStatusBar).toHaveBeenCalledWith(state);

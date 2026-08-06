@@ -18,6 +18,7 @@ import {
   startAuth,
   completeAuth,
   getAuthStatus,
+  getValidToken,
   removeAuth,
   supportsOAuth,
   extractOAuthConfig,
@@ -26,7 +27,7 @@ import {
   type AuthStatus,
 } from "./mcp-auth-flow.ts"
 import { isCallbackServerRunning } from "./mcp-callback-server.ts"
-import { updateTokens, clearAllCredentials } from "./mcp-auth.ts"
+import { updateTokens, updateClientInfo, getAuthForUrl, clearAllCredentials } from "./mcp-auth.ts"
 import type { ServerEntry } from "./types.ts"
 
 describe("mcp-auth-flow", () => {
@@ -136,6 +137,45 @@ describe("mcp-auth-flow", () => {
 
       const status = await getAuthStatus("remove-test")
       assert.strictEqual(status, "not_authenticated")
+    })
+  })
+
+  describe("getValidToken", () => {
+    it("should not attempt refresh or wipe credentials when stored client info is a config-pre-registered stub", async () => {
+      const serverName = "stub-refresh-test"
+      const serverUrl = "https://stub-refresh.example.com/mcp"
+
+      // Expired tokens with a refresh token: normally getValidToken would
+      // attempt an SDK refresh.
+      await updateTokens(serverName, {
+        accessToken: "expired-token",
+        refreshToken: "refresh-token",
+        expiresAt: Date.now() / 1000 - 3600,
+      }, serverUrl)
+
+      // Secretless SEP-2352 issuer stub written for a config-pre-registered
+      // client. getValidToken builds its provider with an empty config, so
+      // this stub must not be served as client information; otherwise a
+      // refresh goes out without a client secret, the AS returns
+      // invalid_client, and the SDK invalidates stored credentials.
+      await updateClientInfo(serverName, {
+        clientId: "config-client",
+        issuer: "https://auth.example.com",
+        configPreRegistered: true,
+      }, serverUrl)
+
+      const result = await getValidToken(serverName, serverUrl)
+
+      // Bails via the "no client info" guard before any network refresh.
+      assert.strictEqual(result, null)
+
+      // Stored credentials must remain intact - nothing was invalidated.
+      const entry = await getAuthForUrl(serverName, serverUrl)
+      assert.strictEqual(entry?.tokens?.accessToken, "expired-token")
+      assert.strictEqual(entry?.tokens?.refreshToken, "refresh-token")
+      assert.strictEqual(entry?.clientInfo?.clientId, "config-client")
+
+      clearAllCredentials(serverName)
     })
   })
 
@@ -254,6 +294,25 @@ describe("mcp-auth-flow", () => {
           oauth: { clientUri: 123 as unknown as string },
         }),
         /clientUri must be a string/
+      )
+    })
+
+    it("should reject malformed OAuth authorizationParams", () => {
+      assert.throws(
+        () => extractOAuthConfig({
+          url: "https://api.example.com/mcp",
+          auth: "oauth",
+          oauth: { authorizationParams: [] as unknown as Record<string, string> },
+        }),
+        /authorizationParams must be an object/
+      )
+      assert.throws(
+        () => extractOAuthConfig({
+          url: "https://api.example.com/mcp",
+          auth: "oauth",
+          oauth: { authorizationParams: { prompt: 123 as unknown as string } },
+        }),
+        /authorizationParams\.prompt must be a string/
       )
     })
 

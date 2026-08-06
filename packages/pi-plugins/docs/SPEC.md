@@ -716,7 +716,7 @@ The system is accepted when automated tests demonstrate:
 12. Claude and Codex marketplace declarations can be adopted read-only.
 13. From an empty consumer dependency tree, the packed product installs from a
     replayed lock/SRI registry snapshot with exact receipts for
-    `@nklisch/pi-mcp-adapter@2.11.0-nklisch.10` and
+    `@nklisch/pi-mcp-adapter@2.20.1-nklisch.0` and
     `@nklisch/pi-subagents@18.0.4-nklisch.1`.
 14. One complete revision-bound production bundle proves skill discovery,
     ordinary hooks, subagent prompt injection and same-session continuation,

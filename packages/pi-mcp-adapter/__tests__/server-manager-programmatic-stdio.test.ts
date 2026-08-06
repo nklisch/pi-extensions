@@ -4,30 +4,29 @@ const mocks = vi.hoisted(() => ({
   stdioOptions: [] as Record<string, unknown>[],
 }));
 
-vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
-  Client: vi.fn().mockImplementation(() => ({
-    setRequestHandler: vi.fn(),
-    setNotificationHandler: vi.fn(),
-    connect: vi.fn(async () => undefined),
-    listTools: vi.fn(async () => ({ tools: [] })),
-    listResources: vi.fn(async () => ({ resources: [] })),
-    close: vi.fn(async () => undefined),
-  })),
-}));
-
-vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
-  StdioClientTransport: vi.fn().mockImplementation((options: Record<string, unknown>) => {
-    mocks.stdioOptions.push(options);
-    return { close: vi.fn(async () => undefined) };
-  }),
-}));
-
-vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
-  StreamableHTTPClientTransport: vi.fn(),
-}));
-
-vi.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({
+vi.mock("@modelcontextprotocol/client", () => ({
+  Client: class MockClient {
+    setRequestHandler = vi.fn();
+    setNotificationHandler = vi.fn();
+    connect = vi.fn(async () => undefined);
+    listTools = vi.fn(async () => ({ tools: [] }));
+    listResources = vi.fn(async () => ({ resources: [] }));
+    close = vi.fn(async () => undefined);
+  },
   SSEClientTransport: vi.fn(),
+  StreamableHTTPClientTransport: vi.fn(),
+  UnauthorizedError: class UnauthorizedError extends Error {},
+  SdkHttpError: class SdkHttpError extends Error {},
+}));
+
+vi.mock("@modelcontextprotocol/client/stdio", () => ({
+  StdioClientTransport: class MockStdioClientTransport {
+    close = vi.fn(async () => undefined);
+
+    constructor(options: Record<string, unknown>) {
+      mocks.stdioOptions.push(options);
+    }
+  },
 }));
 
 vi.mock("../npx-resolver.ts", () => ({
@@ -65,7 +64,7 @@ describe("McpServerManager programmatic stdio values", () => {
       args: ["--resolved"],
       cwd: "/resolved/cwd",
       env: { CALLBACK_ONLY: "resolved" },
-      stderr: "ignore",
+      stderr: "pipe",
     }]);
     expect(JSON.stringify(mocks.stdioOptions)).not.toContain("PROGRAMMATIC_PROCESS_CANARY");
     expect(connection.definition).toEqual({ requestTimeoutMs: 750 });

@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
-import type { CallToolResult, ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, ReadResourceResult, RequestOptions } from "@modelcontextprotocol/client";
 import { McpServerManager } from "./server-manager.ts";
 import { loadProgrammaticCache, saveProgrammaticCache, type ProgrammaticCachedTool } from "./programmatic-cache.ts";
+import { paginate, scoreToolMatch } from "./search-ranking.ts";
+import { isTerminatedSession } from "./session-recovery.ts";
 import type { ServerDefinition } from "./types.ts";
 import type {
   JsonValue,
@@ -31,6 +32,11 @@ const INVALID_SOURCE = "SOURCE_INVALID";
 const INVALID_SEARCH = "SEARCH_INVALID";
 const SEARCH_MAX_QUERY_LENGTH = 256;
 const SEARCH_DEFAULT_LIMIT = 25;
+const REGEX_SAFETY_CHECK_PARAMS = {
+  attackTimeout: 50,
+  incubationTimeout: 50,
+  timeout: 250,
+} as const;
 const ADAPTER_FAILED = "ADAPTER_FAILED";
 const CANCELLED = "MCP_LAUNCH_CANCELLED";
 const CLEANUP_FAILED = "MCP_LAUNCH_CLEANUP_FAILED";
@@ -47,6 +53,8 @@ interface ProgrammaticConnection {
   };
   tools: readonly { name: string; description?: string; inputSchema?: unknown }[];
   resources: readonly { uri: string; name: string; description?: string }[];
+  instructions?: string;
+  transport?: { sessionId?: string };
   status: "connected" | "closed" | "needs-auth";
 }
 
@@ -211,6 +219,13 @@ function registrationIsValid(value: unknown): value is McpSourceRegistration {
     isDigest(value.digest) && value.digest === registrationDigest(value.source);
 }
 
+function requestsUnsupportedOAuth(registration: McpSourceRegistration): boolean {
+  return Object.values(registration.source.servers).some((server) => {
+    const auth = isRecord(server.options.auth) ? server.options.auth : undefined;
+    return auth?.kind === "oauth";
+  });
+}
+
 function launchValuesAreValid(values: unknown, transport: McpSourceServer["transport"]): values is McpLaunchValues {
   if (!isRecord(values) || values.transport !== transport) return false;
   if (transport === "stdio") {
@@ -314,15 +329,13 @@ function serverDefinition(server: McpSourceServer, values: McpLaunchValues): Ser
   const options = server.options as Record<string, unknown>;
   const auth = isRecord(options.auth) ? options.auth : undefined;
   const common: ServerDefinition = {
-    requestTimeoutMs: typeof options.toolTimeoutMs === "number" ? options.toolTimeoutMs : undefined,
+    ...(typeof options.toolTimeoutMs === "number" ? { requestTimeoutMs: options.toolTimeoutMs } : {}),
     exposeResources: options.resources === false ? false : true,
     excludeTools: [
       ...(Array.isArray(options.deniedTools) ? options.deniedTools.filter((value): value is string => typeof value === "string") : []),
     ],
-    auth: auth?.kind === "oauth" ? "oauth" : auth?.kind === "bearer-environment" ? "bearer" : false,
-    oauth: auth?.kind === "oauth" ? {
-      grantType: auth.flow === "client-credentials" ? "client_credentials" : "authorization_code",
-    } : false,
+    auth: auth?.kind === "bearer-environment" ? "bearer" : false,
+    oauth: false,
   };
   if (values.transport === "stdio") {
     return {
@@ -344,7 +357,7 @@ function serverDefinition(server: McpSourceServer, values: McpLaunchValues): Ser
 function retainedDefinition(server: McpSourceServer): ServerDefinition {
   const options = server.options as Record<string, unknown>;
   return {
-    requestTimeoutMs: typeof options.toolTimeoutMs === "number" ? options.toolTimeoutMs : undefined,
+    ...(typeof options.toolTimeoutMs === "number" ? { requestTimeoutMs: options.toolTimeoutMs } : {}),
     exposeResources: options.resources === false ? false : true,
     excludeTools: Array.isArray(options.deniedTools)
       ? options.deniedTools.filter((value): value is string => typeof value === "string")
@@ -393,7 +406,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
 
   installInitialSources(initialSources: readonly McpInitialSource[]): void {
     for (const initial of initialSources) {
-      if (!registrationIsValid(initial.registration) || !providerShapeIsValid(initial)) {
+      if (!registrationIsValid(initial.registration) || requestsUnsupportedOAuth(initial.registration) || !providerShapeIsValid(initial)) {
         throw new ProgrammaticMcpError(INVALID_SOURCE);
       }
       const registration = cloneJson(initial.registration);
@@ -498,7 +511,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
     signal: AbortSignal,
   ): Promise<McpSourceValidationResult> {
     throwIfAborted(signal);
-    if (!registrationIsValid(registration)) {
+    if (!registrationIsValid(registration) || requestsUnsupportedOAuth(registration)) {
       return { ok: false, diagnostics: [invalidDiagnostic("validateMcpSource")] };
     }
     const copy = cloneJson(registration);
@@ -716,6 +729,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
     let lease: McpRuntimeLease | undefined;
     let values: McpLaunchValues | undefined;
     let connection: ProgrammaticConnection | undefined;
+    let reusedConnection = false;
     let primaryFailure: unknown;
     record.serverStatus.set(resolvedKey, { state: "connecting" });
 
@@ -728,6 +742,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
       const existing = manager.getConnection(internalKey) as ProgrammaticConnection | undefined;
       if (existing?.status === "connected") {
         connection = existing;
+        reusedConnection = true;
       } else {
         values = await record.launchValues.resolve(binding, signal);
         throwIfAborted(signal);
@@ -778,7 +793,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
     }
 
     if (primaryFailure !== undefined) {
-      if (connection !== undefined && this.manager !== undefined) {
+      if (connection !== undefined && !reusedConnection && this.manager !== undefined) {
         await this.manager.close(qualifiedServerKey(identity, resolvedKey));
       }
       record.serverStatus.set(resolvedKey, {
@@ -846,15 +861,37 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
     if ((allowed !== undefined && !allowed.has(tool)) || denied?.has(tool)) {
       throw new ProgrammaticMcpError(INVALID_SOURCE);
     }
-    const execution = await this.openExecution(record.registration.source.identity, resolvedKey, signal);
+    const invoke = (execution: ProgrammaticExecution) => execution.connection.client.callTool(
+      { name: tool, arguments: args },
+      undefined,
+      { signal: execution.signal },
+    );
+    let execution = await this.openExecution(record.registration.source.identity, resolvedKey, signal);
+    let executionClosed = false;
+    const hadSessionId = execution.connection.transport?.sessionId != null;
     try {
-      return await execution.connection.client.callTool(
-        { name: tool, arguments: args },
-        undefined,
-        { signal: execution.signal },
-      );
-    } finally {
+      return await invoke(execution);
+    } catch (error) {
+      if (!isTerminatedSession(error, hadSessionId)) throw error;
+
+      // A programmatic reconnect must reacquire late launch values rather than
+      // reusing the secret-free retained definition. Close the stale session,
+      // release this execution, then retry exactly once through openExecution.
       await execution.close(new AbortController().signal);
+      executionClosed = true;
+      const manager = this.manager;
+      if (manager === undefined) throw error;
+      await manager.close(qualifiedServerKey(record.registration.source.identity, resolvedKey));
+      throwIfAborted(signal);
+
+      execution = await this.openExecution(record.registration.source.identity, resolvedKey, signal);
+      try {
+        return await invoke(execution);
+      } finally {
+        await execution.close(new AbortController().signal);
+      }
+    } finally {
+      if (!executionClosed) await execution.close(new AbortController().signal);
     }
   }
 
@@ -882,6 +919,20 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
     }
   }
 
+  async getServerInstructions(
+    identity: McpSourceIdentity | undefined,
+    serverKey: string,
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
+    const { record, serverKey: resolvedKey } = this.recordForCall(identity, serverKey);
+    const execution = await this.openExecution(record.registration.source.identity, resolvedKey, signal);
+    try {
+      return execution.connection.instructions;
+    } finally {
+      await execution.close(new AbortController().signal);
+    }
+  }
+
   /**
    * Fan out listTools across every server in one source and filter by
    * name/description. A server that will not start is reported as
@@ -891,32 +942,41 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
   async searchTools(
     identity: McpSourceIdentity | undefined,
     query: string,
-    options: Readonly<{ regex?: boolean; limit?: number }>,
+    options: Readonly<{ regex?: boolean; limit?: number; offset?: number }>,
     signal: AbortSignal,
   ): Promise<Readonly<{
     matches: readonly Readonly<{ server: string; nativeKey: string; name: string; description?: string }>[];
     unavailableServers: readonly string[];
+    total: number;
+    hasMore: boolean;
+    nextOffset: number | null;
   }>> {
     throwIfAborted(signal);
     if (typeof query !== "string" || query.length === 0 || query.length > SEARCH_MAX_QUERY_LENGTH) {
       throw new ProgrammaticMcpError(INVALID_SEARCH);
     }
+    const limit = options.limit ?? SEARCH_DEFAULT_LIMIT;
+    const offset = options.offset ?? 0;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0) {
+      throw new ProgrammaticMcpError(INVALID_SEARCH);
+    }
     const records = identity === undefined ? [...this.records.values()] : [this.recordFor(identity)];
-    let matcher: (text: string) => boolean;
+    let regex: RegExp | undefined;
     if (options.regex === true) {
-      let pattern: RegExp;
       try {
-        pattern = new RegExp(query, "iu");
-      } catch {
+        const { checkSync } = await import("recheck");
+        const safety = checkSync(query, "iu", REGEX_SAFETY_CHECK_PARAMS);
+        if (safety.status !== "safe") throw new ProgrammaticMcpError(INVALID_SEARCH);
+        regex = new RegExp(query, "iu");
+      } catch (error) {
+        if (error instanceof ProgrammaticMcpError) throw error;
         throw new ProgrammaticMcpError(INVALID_SEARCH);
       }
-      matcher = (text) => pattern.test(text);
-    } else {
-      const needle = query.toLocaleLowerCase("en-US");
-      matcher = (text) => text.toLocaleLowerCase("en-US").includes(needle);
     }
-    const limit = options.limit ?? SEARCH_DEFAULT_LIMIT;
-    const matches: { server: string; nativeKey: string; name: string; description?: string }[] = [];
+    const ranked: Array<{
+      match: { server: string; nativeKey: string; name: string; description?: string };
+      score: number;
+    }> = [];
     const unavailableServers: string[] = [];
     for (const record of records) {
       for (const key of Object.keys(record.registration.source.servers).sort(compareText)) {
@@ -929,18 +989,35 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
           continue;
         }
         for (const tool of tools) {
-          if (!matcher(tool.name) && !(tool.description !== undefined && matcher(tool.description))) continue;
-          matches.push({
-            server: key,
-            nativeKey: record.registration.source.servers[key]!.nativeKey,
-            name: tool.name,
-            ...(tool.description === undefined ? {} : { description: tool.description }),
+          const description = tool.description ?? "";
+          const score = regex === undefined
+            ? scoreToolMatch({ name: tool.name, originalName: tool.name, description }, key, query)
+            : (regex.test(tool.name) || regex.test(description) ? 0 : null);
+          if (score === null) continue;
+          ranked.push({
+            match: {
+              server: key,
+              nativeKey: record.registration.source.servers[key]!.nativeKey,
+              name: tool.name,
+              ...(tool.description === undefined ? {} : { description: tool.description }),
+            },
+            score,
           });
-          if (matches.length >= limit) return Object.freeze({ matches: Object.freeze(matches), unavailableServers: Object.freeze(unavailableServers) });
         }
       }
     }
-    return Object.freeze({ matches: Object.freeze(matches), unavailableServers: Object.freeze(unavailableServers) });
+    ranked.sort((left, right) =>
+      right.score - left.score ||
+      compareText(left.match.name, right.match.name) ||
+      compareText(left.match.server, right.match.server));
+    const page = paginate(ranked.map((entry) => entry.match), offset, limit);
+    return Object.freeze({
+      matches: Object.freeze(page.items),
+      unavailableServers: Object.freeze(unavailableServers),
+      total: page.total,
+      hasMore: page.hasMore,
+      nextOffset: page.nextOffset,
+    });
   }
 
   private ensureInventoryLoaded(): void {

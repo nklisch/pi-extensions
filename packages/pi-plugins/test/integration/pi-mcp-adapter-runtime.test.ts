@@ -18,7 +18,7 @@ import {
 } from "../support/pi-mcp-adapter-fixture.js";
 
 const EXPECTED_PACKAGE = "@nklisch/pi-mcp-adapter";
-const EXPECTED_VERSION = "2.11.0-nklisch.10";
+const EXPECTED_VERSION = "2.20.1-nklisch.0";
 const EXPECTED_LICENSE_SHA256 = "2d20dfacd9742706e564470dc77438608a1e54b0ed46959f080709389209093c";
 const fixtureServer = fileURLToPath(new URL("../fixtures/mcp/stdio-server.mjs", import.meta.url));
 const roots: string[] = [];
@@ -135,7 +135,7 @@ describe("published Pi MCP adapter boundary", () => {
       version: EXPECTED_VERSION,
       license: "MIT",
       engines: { node: ">=22.19.0" },
-      peerDependencies: { "@earendil-works/pi-coding-agent": ">=0.79.1 <1" },
+      peerDependencies: { "@earendil-works/pi-coding-agent": ">=0.82.0 <1" },
       exports: {
         ".": { types: "./dist/index.d.ts", import: "./dist/index.js" },
         "./programmatic": { types: "./dist/programmatic.d.ts", import: "./dist/programmatic.js" },
@@ -208,7 +208,7 @@ describe("published Pi MCP adapter boundary", () => {
       packageName: EXPECTED_PACKAGE,
       version: EXPECTED_VERSION,
       nodeEngine: ">=22.19.0",
-      piPeerRange: ">=0.79.1 <1",
+      piPeerRange: ">=0.82.0 <1",
       contractVersion: 1,
     });
     expect(Object.values(capabilities.sourceLifecycle).every(Boolean)).toBe(true);

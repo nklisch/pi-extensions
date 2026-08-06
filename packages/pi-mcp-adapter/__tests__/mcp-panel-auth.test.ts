@@ -21,10 +21,13 @@ function createCache(config: McpConfig): MetadataCache {
   };
 }
 
-function createCallbacks(status: "connected" | "idle" | "failed" | "needs-auth" = "needs-auth") {
+function createCallbacks(status: "connected" | "idle" | "failed" | "needs-auth" | "disabled" = "needs-auth") {
   let currentStatus = status;
   const callbacks: McpPanelCallbacks = {
-    reconnect: async () => true,
+    reconnect: vi.fn(async () => {
+      currentStatus = "connected";
+      return true;
+    }),
     canAuthenticate: (serverName) => serverName === "github",
     authenticate: vi.fn(async () => {
       currentStatus = "idle";
@@ -80,6 +83,82 @@ describe("mcp-panel auth actions", () => {
     panel.dispose();
   });
 
+  it("ignores the auth shortcut for a disabled server", async () => {
+    const config: McpConfig = {
+      mcpServers: {
+        github: { url: "https://api.githubcopilot.com/mcp", auth: "oauth", disabled: true },
+      },
+    };
+    const callbacks = createCallbacks("disabled");
+    const panel = createMcpPanel(config, createCache(config), new Map(), callbacks, { requestRender: () => {} }, () => {});
+
+    panel.handleInput("\x01");
+    await Promise.resolve();
+
+    expect(callbacks.authenticate).not.toHaveBeenCalled();
+    panel.dispose();
+  });
+
+  it("automatically reconnects after successful OAuth", async () => {
+    const config: McpConfig = {
+      mcpServers: {
+        github: { url: "https://api.githubcopilot.com/mcp", auth: "oauth" },
+      },
+    };
+    const callbacks = createCallbacks("needs-auth");
+    const panel = createMcpPanel(config, null, new Map(), callbacks, { requestRender: () => {} }, () => {});
+
+    panel.handleInput("\r");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(callbacks.authenticate).toHaveBeenCalledWith("github");
+    expect(callbacks.reconnect).toHaveBeenCalledWith("github");
+    const output = stripAnsi(panel.render(100).join("\n"));
+    expect(output).toContain("OAuth finished for github. Reconnected.");
+    expect(output).toContain("connected");
+    panel.dispose();
+  });
+
+  it("shows a retry notice when OAuth succeeds but reconnect does not", async () => {
+    const config: McpConfig = {
+      mcpServers: {
+        github: { url: "https://api.githubcopilot.com/mcp", auth: "oauth" },
+      },
+    };
+    const callbacks = createCallbacks("needs-auth");
+    callbacks.reconnect = vi.fn(async () => false);
+    callbacks.getConnectionStatus = () => "needs-auth";
+    const panel = createMcpPanel(config, null, new Map(), callbacks, { requestRender: () => {} }, () => {});
+
+    panel.handleInput("\r");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(callbacks.authenticate).toHaveBeenCalledWith("github");
+    expect(callbacks.reconnect).toHaveBeenCalledWith("github");
+    const output = stripAnsi(panel.render(100).join("\n"));
+    expect(output).toContain("OAuth finished for github, but reconnect did not complete. Press ctrl+r to retry.");
+    panel.dispose();
+  });
+
+  it("uses the reconnect callback for ctrl+r", async () => {
+    const config: McpConfig = {
+      mcpServers: {
+        github: { url: "https://api.githubcopilot.com/mcp", auth: "oauth" },
+      },
+    };
+    const callbacks = createCallbacks("idle");
+    const panel = createMcpPanel(config, createCache(config), new Map(), callbacks, { requestRender: () => {} }, () => {});
+
+    panel.handleInput("\x12");
+    await Promise.resolve();
+
+    expect(callbacks.reconnect).toHaveBeenCalledWith("github");
+    expect(callbacks.authenticate).not.toHaveBeenCalled();
+    panel.dispose();
+  });
+
   it("shows concrete auth failure messages in the panel", async () => {
     const config: McpConfig = {
       mcpServers: {
@@ -95,6 +174,7 @@ describe("mcp-panel auth actions", () => {
 
     const output = stripAnsi(panel.render(100).join("\n"));
     expect(output).toContain("OAuth failed for github: browser launch failed");
+    expect(callbacks.reconnect).not.toHaveBeenCalled();
     panel.dispose();
   });
 

@@ -1,9 +1,15 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { buildProxyDescription, resolveDirectTools } from "../direct-tools.ts";
-import { computeServerHash, isServerCacheValid, type MetadataCache } from "../metadata-cache.ts";
+import { DIRECT_TOOLS_ADVISORY_THRESHOLD, buildProxyDescription, resolveDirectTools } from "../direct-tools.ts";
+import {
+  computeServerHash,
+  getMissingConfiguredDirectToolServers,
+  isServerCacheValid,
+  type MetadataCache,
+} from "../metadata-cache.ts";
 import { buildToolMetadata } from "../tool-metadata.ts";
+import { formatToolName } from "../types.ts";
 import type { McpConfig } from "../types.ts";
 import { reconstructToolMetadata } from "../metadata-cache.ts";
 
@@ -12,9 +18,11 @@ const originalHashEnv = {
   MCP_HASH_ENV: process.env.MCP_HASH_ENV,
   MCP_HASH_HEADER: process.env.MCP_HASH_HEADER,
   MCP_HASH_TOKEN: process.env.MCP_HASH_TOKEN,
+  MCP_HASH_URL: process.env.MCP_HASH_URL,
 };
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const [key, value] of Object.entries(originalHashEnv)) {
     if (value === undefined) {
       delete process.env[key];
@@ -22,6 +30,15 @@ afterEach(() => {
       process.env[key] = value;
     }
   }
+});
+
+describe("formatToolName", () => {
+  it("sanitizes dotted MCP tool names for every prefix mode", () => {
+    expect(formatToolName("namespace.tool", "demo", "server")).toBe("demo_namespace_tool");
+    expect(formatToolName("namespace.tool", "demo-mcp", "short")).toBe("demo_namespace_tool");
+    expect(formatToolName("namespace.tool", "demo", "none")).toBe("namespace_tool");
+    expect(formatToolName("namespace.tool", "demo-mcp", "mcp")).toBe("mcp__demo_mcp_namespace_tool");
+  });
 });
 
 describe("buildProxyDescription", () => {
@@ -57,6 +74,8 @@ describe("buildProxyDescription", () => {
 
     expect(description).toContain('mcp({ action: "ui-messages" })');
     expect(description).toContain("Retrieve accumulated messages from completed UI sessions");
+    expect(description).toContain("server status, tool search/describe, auth, and single MCP tool calls");
+    expect(description).toContain("When one request needs several MCP calls with logic between them, use mcpScript.");
     expect(description).toContain("Search MCP tools by name/description");
     expect(description).toContain("Non-MCP Pi tools should be called directly, not through mcp.");
     expect(description).not.toContain("MCP + pi");
@@ -69,7 +88,7 @@ describe("buildProxyDescription", () => {
         figma: {
           command: "npx",
           args: ["-y", "figma"],
-          excludeTools: ["get_figjam", "figma_get_screenshot"],
+          excludeTools: ["read_figjam", "figma_get_screenshot"],
         },
       },
     };
@@ -96,9 +115,126 @@ describe("buildProxyDescription", () => {
     expect(description).toContain("Servers: figma (1 tools)");
     expect(description).not.toContain("figma (3 tools)");
   });
+
+  it("includes a truncated instructions snippet for servers that provide one", () => {
+    const config: McpConfig = {
+      mcpServers: {
+        demo: { command: "npx", args: ["-y", "demo-server"] },
+      },
+    };
+
+    const cache: MetadataCache = {
+      version: 1,
+      servers: {
+        demo: {
+          configHash: "hash",
+          cachedAt: Date.now(),
+          tools: [{ name: "read_skill", description: "Read a skill" }],
+          resources: [],
+          instructions: `Skills catalog.\n\nAvailable skills:\n${Array.from({ length: 30 }, (_, i) => `- skill-${i}: does thing ${i}`).join("\n")}`,
+        },
+      },
+    };
+
+    const description = buildProxyDescription(config, cache, []);
+
+    expect(description).toContain('Server instructions (truncated - full text via mcp({ instructions: "name" })):');
+    expect(description).toContain("demo: Skills catalog. Available skills: - skill-0:");
+    expect(description).toContain("...");
+    expect(description).not.toContain("skill-29");
+  });
+
+  it("omits the instructions section when no server provides instructions", () => {
+    const config: McpConfig = {
+      mcpServers: {
+        demo: { command: "npx", args: ["-y", "demo-server"] },
+      },
+    };
+
+    const cache: MetadataCache = {
+      version: 1,
+      servers: {
+        demo: {
+          configHash: "hash",
+          cachedAt: Date.now(),
+          tools: [{ name: "read_skill", description: "Read a skill" }],
+          resources: [],
+        },
+      },
+    };
+
+    const description = buildProxyDescription(config, cache, []);
+
+    expect(description).not.toContain("Server instructions");
+    expect(description).toContain('mcp({ instructions: "name" })');
+  });
 });
 
 describe("metadata cache hashing", () => {
+  it("invalidates metadata when the protocol era changes", () => {
+    const legacy = computeServerHash({ command: "node" });
+    const automatic = computeServerHash({ command: "node", protocolVersion: "auto" });
+    const modern = computeServerHash({ command: "node", protocolVersion: "2026-07-28" });
+
+    expect(new Set([legacy, automatic, modern]).size).toBe(3);
+  });
+
+  it("hashes interpolated URLs", () => {
+    process.env.MCP_HASH_URL = "https://one.example.test/mcp";
+    const first = computeServerHash({ url: "${MCP_HASH_URL}" });
+
+    process.env.MCP_HASH_URL = "https://two.example.test/mcp";
+    const second = computeServerHash({ url: "${MCP_HASH_URL}" });
+
+    expect(first).not.toBe(second);
+    expect(computeServerHash({ url: "${MCP_HASH_URL}" })).toBe(
+      computeServerHash({ url: "https://two.example.test/mcp" }),
+    );
+  });
+
+  it("does not hash URL placeholders with missing environment variables", () => {
+    delete process.env.MCP_HASH_URL;
+
+    expect(() => computeServerHash({ url: "https://${MCP_HASH_URL}/mcp" })).toThrow(
+      "Missing environment variable in MCP server URL: MCP_HASH_URL",
+    );
+  });
+
+  it("treats cached URL placeholders with missing environment variables as cache misses", () => {
+    delete process.env.MCP_HASH_URL;
+
+    expect(isServerCacheValid({
+      configHash: "cached",
+      cachedAt: Date.now(),
+      tools: [],
+      resources: [],
+    }, { url: "https://${MCP_HASH_URL}/mcp" })).toBe(false);
+  });
+
+  it("skips cached direct tools when URL placeholders are missing", () => {
+    delete process.env.MCP_HASH_URL;
+
+    const config: McpConfig = {
+      settings: { directTools: true },
+      mcpServers: {
+        remote: { url: "https://${MCP_HASH_URL}/mcp" },
+      },
+    };
+    const cache: MetadataCache = {
+      version: 1,
+      servers: {
+        remote: {
+          configHash: "cached",
+          cachedAt: Date.now(),
+          tools: [{ name: "search", inputSchema: { type: "object" } }],
+          resources: [],
+        },
+      },
+    };
+
+    expect(resolveDirectTools(config, cache, "server")).toEqual([]);
+  });
+
   it("hashes interpolated cwd", () => {
     process.env.MCP_HASH_CWD = "/tmp/mcp-one";
     const first = computeServerHash({ command: "node", cwd: "${MCP_HASH_CWD}/server" });
@@ -188,12 +324,42 @@ describe("metadata cache hashing", () => {
   });
 });
 
+describe("direct tool metadata bootstrap", () => {
+  it("includes env-selected servers without config-level direct tool settings", () => {
+    const config: McpConfig = {
+      mcpServers: {
+        selected: { command: "selected-server" },
+        cached: { command: "cached-server" },
+        other: { command: "other-server" },
+        disabled: { command: "disabled-server", disabled: true },
+      },
+    };
+    const cache: MetadataCache = {
+      version: 1,
+      servers: {
+        cached: {
+          configHash: computeServerHash(config.mcpServers.cached),
+          cachedAt: Date.now(),
+          tools: [],
+          resources: [],
+        },
+      },
+    };
+
+    expect(getMissingConfiguredDirectToolServers(
+      config,
+      cache,
+      ["selected/search", "cached", "disabled"],
+    )).toEqual(["selected"]);
+  });
+});
+
 describe("excludeTools filtering", () => {
   it("filters excluded tools from live and cached metadata", () => {
     const definition = {
       command: "npx",
       args: ["-y", "figma"],
-      excludeTools: ["figma_get_screenshot", "get_figjam"],
+      excludeTools: ["figma_get_screenshot", "read_figjam"],
     };
 
     const { metadata } = buildToolMetadata(
@@ -229,6 +395,111 @@ describe("excludeTools filtering", () => {
     expect(reconstructed.map((tool) => tool.name)).toEqual(["figma_get_nodes"]);
   });
 
+  it("filters included tools from live and cached metadata before applying exclusions", () => {
+    const definition = {
+      command: "npx",
+      args: ["-y", "figma"],
+      includeTools: ["get_node*", "figma_read_figjam"],
+      excludeTools: ["get_nodes_secret"],
+    };
+
+    const tools = [
+      { name: "get_screenshot", description: "Screenshot" },
+      { name: "get_nodes", description: "Nodes" },
+      { name: "get_nodes_secret", description: "Secret nodes" },
+    ];
+    const resources = [{ name: "figjam", uri: "ui://figjam", description: "FigJam" }];
+
+    const { metadata } = buildToolMetadata(tools as any, resources as any, definition, "figma", "server");
+
+    expect(metadata.map((tool) => tool.name)).toEqual(["figma_get_nodes", "figma_read_figjam"]);
+
+    const reconstructed = reconstructToolMetadata(
+      "figma",
+      {
+        configHash: computeServerHash(definition),
+        cachedAt: Date.now(),
+        tools,
+        resources,
+      },
+      "server",
+      definition,
+    );
+
+    expect(reconstructed.map((tool) => tool.name)).toEqual(["figma_get_nodes", "figma_read_figjam"]);
+  });
+
+  it("honors per-server toolPrefix while building live metadata", () => {
+    const { metadata } = buildToolMetadata(
+      [{ name: "search", description: "Search" }] as any,
+      [],
+      { command: "npx", args: ["-y", "github"], toolPrefix: "none" },
+      "github",
+      "server",
+    );
+
+    expect(metadata.map((tool) => tool.name)).toEqual(["search"]);
+  });
+
+  it("sanitizes registered names while preserving raw MCP names", () => {
+    const { metadata } = buildToolMetadata(
+      [{ name: "namespace.tool", description: "Namespaced tool" }] as any,
+      [],
+      { command: "npx", args: ["-y", "demo"] },
+      "demo",
+      "server",
+    );
+
+    expect(metadata).toEqual([
+      expect.objectContaining({
+        name: "demo_namespace_tool",
+        originalName: "namespace.tool",
+      }),
+    ]);
+  });
+
+  it("keeps the first raw tool when sanitized live metadata names collide", () => {
+    const { metadata } = buildToolMetadata(
+      [
+        { name: "namespace.tool", description: "Dotted" },
+        { name: "namespace_tool", description: "Underscored" },
+        { name: "read_namespace.tool", description: "Tool before colliding resource" },
+      ] as any,
+      [{ name: "namespace.tool", uri: "ui://namespace.tool", description: "Resource" }] as any,
+      { command: "npx", args: ["-y", "demo"] },
+      "demo",
+      "server",
+    );
+
+    expect(metadata.map((tool) => [tool.name, tool.originalName, tool.description])).toEqual([
+      ["demo_namespace_tool", "namespace.tool", "Dotted"],
+      ["demo_read_namespace_tool", "read_namespace.tool", "Tool before colliding resource"],
+    ]);
+  });
+
+  it("keeps the first raw tool when sanitized cached metadata names collide", () => {
+    const reconstructed = reconstructToolMetadata(
+      "demo",
+      {
+        configHash: "hash",
+        cachedAt: Date.now(),
+        tools: [
+          { name: "namespace.tool", description: "Dotted" },
+          { name: "namespace_tool", description: "Underscored" },
+          { name: "read_namespace.tool", description: "Tool before colliding resource" },
+        ],
+        resources: [{ name: "namespace.tool", uri: "ui://namespace.tool", description: "Resource" }],
+      },
+      "server",
+      { command: "npx", args: ["-y", "demo"] },
+    );
+
+    expect(reconstructed.map((tool) => [tool.name, tool.originalName, tool.description])).toEqual([
+      ["demo_namespace_tool", "namespace.tool", "Dotted"],
+      ["demo_read_namespace_tool", "read_namespace.tool", "Tool before colliding resource"],
+    ]);
+  });
+
   it("filters excluded tools during direct tool registration from cache", () => {
     const config: McpConfig = {
       settings: { toolPrefix: "server" },
@@ -237,7 +508,7 @@ describe("excludeTools filtering", () => {
           command: "npx",
           args: ["-y", "figma"],
           directTools: true,
-          excludeTools: ["figma_get_screenshot", "get_figjam"],
+          excludeTools: ["figma_get_screenshot", "read_figjam"],
         },
       },
     };
@@ -262,6 +533,137 @@ describe("excludeTools filtering", () => {
     const specs = resolveDirectTools(config, cache, "server");
 
     expect(specs.map((spec) => spec.prefixedName)).toEqual(["figma_get_nodes"]);
+  });
+
+  it("honors per-server toolPrefix during direct tool registration from cache", () => {
+    const config: McpConfig = {
+      settings: { toolPrefix: "none" },
+      mcpServers: {
+        github: {
+          command: "npx",
+          args: ["-y", "github"],
+          directTools: true,
+          toolPrefix: "server",
+        },
+      },
+    };
+
+    const cache: MetadataCache = {
+      version: 1,
+      servers: {
+        github: {
+          configHash: computeServerHash(config.mcpServers.github),
+          cachedAt: Date.now(),
+          tools: [{ name: "search", description: "Search" }],
+          resources: [],
+        },
+      },
+    };
+
+    const specs = resolveDirectTools(config, cache, "none");
+
+    expect(specs.map((spec) => spec.prefixedName)).toEqual(["github_search"]);
+  });
+
+  it("warns without capping when resolved direct tools exceed the README threshold", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const tools = Array.from({ length: DIRECT_TOOLS_ADVISORY_THRESHOLD }, (_, index) => ({
+      name: `tool_${index}`,
+      description: `Tool ${index}`,
+    }));
+    const config: McpConfig = {
+      mcpServers: {
+        huge: {
+          command: "npx",
+          args: ["-y", "huge"],
+          directTools: true,
+        },
+      },
+    };
+    const cache: MetadataCache = {
+      version: 1,
+      servers: {
+        huge: {
+          configHash: computeServerHash(config.mcpServers.huge),
+          cachedAt: Date.now(),
+          tools,
+          resources: [],
+        },
+      },
+    };
+
+    const specs = resolveDirectTools(config, cache, "server");
+
+    expect(specs).toHaveLength(DIRECT_TOOLS_ADVISORY_THRESHOLD);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("75+ direct tools"));
+  });
+
+  it("filters included tools during direct tool registration from cache", () => {
+    const config: McpConfig = {
+      settings: { toolPrefix: "server" },
+      mcpServers: {
+        figma: {
+          command: "npx",
+          args: ["-y", "figma"],
+          directTools: true,
+          includeTools: ["get_node*", "figma_read_figjam"],
+          excludeTools: ["get_nodes_secret"],
+        },
+      },
+    };
+
+    const cache: MetadataCache = {
+      version: 1,
+      servers: {
+        figma: {
+          configHash: computeServerHash(config.mcpServers.figma),
+          cachedAt: Date.now(),
+          tools: [
+            { name: "get_screenshot", description: "Screenshot" },
+            { name: "get_nodes", description: "Nodes" },
+            { name: "get_nodes_secret", description: "Secret nodes" },
+          ],
+          resources: [{ name: "figjam", uri: "ui://figjam", description: "FigJam" }],
+        },
+      },
+    };
+
+    const specs = resolveDirectTools(config, cache, "server");
+
+    expect(specs.map((spec) => spec.prefixedName)).toEqual(["figma_get_nodes", "figma_read_figjam"]);
+  });
+
+  it("matches mcp-prefixed exclusions when toolPrefix is mcp", () => {
+    const config: McpConfig = {
+      settings: { toolPrefix: "mcp" },
+      mcpServers: {
+        "my-server": {
+          command: "npx",
+          args: ["-y", "my-server"],
+          directTools: true,
+          excludeTools: ["mcp__my_server_do_thing"],
+        },
+      },
+    };
+
+    const cache: MetadataCache = {
+      version: 1,
+      servers: {
+        "my-server": {
+          configHash: computeServerHash(config.mcpServers["my-server"]),
+          cachedAt: Date.now(),
+          tools: [
+            { name: "do_thing", description: "Does a thing" },
+            { name: "other_tool", description: "Another tool" },
+          ],
+          resources: [],
+        },
+      },
+    };
+
+    const specs = resolveDirectTools(config, cache, "mcp");
+
+    expect(specs.map((spec) => spec.prefixedName)).toEqual(["mcp__my_server_other_tool"]);
   });
 
   it("matches prefixed exclusions even when toolPrefix is none", () => {

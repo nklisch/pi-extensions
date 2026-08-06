@@ -76,18 +76,24 @@ function formatSearch(
   result: Readonly<{
     matches: readonly Readonly<{ server: string; nativeKey?: string; name: string; description?: string }>[];
     unavailableServers: readonly string[];
+    total: number;
+    hasMore: boolean;
+    nextOffset: number | null;
   }>,
 ): string {
   const lines: string[] = [];
   if (result.matches.length === 0) lines.push(`No tools matching "${oneLine(query, 48)}".`);
   else {
-    lines.push(`${result.matches.length} tool${result.matches.length === 1 ? "" : "s"} matching "${oneLine(query, 48)}":`);
+    lines.push(`${result.matches.length} of ${result.total} tool${result.total === 1 ? "" : "s"} matching "${oneLine(query, 48)}":`);
     for (const match of result.matches) {
       const description = oneLine(match.description, 64);
       // Show the human-readable native key; the opaque source-local key stays
       // available in details for callers that need exact addressing.
       lines.push(`- ${match.nativeKey ?? match.server} · ${match.name}${description.length === 0 ? "" : ` — ${description}`}`);
     }
+  }
+  if (result.hasMore && result.nextOffset !== null) {
+    lines.push(`More matches available; repeat with offset: ${result.nextOffset}.`);
   }
   if (result.unavailableServers.length > 0) {
     lines.push(`(${result.unavailableServers.length} server${result.unavailableServers.length === 1 ? "" : "s"} couldn't be searched: ${result.unavailableServers.join(", ")})`);
@@ -242,7 +248,7 @@ export function registerProgrammaticExtension(
   (pi.registerTool as (tool: unknown) => unknown)({
     name: toolName,
     label: toolName === "mcp" ? "MCP" : "MCP Sources",
-    description: "Source-qualified MCP gateway for programmatic configuration sources — discover servers (status/list/search), load exact input schemas (schema), and call tools (call)",
+    description: "Source-qualified MCP gateway for programmatic configuration sources — discover servers (status/list/search), read server instructions, load exact input schemas (schema), and call tools (call)",
     promptSnippet: "MCP gateway for isolated programmatic sources",
     renderCall: renderMcpProxyToolCall,
     renderResult: renderMcpToolResult,
@@ -256,6 +262,7 @@ export function registerProgrammaticExtension(
         Type.Literal("capabilities"),
         Type.Literal("list"),
         Type.Literal("search"),
+        Type.Literal("instructions"),
         Type.Literal("schema"),
         Type.Literal("call"),
       ])),
@@ -271,18 +278,22 @@ export function registerProgrammaticExtension(
       ], { description: "Native MCP tool name — or an array of names to batch the schema action" })),
       args: Type.Optional(Type.String({ description: "Tool arguments encoded as a JSON object" })),
       query: Type.Optional(Type.String({ description: "Search text for tool names/descriptions" })),
-      regex: Type.Optional(Type.Boolean({ description: "Treat query as a regular expression (default: substring match)" })),
+      regex: Type.Optional(Type.Boolean({ description: "Treat query as a regular expression (default: ranked text match)" })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, description: "Maximum search matches to return (default: 25)" })),
+      offset: Type.Optional(Type.Integer({ minimum: 0, description: "Search result offset for pagination (default: 0)" })),
     }),
     async execute(
       _toolCallId: string,
       params: {
-        action?: "status" | "capabilities" | "list" | "search" | "schema" | "call";
+        action?: "status" | "capabilities" | "list" | "search" | "instructions" | "schema" | "call";
         source?: string;
         server?: string;
         tool?: string | string[];
         args?: string;
         query?: string;
         regex?: boolean;
+        limit?: number;
+        offset?: number;
       },
       signal?: AbortSignal,
     ) {
@@ -301,12 +312,19 @@ export function registerProgrammaticExtension(
         const identity = parseIdentity(params.source);
         if (action === "search") {
           if (params.query === undefined || params.query.length === 0) throw new Error("query is required for search");
-          const result = await runtime.searchTools(identity, params.query, { regex: params.regex === true }, operationSignal);
+          const result = await runtime.searchTools(identity, params.query, {
+            regex: params.regex === true,
+            ...(params.limit === undefined ? {} : { limit: params.limit }),
+            ...(params.offset === undefined ? {} : { offset: params.offset }),
+          }, operationSignal);
           return textResult(formatSearch(params.query, result), {
             mode: "search",
             query: params.query,
             matches: result.matches.map((match) => ({ server: match.server, name: match.name })),
             count: result.matches.length,
+            total: result.total,
+            hasMore: result.hasMore,
+            nextOffset: result.nextOffset,
             unavailableServers: result.unavailableServers,
           });
         }
@@ -317,6 +335,17 @@ export function registerProgrammaticExtension(
             formatToolList(params.server, tools, toolName),
             { mode: "list", server: params.server, tools: tools.map((tool) => ({ name: tool.name })), count: tools.length },
           );
+        }
+        if (action === "instructions") {
+          const instructions = await runtime.getServerInstructions(identity, params.server, operationSignal);
+          const guarded = await guardMcpOutput(
+            [{ type: "text" as const, text: instructions ?? `Server "${params.server}" did not provide instructions.` }],
+            resolveMcpOutputGuardOptions(),
+          );
+          return {
+            content: guarded.content,
+            details: { mode: "instructions", server: params.server, available: instructions !== undefined, ...guardedMcpDetails(guarded) },
+          };
         }
         if (action === "schema") {
           if (params.tool === undefined) throw new Error("tool name(s) are required for the schema action");

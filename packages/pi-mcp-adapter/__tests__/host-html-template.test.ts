@@ -4,6 +4,7 @@ import { buildHostHtmlTemplate, type HostHtmlTemplateInput } from "../host-html-
 function createMinimalInput(overrides: Partial<HostHtmlTemplateInput> = {}): HostHtmlTemplateInput {
   return {
     sessionToken: "test-token-123",
+    uiResourceToken: "resource-token-456",
     serverName: "test-server",
     toolName: "test-tool",
     toolArgs: { arg1: "value1" },
@@ -52,7 +53,18 @@ describe("buildHostHtmlTemplate", () => {
       const html = buildHostHtmlTemplate(createMinimalInput());
 
       expect(html).toContain('<iframe id="mcp-app"');
+      expect(html).toContain('sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"');
+      expect(html).not.toContain("allow-popups-to-escape-sandbox");
+      expect(html).not.toContain("allow-same-origin");
       expect(html).toContain('referrerpolicy="no-referrer"');
+    });
+
+    it("rejects nested-frame protocol and raw messages by binding to the sandboxed app frame", () => {
+      const html = buildHostHtmlTemplate(createMinimalInput());
+
+      expect(html).toContain("new PostMessageTransport(iframe.contentWindow, iframe.contentWindow)");
+      expect(html).toContain("if (event.source !== iframe.contentWindow) return;");
+      expect(html).not.toContain("new PostMessageTransport(iframe.contentWindow, null)");
     });
 
     it("includes control buttons", () => {
@@ -61,15 +73,32 @@ describe("buildHostHtmlTemplate", () => {
       expect(html).toContain('id="done-btn"');
       expect(html).toContain('id="cancel-btn"');
     });
+
+    it("includes mobile and in-app-browser host shell affordances", () => {
+      const html = buildHostHtmlTemplate(createMinimalInput());
+
+      expect(html).toContain("min-height: 100dvh");
+      expect(html).toContain("env(safe-area-inset-top");
+      expect(html).toContain("@media (max-width: 640px)");
+      expect(html).toContain('id="completion-overlay"');
+      expect(html).toContain("closeOrShowDone");
+      expect(html).toContain("visibilitychange");
+    });
   });
 
   describe("data injection", () => {
-    it("injects session token", () => {
+    it("keeps the session token out of the sandboxed app URL", () => {
       const html = buildHostHtmlTemplate(
-        createMinimalInput({ sessionToken: "secret-token-xyz" })
+        createMinimalInput({
+          sessionToken: "secret-session-token",
+          uiResourceToken: "app-resource-token",
+        })
       );
 
-      expect(html).toContain('"secret-token-xyz"');
+      expect(html).toContain('const SESSION_TOKEN = "secret-session-token"');
+      expect(html).toContain('const UI_RESOURCE_TOKEN = "app-resource-token"');
+      expect(html).toContain('iframe.src = "/ui-app?resource=" + encodeURIComponent(UI_RESOURCE_TOKEN)');
+      expect(html).not.toContain('iframe.src = "/ui-app?session="');
     });
 
     it("injects tool arguments", () => {
@@ -158,44 +187,140 @@ describe("buildHostHtmlTemplate", () => {
   });
 
   describe("CSP handling", () => {
-    it("buildCspMetaContent generates correct CSP directives", async () => {
+    it("maps standard resourceDomains to static resource directives", async () => {
       const { buildCspMetaContent } = await import("../host-html-template.ts");
+
       const csp = buildCspMetaContent({
-        scriptDomains: ["'self'", "cdn.example.com"],
-        styleDomains: ["'self'"],
+        resourceDomains: ["https://esm.sh"],
+        connectDomains: ["https://api.example.com"],
       });
 
-      expect(csp).toContain("script-src 'self' cdn.example.com");
-      expect(csp).toContain("style-src 'self'");
-      expect(csp).toContain("default-src 'none'");
+      expect(csp).toBe([
+        "default-src 'none'",
+        "sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads",
+        "script-src 'self' 'unsafe-inline' https://esm.sh",
+        "style-src 'self' 'unsafe-inline' https://esm.sh",
+        "font-src 'self' https://esm.sh",
+        "img-src 'self' data: https://esm.sh",
+        "media-src 'self' data: https://esm.sh",
+        "connect-src https://api.example.com",
+        "frame-src 'none'",
+        "worker-src 'none'",
+        "object-src 'none'",
+        "base-uri 'self'",
+      ].join("; "));
+      expect(csp).not.toContain("'unsafe-eval'");
     });
 
-    it("applyCspMeta injects CSP meta into HTML head", async () => {
-      const { applyCspMeta } = await import("../host-html-template.ts");
-      const html = applyCspMeta(
-        "<html><head></head><body>Content</body></html>",
-        "default-src 'none'; script-src 'self'"
-      );
+    it("rejects CSP source expressions that can inject directives", async () => {
+      const { buildCspMetaContent } = await import("../host-html-template.ts");
 
-      expect(html).toContain("Content-Security-Policy");
-      expect(html).toContain("script-src");
+      const csp = buildCspMetaContent({
+        resourceDomains: [
+          "https://safe.example.com",
+          "https://safe.example.com",
+          "https://evil.example.com; script-src *",
+          "https://evil.example.com\nimg-src",
+          "https://evil.example.com\rimg-src",
+          "https://evil.example.com\timg-src",
+          "https://evil.example.com\fimg-src",
+          "https://nul-evil.example.com\0img-src",
+          "https://del-evil.example.com\x7Fimg-src",
+          "https://two sources.example.com",
+          "https://evil.example.com\"img-src",
+          "'unsafe-eval'",
+          42 as unknown as string,
+        ],
+      });
+
+      expect(csp).toContain("https://safe.example.com");
+      expect(csp?.match(/https:\/\/safe\.example\.com/g)).toHaveLength(5);
+      expect(csp).not.toContain("evil.example.com");
+      expect(csp).not.toContain("nul-evil.example.com");
+      expect(csp).not.toContain("del-evil.example.com");
+      expect(csp).not.toContain("https://two sources.example.com");
+      expect(csp).not.toContain("'unsafe-eval'");
     });
 
-    it("applyCspMeta preserves existing CSP in resource HTML", async () => {
-      const { applyCspMeta } = await import("../host-html-template.ts");
-      const resourceWithCsp = `<html>
-        <head>
-          <meta http-equiv="Content-Security-Policy" content="default-src 'self'">
-        </head>
-        <body>Content</body>
-      </html>`;
+    it("rejects all control characters and non-ASCII CSP sources before serialization", async () => {
+      const { buildCspMetaContent } = await import("../host-html-template.ts");
+      const rejectedSources = [
+        "https://vertical-tab.example.com\vimg-src",
+        "https://unit-separator.example.com\x1Fimg-src",
+        "https://c1-low.example.com\x80img-src",
+        "https://c1-high.example.com\x9Fimg-src",
+        "https://emoji.example.com/😀",
+        "https://accent.example.com/café",
+      ];
 
-      const html = applyCspMeta(resourceWithCsp, "script-src 'self'");
+      const csp = buildCspMetaContent({
+        resourceDomains: ["https://safe.example.com", ...rejectedSources],
+      });
 
-      // Should not duplicate CSP meta - applyCspMeta should detect existing CSP and skip injection
-      const cspMatches = html.match(/Content-Security-Policy/g) ?? [];
-      expect(cspMatches.length).toBe(1);
+      expect(csp?.match(/https:\/\/safe\.example\.com/g)).toHaveLength(5);
+      for (const source of rejectedSources) {
+        expect(csp).not.toContain(source);
+      }
     });
+
+    it("fails closed for malformed CSP domain containers", async () => {
+      const { buildCspMetaContent } = await import("../host-html-template.ts");
+
+      const csp = buildCspMetaContent({
+        resourceDomains: {} as unknown as string[],
+        connectDomains: "https://api.example.com" as unknown as string[],
+      });
+
+      expect(csp).toBe([
+        "default-src 'none'",
+        "sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads",
+        "script-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline'",
+        "font-src 'self'",
+        "img-src 'self' data:",
+        "media-src 'self' data:",
+        "connect-src 'none'",
+        "frame-src 'none'",
+        "worker-src 'none'",
+        "object-src 'none'",
+        "base-uri 'self'",
+      ].join("; "));
+    });
+
+    it("deduplicates frame and base URI domains", async () => {
+      const { buildCspMetaContent } = await import("../host-html-template.ts");
+
+      const csp = buildCspMetaContent({
+        frameDomains: ["https://frames.example.com", "https://frames.example.com"],
+        baseUriDomains: ["https://base.example.com", "https://base.example.com"],
+      });
+
+      expect(csp).toContain("frame-src https://frames.example.com");
+      expect(csp).toContain("base-uri https://base.example.com");
+      expect(csp?.match(/https:\/\/frames\.example\.com/g)).toHaveLength(1);
+      expect(csp?.match(/https:\/\/base\.example\.com/g)).toHaveLength(1);
+    });
+
+    it("returns a restrictive default when the app declares no CSP metadata", async () => {
+      const { buildCspMetaContent } = await import("../host-html-template.ts");
+
+      expect(buildCspMetaContent(undefined)).toBe([
+        "default-src 'none'",
+        "sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads",
+        "script-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline'",
+        "font-src 'self'",
+        "img-src 'self' data:",
+        "media-src 'self' data:",
+        "connect-src 'none'",
+        "frame-src 'none'",
+        "worker-src 'none'",
+        "object-src 'none'",
+        "base-uri 'self'",
+      ].join("; "));
+    });
+
+
   });
 
   describe("module loading", () => {

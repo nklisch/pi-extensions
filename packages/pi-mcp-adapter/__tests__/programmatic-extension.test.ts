@@ -285,11 +285,12 @@ describe("programmatic gateway discovery", () => {
     }>;
   };
 
-  function connectedWith(tools: unknown[], callToolImpl?: () => Promise<unknown>) {
+  function connectedWith(tools: unknown[], callToolImpl?: () => Promise<unknown>, instructions?: string) {
     managerSpies.connect.mockResolvedValue({
       status: "connected",
       tools,
       resources: [],
+      ...(instructions === undefined ? {} : { instructions }),
       client: {
         callTool: callToolImpl ?? vi.fn().mockResolvedValue({ content: [{ type: "text", text: "ok" }] }),
       },
@@ -321,6 +322,14 @@ describe("programmatic gateway discovery", () => {
     const renderers = pi.tools[0] as { renderCall?: unknown; renderResult?: unknown };
     expect(typeof renderers.renderCall).toBe("function");
     expect(typeof renderers.renderResult).toBe("function");
+  });
+
+  it("returns server instructions through the source-qualified gateway", async () => {
+    const { tool } = await startedAdapter();
+    connectedWith([], undefined, "Use exact repository-relative paths.");
+    const result = await tool.execute("i1", { action: "instructions", server: "native" }, new AbortController().signal);
+    expect(result.content[0]!.text).toContain("Use exact repository-relative paths.");
+    expect(result.details).toMatchObject({ mode: "instructions", server: "native", available: true });
   });
 
   it("serves batched raw schemas in one call and reports missing tools", async () => {

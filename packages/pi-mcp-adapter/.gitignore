@@ -1,5 +1,6 @@
 node_modules/
 .pi/
+conformance/results/
 *.log
 .DS_Store
 

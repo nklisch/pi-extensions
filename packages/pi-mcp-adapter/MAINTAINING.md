@@ -1,66 +1,55 @@
-# Maintained fork policy
+# Maintained product policy
 
-This package is a narrow MIT-licensed fork of
-[`nicobailon/pi-mcp-adapter`](https://github.com/nicobailon/pi-mcp-adapter).
-It exists only to carry the generic programmatic configuration-source lifecycle
-until equivalent released upstream bytes pass the same qualification.
-Its home is the `nklisch/pi-extensions` monorepo (`packages/pi-mcp-adapter`);
-pre-monorepo history lives in the `nklisch/pi-mcp-adapter` fork repository.
+`@nklisch/pi-mcp-adapter` is an independently maintained MIT-licensed MCP client for Pi. It descends from [`nicobailon/pi-mcp-adapter`](https://github.com/nicobailon/pi-mcp-adapter), retains upstream authorship and license history, and learns from that project and other MCP clients. External projects are prior art and compatibility inputs. They are not runtime dependencies, release pins, or retirement targets.
+
+The package lives in the `nklisch/pi-extensions` monorepo under `packages/pi-mcp-adapter`. Pre-monorepo history remains in the `nklisch/pi-mcp-adapter` repository.
 
 ## Provenance
 
-- Upstream base package: `pi-mcp-adapter@2.11.0`
-- Upstream base commit: `82724dccc13a49310530898f922bafff12b7f3fe`
-- Upstream tag: `v2.11.0`
-- npm package: `@nklisch/pi-mcp-adapter`, published through `2.11.0-nklisch.3`
-- Security reports: private GitHub security-advisory channel on the fork's
-  home repository
-- License: MIT; the upstream `LICENSE`, copyright, authorship, Git history,
-  README, changelog, CLI, extension entry, and runtime files are retained.
+- Material external release integrated through: `pi-mcp-adapter@2.20.1`
+- Release commit and tag: `1dbdef96f674410ac37067de70f10a3de3d48d98` (`v2.20.1`)
+- Reviewed post-release fixes integrated through: `08fe82be1d55036d3960c4bb3fa77ed8707f2bca`
+- Common ancestry used for three-way integration: `82724dccc13a49310530898f922bafff12b7f3fe` (`v2.11.0`)
+- npm package: `@nklisch/pi-mcp-adapter`, published through `2.11.0-nklisch.9`
+- Security reports: the private GitHub security-advisory channel for the maintained package
+- License: MIT
 
-The repository and npm namespace did not exist when this candidate was created.
-The version above is not publication evidence. A release exists only after the
-immutable registry and GitHub receipts in the publication checklist are filled.
+The package version or a local commit is not publication evidence. A release exists only after the immutable npm and GitHub receipts in the publication checklist are recorded.
 
-## Scope boundary
+Update this provenance when an external source range is integrated. Preserve the exact source commits, license, imported authorship, and any locally rewritten behavior that affects later maintenance.
 
-Maintainers may carry only:
+## Ownership boundary
 
-1. the typed `./programmatic` package export;
-2. exact source registration, compare-and-replace, removal, inspection, and
-   complete capability reporting;
-3. source-qualified process/tool/cache/status identity;
-4. immediate callback-scoped launch values, cancellation, and runtime leases;
-5. tests and documentation required to prove those contracts; and
-6. minimal internal seams that let the existing manager consume already-resolved
-   launch values and disable legacy-SSE fallback for exact Streamable HTTP.
+The package owns:
 
-Do not add host-specific policy, state models, settings mutation, generated
-configuration files, process-global secret injection, manager deep exports, or
-parallel MCP SDK/transport/authentication implementations. Changes outside this
-boundary belong upstream first.
+1. standalone MCP configuration, management, transports, authentication, discovery, prompts, approvals, output handling, and MCP Apps;
+2. the typed `./programmatic` package export;
+3. exact source registration, compare-and-replace, removal, inspection, and capability reporting;
+4. source-qualified process, tool, cache, status, credential, and UI identity where those capabilities are available;
+5. callback-scoped launch values, cancellation, and runtime leases;
+6. compact agent discovery, batched exact schema loading, and schema-on-error guidance; and
+7. tests and documentation that prove these contracts.
 
-## Ownership and security intake
+Generic MCP behavior uses one implementation. Do not create parallel SDK, transport, authentication, output, or UI stacks for standalone and programmatic operation. Add a narrow source-ownership seam to the shared implementation when programmatic operation needs different identity, launch-value, fallback, or cleanup behavior.
 
-Nathan Klisch owns npm publication, GitHub repository administration, security
-triage, upstream rebases, and emergency unpublishing/deprecation decisions.
-Security reports go through the private GitHub security-advisory channel.
+The adapter does not own Plugin Host policy, installation state, marketplace trust, immutable plugin revisions, or generated projections. It must not mutate Plugin Host state, write generated Plugin Host configuration, inject secrets through process-global state, or retain expanded launch values beyond connection creation.
 
-For an upstream security release or high-impact protocol fix:
+A feature that is safe in standalone mode is not automatically available to programmatic sources. Expose it only after exact source ownership, cancellation, redaction, replacement, removal, and lease behavior are qualified. Capability reporting stays false until that work is complete.
 
-1. fetch `upstream/main` and all release tags;
-2. verify npm `latest`, npm `gitHead`, the GitHub release tag, and the candidate
-   upstream commit independently;
-3. rebase the generic commits onto the newest release commit when the contract
-   remains valid; use a merge only when preserving a non-linear upstream fix is
-   materially safer;
-4. rerun the full upstream suite, source-lifecycle suite, packed-package Node 24
-   test, no-source parity, Pi ordering/isolation, cancellation, redaction, and
-   downstream conformance qualification; and
-5. publish a new immutable version rather than rewriting a tag or npm version.
+## External change intake
 
-Routine upstream release checks occur at least monthly and before every fork
-publication. Critical upstream security notices are evaluated immediately.
+Evaluate external releases and security notices before every package publication and at least monthly. For a useful source range:
+
+1. fetch the immutable commits and tags;
+2. verify the published package version, npm `gitHead`, source tag, commit, and license independently;
+3. attest the inspected source and record the integration decision;
+4. integrate through the real common ancestry when available, or reimplement behavior when that produces a clearer maintained design;
+5. preserve this package's public contracts and stronger local behavior when resolving conflicts; and
+6. qualify the complete result as this package's code.
+
+A common-base merge is an implementation technique, not an ongoing tracking promise. Do not add an external package dependency or source pin merely to delegate maintenance ownership.
+
+Critical credential, authentication, sandbox, and transport fixes are evaluated immediately. Credential binding includes the exact endpoint authority and path. A higher-precedence configuration that changes an endpoint must not inherit authorization intended for the previous endpoint.
 
 ## Qualification commands
 
@@ -73,77 +62,65 @@ npm run build --prefix packages/pi-mcp-adapter/examples/interactive-visualizer
 npm test --workspace @nklisch/pi-mcp-adapter
 npm run test:package --workspace @nklisch/pi-mcp-adapter
 npm pack --dry-run --workspace @nklisch/pi-mcp-adapter
+npm run check
 ```
 
-The visualizer build is an existing upstream-suite prerequisite: its generated
-`dist/` fixtures are intentionally ignored and are not fork source changes.
-Then install the exact local tarball into an isolated consumer and run the
-Plugin Host adapter-neutral MCP contract unchanged. The qualification adapter
-may map package values to host schemas, but it must import only the packed
-`@nklisch/pi-mcp-adapter/programmatic` export and must not edit Plugin Host's
-production adapter, capability composition, package manifest, or lockfile.
+The visualizer build produces ignored fixtures required by the package suite. Then install the exact local tarball into an isolated consumer and run Plugin Host's adapter-neutral MCP contract through the packed `@nklisch/pi-mcp-adapter/programmatic` export.
 
-Required evidence:
+Required evidence includes:
 
-- ordinary default extension and CLI parity;
-- initial sources visible before Pi tool registration;
-- disabled file/import/cache discovery;
-- exact identity isolation through process/tool/cache/status paths;
-- atomic stale/failure rollback and exact idempotent removal;
+- ordinary standalone extension and CLI behavior;
+- no-source standalone parity;
+- initial programmatic sources visible before Pi tool registration;
+- disabled file, import, and standalone-cache discovery in Plugin Host composition;
+- exact identity isolation through process, tool, cache, status, credential, and UI paths that are enabled;
+- atomic stale or failed replacement rollback and exact idempotent removal;
 - pre-abort and in-flight cancellation;
-- launch-value disposal and runtime-lease release on all outcomes;
-- redaction canaries absent from status, diagnostics, logs, and packed metadata;
-- exact Streamable HTTP without legacy-SSE fallback;
-- package exports deny manager deep imports; and
-- MIT license included in the tarball.
+- launch-value disposal and runtime-lease release on every outcome;
+- redaction canaries absent from status, diagnostics, logs, caches, and packed metadata;
+- exact Streamable HTTP for programmatic sources without legacy-SSE fallback;
+- conservative legacy and negotiated modern protocol fixtures for standalone operation;
+- secure credential-store failure without plaintext fallback;
+- no eager programmatic server, script worker, OAuth flow, or UI listener;
+- bounded model output, transcript rendering, and MCP Apps context handoff;
+- package exports that deny unsupported deep imports;
+- native dependency installation in the packed-consumer environment;
+- the MIT license and attributed vendored assets in the tarball; and
+- unchanged downstream Plugin Host ordering, isolation, and lifecycle conformance.
 
 ## Publication checklist
 
-Publication is an operator action through the monorepo's trusted-publishing
-workflow. Never infer these receipts from a local build.
+Publication is an operator action through the monorepo's trusted-publishing workflow. Never infer publication receipts from a local build.
 
-1. Choose a final immutable version in a release commit (`npm version ...
-   --workspace @nklisch/pi-mcp-adapter --no-git-tag-version`).
-2. Rerun all qualification against the exact release commit (`npm run check`).
-3. Dispatch the **Publish Pi extension** workflow for `pi-mcp-adapter`.
-4. Record all of the following together:
+1. Choose a final immutable version with `npm version --workspace @nklisch/pi-mcp-adapter --no-git-tag-version`.
+2. Update `pi-plugins`' exact sibling dependency, receipt, tests, and foundation version in the same delivery boundary.
+3. Rerun all qualification against the exact release commit.
+4. Dispatch the **Publish Pi extension** workflow for `pi-mcp-adapter`.
+5. Record together:
    - npm version and `sha512` integrity;
    - npm tarball URL and registry publication time;
    - npm `gitHead`;
    - monorepo commit;
-   - upstream base commit and release tag;
+   - material external source commits and release tags;
    - included `LICENSE` digest;
    - Node and Pi versions used for qualification; and
    - test command receipts.
-5. Reinstall by exact npm version in a fresh directory and rerun package exports
-   plus downstream conformance against the registry bytes.
+6. Reinstall the exact npm version in a fresh directory and rerun package exports plus downstream conformance against the registry bytes.
 
-Only step 5 can unblock a production consumer. A local tarball, commit, tag, or
-successful dry run is not a published package.
+Only the final registry-byte qualification can unblock a production consumer. A local tarball, commit, tag, or successful dry run is not a published package.
 
-## Emergency rollback
+## Emergency recovery
 
-If released bytes fail qualification or a security issue is found:
+If released bytes fail qualification or contain a security defect:
 
-1. deprecate the affected npm version with a specific warning; do not overwrite
-   or silently unpublish unless npm policy and incident severity require it;
-2. make consumers select no MCP runtime, so capability reporting fails closed;
-3. publish a fixed immutable version after complete qualification;
-4. preserve the faulty tag and receipts for audit; and
-5. notify upstream when the issue also affects upstream behavior.
+1. deprecate the affected npm version with a specific warning; do not overwrite immutable versions;
+2. make Plugin Host select no MCP runtime when qualification fails, so dependent capability reporting fails closed;
+3. publish a corrected immutable version after complete qualification;
+4. preserve the faulty tag and receipts for investigation; and
+5. notify another project when the defect also affects its implementation.
 
-Generated files, settings mutation, deep imports, and process-global secret
-workarounds are never rollback paths.
+Generated configuration, settings mutation, deep imports, plaintext secret fallback, and process-global secret workarounds are never recovery paths.
 
-## Return to upstream
+## Collaboration
 
-After the fork is proven, replay only the generic commits onto current upstream
-`main`, reference upstream issue #85 and prior PR #56, and open a focused PR.
-Retire the fork only when:
-
-1. upstream publishes the complete documented source lifecycle;
-2. exact upstream registry bytes pass the unchanged conformance and Pi tests;
-3. the downstream wrapper changes package selection only—no application/domain
-   contract changes;
-4. rollback to the last qualified fork version is proven; and
-5. the fork package is deprecated with a migration target rather than deleted.
+Contribute generic fixes or source-lifecycle ideas to other MCP projects when useful, without making this package's roadmap contingent on acceptance. External implementations may later adopt equivalent behavior; that does not change this package's ownership or support commitment.

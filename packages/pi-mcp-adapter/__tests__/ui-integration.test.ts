@@ -147,6 +147,7 @@ function createIntegrationManager(): McpServerManager {
     ["save_file", { result: { saved: true, path: "/tmp/file.txt" } }],
     ["slow_operation", { result: { completed: true }, delay: 100 }],
   ]);
+  const toolDefinitions = [...tools.keys()].map((name) => ({ name }));
 
   return {
     getConnection: vi.fn().mockReturnValue({
@@ -161,6 +162,7 @@ function createIntegrationManager(): McpServerManager {
           return { content: [{ type: "text", text: JSON.stringify(tool.result) }] };
         }),
       },
+      tools: toolDefinitions,
     }),
     touch: vi.fn(),
     incrementInFlight: vi.fn(),
@@ -453,6 +455,7 @@ describe("MCP UI Integration", () => {
           client: {
             callTool: vi.fn().mockRejectedValue(new Error("MCP server error")),
           },
+          tools: [{ name: "failing_tool" }],
         }),
       } as unknown as McpServerManager;
 

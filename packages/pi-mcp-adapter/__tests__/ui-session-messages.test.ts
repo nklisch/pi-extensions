@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseUiPromptHandoff, type UiSessionMessages } from "../types.ts";
+import { createUiModelContextUpdate, parseUiPromptHandoff, type UiSessionMessages } from "../types.ts";
 
 describe("UiSessionMessages", () => {
   describe("type structure", () => {
@@ -8,6 +8,7 @@ describe("UiSessionMessages", () => {
         prompts: [],
         notifications: [],
         intents: [],
+        contexts: [],
       };
 
       expect(messages.prompts).toHaveLength(0);
@@ -20,6 +21,7 @@ describe("UiSessionMessages", () => {
         prompts: ["What is the weather?", "Tell me more"],
         notifications: [],
         intents: [],
+        contexts: [],
       };
 
       expect(messages.prompts).toHaveLength(2);
@@ -31,6 +33,7 @@ describe("UiSessionMessages", () => {
         prompts: [],
         notifications: ["Task completed", "Error occurred"],
         intents: [],
+        contexts: [],
       };
 
       expect(messages.notifications).toHaveLength(2);
@@ -44,12 +47,27 @@ describe("UiSessionMessages", () => {
           { intent: "get_forecast", params: { days: 7, location: "NYC" } },
           { intent: "refresh" },
         ],
+        contexts: [],
       };
 
       expect(messages.intents).toHaveLength(2);
       expect(messages.intents[0].intent).toBe("get_forecast");
       expect(messages.intents[0].params).toEqual({ days: 7, location: "NYC" });
       expect(messages.intents[1].params).toBeUndefined();
+    });
+
+    it("can store bounded model context updates", () => {
+      const update = createUiModelContextUpdate({ content: [{ type: "text", text: "selection" }] });
+      const messages: UiSessionMessages = {
+        prompts: [],
+        notifications: [],
+        intents: [],
+        contexts: update ? [update] : [],
+      };
+
+      expect(messages.contexts).toHaveLength(1);
+      expect(messages.contexts[0]).toMatchObject({ truncated: false });
+      expect(messages.contexts[0].summary).toContain("selection");
     });
   });
 

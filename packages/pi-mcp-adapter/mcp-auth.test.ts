@@ -4,8 +4,8 @@
 
 import { describe, it, before, after } from "node:test"
 import assert from "node:assert"
-import { mkdirSync, rmSync, existsSync } from "fs"
-import { join } from "path"
+import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs"
+import { dirname, join } from "path"
 import { tmpdir } from "os"
 import { randomBytes } from "crypto"
 
@@ -15,6 +15,7 @@ process.env.MCP_OAUTH_DIR = TEST_DIR
 
 import {
   getAuthEntry,
+  getAuthEntryFilePath,
   getAuthForUrl,
   saveAuthEntry,
   removeAuthEntry,
@@ -30,6 +31,8 @@ import {
   clearAllCredentials,
   clearClientInfo,
   clearTokens,
+  resetTestAuthSecretStore,
+  loadTestKeyringEntryClass,
   type AuthEntry,
 } from "./mcp-auth.ts"
 
@@ -57,10 +60,121 @@ describe("mcp-auth", () => {
     }
   })
 
+
+  describe("keyring native binding fallback", () => {
+    class FakeEntry {
+      constructor(readonly service: string, readonly account: string) {}
+      getPassword(): string | null { return null }
+      setPassword(): void {}
+      deleteCredential(): boolean { return true }
+    }
+
+    it("loads the native binding by absolute path when the package loader fails", () => {
+      const loaderError = new Error("package loader failed")
+      const nativePath = "/tmp/keyring-darwin-arm64/keyring.darwin-arm64.node"
+      const required: string[] = []
+      const requireStub = Object.assign((id: string) => {
+        required.push(id)
+        if (id === "@napi-rs/keyring") throw loaderError
+        if (id === nativePath) return { Entry: FakeEntry }
+        throw new Error(`unexpected require: ${id}`)
+      }, {
+        resolve(id: string) {
+          assert.strictEqual(id, "@napi-rs/keyring-darwin-arm64/package.json")
+          return "/tmp/keyring-darwin-arm64/package.json"
+        },
+      })
+
+      const Entry = loadTestKeyringEntryClass(requireStub, "darwin", "arm64")
+
+      assert.strictEqual(Entry, FakeEntry)
+      assert.deepStrictEqual(required, ["@napi-rs/keyring", nativePath])
+    })
+
+    it("tries the Linux musl package when the gnu package is unavailable", () => {
+      const loaderError = new Error("package loader failed")
+      const nativePath = "/tmp/keyring-linux-x64-musl/keyring.linux-x64-musl.node"
+      const resolved: string[] = []
+      const requireStub = Object.assign((id: string) => {
+        if (id === "@napi-rs/keyring") throw loaderError
+        if (id === nativePath) return { Entry: FakeEntry }
+        throw new Error(`unexpected require: ${id}`)
+      }, {
+        resolve(id: string) {
+          resolved.push(id)
+          if (id === "@napi-rs/keyring-linux-x64-musl/package.json") return "/tmp/keyring-linux-x64-musl/package.json"
+          throw new Error(`missing package: ${id}`)
+        },
+      })
+
+      const Entry = loadTestKeyringEntryClass(requireStub, "linux", "x64")
+
+      assert.strictEqual(Entry, FakeEntry)
+      assert.deepStrictEqual(resolved, [
+        "@napi-rs/keyring-linux-x64-gnu/package.json",
+        "@napi-rs/keyring-linux-x64-musl/package.json",
+      ])
+    })
+
+    it("keeps the original loader error in the cause chain when fallback fails", () => {
+      const loaderError = new Error("package loader failed")
+      const fallbackError = new Error("native binding failed")
+      const requireStub = Object.assign((id: string) => {
+        if (id === "@napi-rs/keyring") throw loaderError
+        throw fallbackError
+      }, {
+        resolve() { return "/tmp/keyring-darwin-arm64/package.json" },
+      })
+
+      assert.throws(() => loadTestKeyringEntryClass(requireStub, "darwin", "arm64"), (error) => {
+        assert(error instanceof Error)
+        assert.match(error.message, /absolute-path native binding fallback also failed: native binding failed/)
+        let current: unknown = error
+        while (current && typeof current === "object") {
+          if (current === loaderError) return true
+          current = (current as { cause?: unknown }).cause
+        }
+        assert.fail("original loader error was not preserved in the cause chain")
+      })
+    })
+  })
+
   describe("getAuthEntry", () => {
     it("should return undefined for non-existent entry", () => {
       const entry = getAuthEntry("non-existent")
       assert.strictEqual(entry, undefined)
+    })
+
+    it("should import legacy plaintext entries and remove the file", () => {
+      const filePath = getAuthEntryFilePath("legacy-import")
+      mkdirSync(dirname(filePath), { recursive: true })
+      writeFileSync(filePath, JSON.stringify({
+        tokens: { accessToken: "legacy-token" },
+        serverUrl: "https://api.example.com",
+      }), "utf-8")
+
+      const entry = getAuthEntry("legacy-import")
+      assert.strictEqual(entry?.tokens?.accessToken, "legacy-token")
+      assert.strictEqual(existsSync(filePath), false)
+      assert.strictEqual(getAuthEntry("legacy-import")?.tokens?.accessToken, "legacy-token")
+    })
+
+    it("should fail closed when the secure credential store is unavailable", () => {
+      const previous = process.env.PI_MCP_ADAPTER_TEST_AUTH_STORE
+      process.env.PI_MCP_ADAPTER_TEST_AUTH_STORE = "unavailable"
+      resetTestAuthSecretStore()
+      try {
+        assert.throws(
+          () => getAuthEntry("secure-store-unavailable"),
+          /Failed to read OAuth credentials.*OS secure credential store/,
+        )
+      } finally {
+        if (previous === undefined) {
+          delete process.env.PI_MCP_ADAPTER_TEST_AUTH_STORE
+        } else {
+          process.env.PI_MCP_ADAPTER_TEST_AUTH_STORE = previous
+        }
+      }
     })
   })
 

@@ -677,12 +677,12 @@ tool-discovery, and launch failures remain redacted per-server health rather
 than activation identity.
 
 Production composition uses the exact sibling
-`@nklisch/pi-mcp-adapter@2.11.0-nklisch.10` package through its documented
+`@nklisch/pi-mcp-adapter@2.20.1-nklisch.0` package through its documented
 `@nklisch/pi-mcp-adapter/programmatic` export, with initial plugin sources
 registered before MCP tools and foreign file discovery disabled. Before package
 code executes, the wrapper verifies the package name and version, MIT license,
 manifest exports (`.` and `./programmatic`), Pi resource (`./index.ts`), Node
-`>=22.19.0`, and Pi peer range `>=0.79.1 <1`. npm lockfile integrity protects
+`>=22.19.0`, and Pi peer range `>=0.82.0 <1`. npm lockfile integrity protects
 installed bytes, while the release bundle ships the repository-owned sibling
 under the same delivery boundary.
 Package-specific ordering, source isolation, replace/remove cleanup,
@@ -902,7 +902,7 @@ reload behavior, project trust, and non-interactive degradation.
 Final acceptance starts with an empty consumer `node_modules` tree, installs the
 packed `@nklisch/pi-plugins` candidate from the replayed lock/SRI registry
 snapshot, and verifies exact receipts for
-`@nklisch/pi-mcp-adapter@2.11.0-nklisch.10` and
+`@nklisch/pi-mcp-adapter@2.20.1-nklisch.0` and
 `@nklisch/pi-subagents@18.0.4-nklisch.1`. In a clean Pi environment with no
 Claude or Codex state, one revision-bound production fixture carries a skill,
 ordinary hooks, subagent interception, and canonical MCP through install,

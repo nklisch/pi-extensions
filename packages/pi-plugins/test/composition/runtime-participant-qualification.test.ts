@@ -34,7 +34,7 @@ function mcp(provider: unknown) {
   } as never;
 }
 
-async function decide(runtime: unknown, piVersion = "0.80.8") {
+async function decide(runtime: unknown, piVersion = "0.82.0") {
   return await qualifyRuntimeParticipants({
     pi: pi as never,
     nodeVersion: "24.0.0",
@@ -49,7 +49,7 @@ const publishedProvider = {
   packageName: "qualified-mcp-adapter",
   version: "2.0.0",
   nodeEngine: ">=24 <25",
-  piPeerRange: ">=0.79.1 <1",
+  piPeerRange: ">=0.82.0 <1",
   contractVersion: 1,
 };
 
@@ -62,7 +62,8 @@ describe("runtime participant qualification", () => {
   it("uses complete published-package and actual Node/Pi range evidence", async () => {
     const provider = publishedProvider;
     expect((await decide(mcp(provider))).mcp.status).toBe("available");
-    expect((await decide(mcp({ ...provider, piPeerRange: ">=0.81.0" }))).mcp.status).toBe("unavailable");
+    expect((await decide(mcp({ ...provider, piPeerRange: ">=0.81.0" }))).mcp.status).toBe("available");
+    expect((await decide(mcp({ ...provider, piPeerRange: ">=0.83.0" }))).mcp.status).toBe("unavailable");
     expect((await decide(mcp({ ...provider, nodeEngine: ">=25" }))).mcp.status).toBe("unavailable");
   });
 
@@ -72,7 +73,8 @@ describe("runtime participant qualification", () => {
     expect((await decide(mcp(publishedProvider), "0.79.9")).hostApi.status).toBe("unavailable");
     expect((await decide(mcp(publishedProvider), "0.80.0")).hostApi.status).toBe("available");
     expect((await decide(mcp(publishedProvider), "0.81.1")).hostApi.status).toBe("available");
-    expect((await decide(mcp(publishedProvider), "0.81.1")).mcp.status).toBe("available");
+    expect((await decide(mcp(publishedProvider), "0.81.1")).mcp.status).toBe("unavailable");
+    expect((await decide(mcp(publishedProvider), "0.82.0")).mcp.status).toBe("available");
     expect((await decide(mcp(publishedProvider), "0.99.0")).hostApi.status).toBe("available");
     expect((await decide(mcp(publishedProvider), "0.99.0-beta.1")).hostApi.status).toBe("available");
     expect((await decide(mcp(publishedProvider), "1.0.0")).hostApi.status).toBe("unavailable");

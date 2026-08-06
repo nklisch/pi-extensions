@@ -1,4 +1,4 @@
-import { KeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
+import { KeybindingsManager, TUI_KEYBINDINGS, visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import { createMcpPanel } from "../mcp-panel.ts";
 import { createMcpSetupPanel, type SetupPanelCallbacks } from "../mcp-setup-panel.ts";
@@ -47,6 +47,9 @@ function createEmptyDiscovery(): McpDiscoverySummary {
     hasSharedServers: false,
     hasPiOwnedServers: false,
     totalServerCount: 0,
+    hostConfigs: [],
+    hostConfigDiscovery: "off",
+    conflicts: [],
     fingerprint: "test",
     repoPrompt: { configured: false },
   };
@@ -58,9 +61,11 @@ function createSetupCallbacks(): SetupPanelCallbacks {
     previewImports: () => preview,
     previewStarterProject: () => preview,
     previewRepoPrompt: () => null,
+    previewKnownServer: () => preview,
     adoptImports: async () => ({ added: [], path: "/tmp/x" }),
     scaffoldProjectConfig: vi.fn(async () => ({ path: "/tmp/x" })),
     addRepoPrompt: async () => ({ path: "/tmp/x", serverName: "repoprompt" }),
+    addKnownServer: async (preset) => ({ path: "/tmp/x", serverName: preset.name }),
     openPath: async () => {},
     markSetupCompleted: () => {},
   };
@@ -181,6 +186,57 @@ describe("mcp-setup-panel custom keybindings", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(callbacks.scaffoldProjectConfig).toHaveBeenCalledTimes(1);
+    panel.dispose();
+  });
+
+  it("keeps setup previews usable at mobile width", () => {
+    const panel = createMcpSetupPanel(
+      createEmptyDiscovery(),
+      createSetupCallbacks(),
+      {
+        mode: "setup",
+        onboardingState: { version: 1, sharedConfigHintShown: false, setupCompleted: false },
+      },
+      { requestRender: () => {} },
+      () => {},
+    );
+
+    // Actions for this discovery: view-example, scaffold-project, show-precedence, known presets, close.
+    panel.handleInput(DOWN);
+    panel.handleInput(DOWN);
+    panel.handleInput(DOWN);
+    const lines = panel.render(37);
+    const output = lines.join("\n");
+
+    expect(Math.max(...lines.map((line) => visibleWidth(line)))).toBeLessThanOrEqual(37);
+    expect(output).toContain("DeepWiki");
+    expect(output).toContain("write preview");
+    expect(output).toContain("Enter select");
+    panel.dispose();
+  });
+
+  it("shows the actual config precedence including .agents paths", () => {
+    const panel = createMcpSetupPanel(
+      createEmptyDiscovery(),
+      createSetupCallbacks(),
+      {
+        mode: "setup",
+        onboardingState: { version: 1, sharedConfigHintShown: false, setupCompleted: false },
+      },
+      { requestRender: () => {} },
+      () => {},
+    );
+
+    // Actions for this discovery: view-example, scaffold-project, show-precedence, close.
+    panel.handleInput(DOWN);
+    panel.handleInput(DOWN);
+    const output = panel.render(100).join("\n");
+
+    expect(output).toContain("Read order (later entries win):");
+    expect(output).toContain("0. detected host configs (opt-in lowest-precedence fallback)");
+    expect(output).toContain("2. ~/.agents/mcp.json");
+    expect(output).toContain("3. ~/.agents/mcp/mcp.json");
+    expect(output).toContain("6. .pi/mcp.json");
     panel.dispose();
   });
 });

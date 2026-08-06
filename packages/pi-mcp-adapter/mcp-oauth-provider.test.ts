@@ -21,9 +21,9 @@ import {
   setOAuthCallbackPort,
   type McpOAuthConfig,
 } from "./mcp-oauth-provider.ts"
-import { getAuthForUrl, saveAuthEntry, updateOAuthState } from "./mcp-auth.ts"
-import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
-import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js"
+import { getAuthForUrl, saveAuthEntry } from "./mcp-auth.ts"
+import { UnauthorizedError } from "@modelcontextprotocol/client"
+import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/client"
 
 describe("McpOAuthProvider", () => {
   const serverName = "test-server"
@@ -103,7 +103,7 @@ describe("McpOAuthProvider", () => {
 
       assert.deepStrictEqual(metadata.redirect_uris, ["http://localhost:19876/callback"])
       assert.strictEqual(metadata.client_name, "Pi Coding Agent")
-      assert.strictEqual(metadata.client_uri, "https://github.com/nicobailon/pi-mcp-adapter")
+      assert.strictEqual(metadata.client_uri, "https://github.com/nklisch/pi-extensions/tree/main/packages/pi-mcp-adapter")
       assert.deepStrictEqual(metadata.grant_types, ["authorization_code", "refresh_token"])
       assert.deepStrictEqual(metadata.response_types, ["code"])
       assert.strictEqual(metadata.token_endpoint_auth_method, "none")
@@ -201,6 +201,51 @@ describe("McpOAuthProvider", () => {
 
       const info = await provider.clientInformation()
       assert.strictEqual(info, undefined)
+    })
+
+    it("should not serve a config-pre-registered stub when no config clientId is present", async () => {
+      // Stub written by the config-clientId path of saveClientInformation
+      // (SEP-2352 stamp-and-resave): {clientId, issuer} with the marker.
+      const provider = createProvider()
+      saveAuthEntry(serverName, {
+        clientInfo: {
+          clientId: "config-client",
+          issuer: "https://auth.example.com",
+          configPreRegistered: true,
+        },
+        serverUrl,
+      }, serverUrl)
+
+      assert.strictEqual(await provider.clientInformation(), undefined)
+    })
+
+    it("should not serve a legacy unmarked {clientId, issuer} stub when no config clientId is present", async () => {
+      const provider = createProvider()
+      saveAuthEntry(serverName, {
+        clientInfo: {
+          clientId: "config-client",
+          issuer: "https://auth.example.com",
+        },
+        serverUrl,
+      }, serverUrl)
+
+      assert.strictEqual(await provider.clientInformation(), undefined)
+    })
+
+    it("should still serve a dynamically-registered public client (no secret) with registration metadata", async () => {
+      const provider = createProvider()
+      saveAuthEntry(serverName, {
+        clientInfo: {
+          clientId: "public-client",
+          clientIdIssuedAt: Math.floor(Date.now() / 1000),
+          redirectUris: ["http://localhost:19876/callback"],
+        },
+        serverUrl,
+      }, serverUrl)
+
+      const info = await provider.clientInformation()
+      assert.strictEqual(info?.client_id, "public-client")
+      assert.strictEqual(info?.client_secret, undefined)
     })
 
     it("should prefer config over stored", async () => {
@@ -329,8 +374,7 @@ describe("McpOAuthProvider", () => {
         onRedirect: async (url) => {
           redirectCaptured = url
         },
-      })
-      await updateOAuthState("redirect-with-state", "state-abc", serverUrl)
+      }, {}, undefined, "state-abc")
       const testUrl = new URL("https://example.com/auth")
 
       await provider.redirectToAuthorization(testUrl)
@@ -379,7 +423,7 @@ describe("McpOAuthProvider", () => {
 
       const verifier = await provider.codeVerifier()
       assert.strictEqual(verifier, "verifier-abc-123")
-      assert.strictEqual(getAuthForUrl("code-verifier-test", serverUrl)?.codeVerifier, "verifier-abc-123")
+      assert.strictEqual(getAuthForUrl("code-verifier-test", serverUrl), undefined)
     })
 
     it("should throw when no code verifier", async () => {
@@ -419,7 +463,7 @@ describe("McpOAuthProvider", () => {
 
       const state = await provider.state()
       assert.strictEqual(state, "state-xyz-789")
-      assert.strictEqual(getAuthForUrl("state-test-save", serverUrl)?.oauthState, "state-xyz-789")
+      assert.strictEqual(getAuthForUrl("state-test-save", serverUrl), undefined)
     })
 
     it("should throw UnauthorizedError when no state is saved", async () => {

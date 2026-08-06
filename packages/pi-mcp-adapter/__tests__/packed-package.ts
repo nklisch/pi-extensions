@@ -31,6 +31,9 @@ try {
     "dist/index.d.ts",
     "dist/programmatic.js",
     "dist/programmatic.d.ts",
+    "dist/app-bridge.bundle.js",
+    "dist/mcp-keyring-helper.cjs",
+    "dist/mcp-script-worker.mjs",
   ]) {
     assert(paths.has(required), `packed package is missing ${required}`);
   }
@@ -50,8 +53,13 @@ try {
     `
       const extension = await import('@nklisch/pi-mcp-adapter');
       const api = await import('@nklisch/pi-mcp-adapter/programmatic');
-      if (typeof extension.default !== 'function') throw new Error('missing extension export');
+      if (typeof extension.default !== 'function' || typeof extension.createMcpAdapter !== 'function') {
+        throw new Error('missing standalone extension factory');
+      }
       if (typeof api.createMcpAdapter !== 'function') throw new Error('missing programmatic export');
+      if (extension.createMcpAdapter === api.createMcpAdapter) throw new Error('standalone and programmatic factories collided');
+      const standalone = extension.createMcpAdapter({ config: { mcpServers: {} } });
+      if (typeof standalone !== 'function') throw new Error('invalid standalone factory');
       const adapter = api.createMcpAdapter({ fileDiscovery: 'disabled' });
       if (typeof adapter.extension !== 'function' || typeof adapter.runtime.inspectSources !== 'function') {
         throw new Error('invalid programmatic factory');

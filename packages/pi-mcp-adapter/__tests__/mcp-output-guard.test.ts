@@ -85,6 +85,21 @@ describe("guardMcpOutput", () => {
     expect((summarized.mcpResult as McpResultSummary).fullResultPath).toBeTruthy();
   });
 
+  it("spills the oversized raw result as compact JSON and reports its compact byte size", async () => {
+    const rawMcpResult = { content: [{ type: "text", text: "ok" }], isError: false, structuredContent: { rows: "z".repeat(500) } };
+    const guarded = await guardMcpOutput([{ type: "text", text: "ok" }], { detailsMaxBytes: 50, rawMcpResult });
+
+    const summary = guarded.mcpResult as McpResultSummary;
+    expect(summary.omitted).toBe(true);
+    expect(summary.fullResultPath).toBeTruthy();
+
+    const compact = JSON.stringify(rawMcpResult);
+    const saved = await readFile(summary.fullResultPath!, "utf8");
+    expect(saved).toBe(compact);
+    expect(saved).not.toContain("\n");
+    expect(summary.rawResultBytes).toBe(Buffer.byteLength(compact, "utf8"));
+  });
+
   it("passes image blocks through untouched, even large ones", async () => {
     const image = { type: "image" as const, data: "A".repeat(100_000), mimeType: "image/png" };
     const guarded = await guardMcpOutput(

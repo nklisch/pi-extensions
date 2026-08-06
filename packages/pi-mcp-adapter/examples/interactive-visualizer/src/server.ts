@@ -25,7 +25,7 @@ const server = new McpServer({
   version: "0.1.0",
 });
 
-server.resource(
+server.registerResource(
   "app-html",
   new ResourceTemplate("ui://interactive-visualizer/app.html", { list: undefined }),
   { mimeType: "text/html;profile=mcp-app" },
@@ -51,12 +51,12 @@ server.registerTool(
   "show_chart",
   {
     description: "Display an interactive chart. The chart opens in a UI window.",
-    inputSchema: {
+    inputSchema: z.object({
       type: z.string().describe("Chart type: bar, line, pie, or doughnut"),
       title: z.string().describe("Chart title"),
       labels: z.string().describe("Comma-separated labels for the x-axis or segments"),
       datasets: z.string().describe("JSON array of datasets: [{label, data: number[], color?}]"),
-    },
+    }),
     _meta: { ui: { resourceUri: "ui://interactive-visualizer/app.html" } },
   },
   async (args, extra) => {
@@ -182,7 +182,7 @@ server.registerTool(
   "stream_adventure",
   {
     description: "Stream an interactive choose-your-own-adventure decision tree. The story builds tier by tier. Click any choice node to send your decision back to the agent.",
-    inputSchema: {},
+    inputSchema: z.object({}),
     _meta: { ui: { resourceUri: "ui://interactive-visualizer/app.html" } },
   },
   async (_args, extra) => {

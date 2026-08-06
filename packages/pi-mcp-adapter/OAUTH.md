@@ -20,7 +20,7 @@ The Pi MCP Adapter uses the official MCP SDK's built-in OAuth implementation, wh
 - ✅ **Auto-Discovery** - Discovers OAuth endpoints from server metadata
 - ✅ **Automatic Token Refresh** - SDK handles expired tokens automatically
 - ✅ **State Parameter Validation** - CSRF protection
-- ✅ **Secure Token Storage** - Stored in `~/.pi/agent/mcp-oauth/sha256-<server-hash>/tokens.json`
+- ✅ **Secure Token Storage** - Persistent OAuth entries are stored in the operating system credential store
 
 ## Configuration
 
@@ -58,6 +58,7 @@ You can optionally provide a pre-registered client:
         "clientId": "your-client-id",
         "clientSecret": "your-client-secret",
         "scope": "read write",
+        "authorizationParams": { "access_type": "offline", "prompt": "consent" },
         "redirectUri": "http://localhost:3118/callback"
       }
     }
@@ -75,6 +76,7 @@ You can optionally provide a pre-registered client:
 - `oauth.clientId` - Pre-registered client ID (optional, SDK tries dynamic registration if not provided)
 - `oauth.clientSecret` - Client secret for confidential clients (optional)
 - `oauth.scope` - Requested OAuth scopes (optional)
+- `oauth.authorizationParams` - Extra authorization URL parameters for provider-specific extensions, such as Google's `{ "access_type": "offline", "prompt": "consent" }`. Flow-owned parameters like `client_id`, `redirect_uri`, `scope`, `state`, `code_challenge`, `response_type`, and `resource` cannot be overridden.
 - `oauth.redirectUri` - Exact browser callback URI to advertise and bind, such as `http://localhost:3118/callback` (optional)
 - `oauth.clientName` - Client display name used for dynamic registration (optional, defaults to `Pi Coding Agent`)
 - `oauth.clientUri` - Client homepage URI used for dynamic registration (optional)
@@ -139,11 +141,11 @@ Open the returned URL in your local browser. After approval, copy the full redir
 mcp({
   action: "auth-complete",
   server: "my-oauth-server",
-  args: '{"redirectUrl":"http://localhost:19876/callback?code=...&state=..."}'
+  args: { redirectUrl: "http://localhost:19876/callback?code=...&state=..." }
 })
 ```
 
-You can also pass only the `code` query parameter with `args: '{"code":"..."}'`. Redirect URL completion validates the saved OAuth state; raw code completion is available for providers that display a code directly.
+You can also pass only the `code` query parameter with `args: { code: "..." }`. JSON-string args remain supported. Redirect URL completion validates the saved OAuth state; raw code completion is available for providers that display a code directly.
 
 ### Step 2: Use the Server
 
@@ -151,7 +153,7 @@ Once authenticated, use the server normally:
 
 ```
 mcp({ server: "my-oauth-server" })
-mcp({ tool: "my-tool", args: '{"key": "value"}' })
+mcp({ tool: "my-tool", args: { key: "value" } })
 ```
 
 The SDK automatically:
@@ -224,36 +226,15 @@ A Node.js HTTP server runs on a loopback callback endpoint and handles the activ
 
 ## Token Storage
 
-Tokens are stored per-server in `~/.pi/agent/mcp-oauth/sha256-<server-hash>/tokens.json`. The hash is derived from the configured MCP server name, so any valid config key can be used without becoming a filesystem path component:
+Persistent OAuth entries are stored per configured server name in the operating system credential store, using macOS Keychain, Windows Credential Manager, or Linux Secret Service/libsecret through `@napi-rs/keyring`. The stored entry contains tokens, dynamic client information, legacy verifier/state fields when present, and the server URL binding.
 
-```json
-{
-  "tokens": {
-    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "refreshToken": "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4...",
-    "expiresAt": 1709769600,
-    "scope": "read write"
-  },
-  "clientInfo": {
-    "clientId": "auto-registered-client-id",
-    "clientSecret": "auto-generated-secret",
-    "redirectUris": ["http://localhost:49152/callback"]
-  },
-  "serverUrl": "https://api.example.com/mcp"
-}
-```
+The adapter fails closed when the OS credential store is unavailable. On headless Linux, configure an unlocked Secret Service-compatible keyring before using persistent OAuth; the adapter does not silently fall back to plaintext token files.
 
-Example directory structure:
-```
-~/.pi/agent/mcp-oauth/
-├── sha256-<linear-server-name-hash>/
-│   └── tokens.json
-├── sha256-<github-server-name-hash>/
-│   └── tokens.json
-└── ...
-```
+On Linux, if credential access fails because Pi inherited a revoked session keyring, the adapter makes one best-effort retry through `keyctl session - node <packaged helper>`. This lets explicit re-authentication write fresh credentials from a new session keyring without restarting a long-lived tmux or server process. The recovery path requires `keyctl` and `node` on `PATH`; missing, locked, or otherwise unavailable credential stores still fail closed.
 
-The `serverUrl` field ensures credentials are invalidated if the server URL changes.
+Older versions stored plaintext entries at `~/.pi/agent/mcp-oauth/sha256-<server-hash>/tokens.json`, or under `settings.oauthDir` / `MCP_OAUTH_DIR`. On first read after upgrade, a valid legacy entry is imported into the OS credential store and the plaintext `tokens.json` file is removed. These directories are now legacy import locations, not persistent credential stores or isolation namespaces.
+
+The stored `serverUrl` field ensures credentials are invalidated if the server URL changes.
 
 ## Security Considerations
 
@@ -265,9 +246,9 @@ All OAuth flows use PKCE with the S256 method, preventing authorization code int
 
 A cryptographically secure random state parameter is generated for each flow and validated on callback.
 
-### File Permissions
+### OS Credential Store
 
-Token files (`tokens.json`) are created with `0o600` permissions and stored in hashed per-server directories with `0o700` permissions (readable only by owner).
+Persistent OAuth credentials are written to the OS credential store. Legacy plaintext files are read only for one-way migration and are removed after successful import. On Linux, revoked session-keyring errors can be retried once through a fresh `keyctl session` helper during explicit re-authentication.
 
 ### URL Validation
 
@@ -316,25 +297,22 @@ If the browser fails to open (e.g., in SSH sessions), the authorization URL will
 
 The OAuth implementation uses the following modules:
 
-- `mcp-auth.ts` - Auth storage and retrieval (hashed per-server `tokens.json` files)
+- `mcp-auth.ts` - Auth storage and retrieval through the OS credential store, with one-way legacy `tokens.json` import
 - `mcp-oauth-provider.ts` - SDK OAuthClientProvider implementation
 - `mcp-callback-server.ts` - Node.js HTTP callback server
 - `mcp-auth-flow.ts` - High-level auth flow using SDK transport
 
 ## SDK Integration
 
-The implementation uses these SDK exports:
+The implementation uses the stable modular MCP client and OAuth APIs:
 
 ```typescript
 import {
   auth,
-  UnauthorizedError,
-  OAuthClientProvider,
-} from "@modelcontextprotocol/sdk/client/auth.js"
-
-import {
   StreamableHTTPClientTransport,
-} from "@modelcontextprotocol/sdk/client/streamableHttp.js"
+  UnauthorizedError,
+  type OAuthClientProvider,
+} from "@modelcontextprotocol/client"
 ```
 
 The `McpOAuthProvider` class implements `OAuthClientProvider` and is passed to `StreamableHTTPClientTransport`:

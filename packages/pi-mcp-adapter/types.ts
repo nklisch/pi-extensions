@@ -1,15 +1,47 @@
 // types.ts - Core type definitions
-import type { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import type { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type {
+  ContentBlock as McpContentBlock,
+  ListPromptsResult,
+  ListResourcesResult,
+  ListToolsResult,
+  Transport as McpTransport,
+} from "@modelcontextprotocol/client";
 import type { TextContent, ImageContent } from "@earendil-works/pi-ai";
 import type { UiStreamMode } from "./ui-stream-types.ts";
+import type { UiToolVisibility } from "./ui-tool-visibility.ts";
 
-// Transport type (stdio + HTTP)
-export type Transport = 
-  | StdioClientTransport 
-  | SSEClientTransport 
-  | StreamableHTTPClientTransport;
+export type Transport = McpTransport;
+
+/** Versioned shared-event-bus channel for read-only MCP runtime snapshots. */
+export const MCP_STATUS_EVENT = "pi-mcp-adapter/status/v1";
+
+export const MCP_STATUS_SNAPSHOT_VERSION = 1 as const;
+
+export type McpServerRuntimeStatus =
+  | "connected"
+  | "cached"
+  | "failed"
+  | "needs-auth"
+  | "not-connected"
+  | "disabled";
+
+export interface McpServerStatusSnapshot {
+  readonly name: string;
+  readonly status: McpServerRuntimeStatus;
+  readonly toolCount: number;
+  readonly resourceCount?: number;
+  readonly failedAgoSeconds?: number;
+  readonly disabled: boolean;
+}
+
+export interface McpStatusSnapshot {
+  readonly version: typeof MCP_STATUS_SNAPSHOT_VERSION;
+  readonly servers: ReadonlyArray<McpServerStatusSnapshot>;
+  readonly totalTools: number;
+  readonly totalResources: number;
+  readonly connectedCount: number;
+  readonly disabledCount: number;
+}
 
 // Import sources for config
 export type ImportKind = 
@@ -17,25 +49,45 @@ export type ImportKind =
   | "claude-code" 
   | "claude-desktop" 
   | "codex" 
+  | "opencode"
   | "windsurf" 
   | "vscode";
 
-// Tool definition from MCP server
+type SdkTool = ListToolsResult["tools"][number];
+type SdkResource = ListResourcesResult["resources"][number];
+type SdkPrompt = ListPromptsResult["prompts"][number];
+type SdkPromptArgument = NonNullable<SdkPrompt["arguments"]>[number];
+
+// MCP wire definitions derive their field types from the installed SDK while
+// retaining the adapter's deliberately smaller public surface.
 export interface McpTool {
-  name: string;
-  title?: string;
-  description?: string;
-  inputSchema?: unknown; // JSON Schema
-  _meta?: Record<string, unknown>;
+  name: SdkTool["name"];
+  title?: SdkTool["title"];
+  description?: SdkTool["description"];
+  inputSchema?: SdkTool["inputSchema"]; // JSON Schema
+  _meta?: SdkTool["_meta"];
 }
 
-// Resource definition from MCP server
 export interface McpResource {
-  uri: string;
-  name: string;
-  description?: string;
-  mimeType?: string;
-  _meta?: Record<string, unknown>;
+  uri: SdkResource["uri"];
+  name: SdkResource["name"];
+  description?: SdkResource["description"];
+  mimeType?: SdkResource["mimeType"];
+  _meta?: SdkResource["_meta"];
+}
+
+export interface McpPromptArgument {
+  name: SdkPromptArgument["name"];
+  description?: SdkPromptArgument["description"];
+  required?: SdkPromptArgument["required"];
+}
+
+export interface McpPrompt {
+  name: SdkPrompt["name"];
+  title?: SdkPrompt["title"];
+  description?: SdkPrompt["description"];
+  arguments?: SdkPrompt["arguments"];
+  _meta?: SdkPrompt["_meta"];
 }
 
 export interface UiResourceMeta {
@@ -64,14 +116,9 @@ export interface UiProxyResult<T = Record<string, unknown>> {
 }
 
 export interface UiResourceCsp {
+  resourceDomains?: string[];
   connectDomains?: string[];
-  scriptDomains?: string[];
-  styleDomains?: string[];
-  fontDomains?: string[];
-  imgDomains?: string[];
-  mediaDomains?: string[];
   frameDomains?: string[];
-  workerDomains?: string[];
   baseUriDomains?: string[];
 }
 
@@ -221,12 +268,35 @@ export interface UiSessionMessages {
   prompts: string[];
   notifications: string[];
   intents: Array<{ intent: string; params?: Record<string, unknown> }>;
+  contexts: UiModelContextUpdate[];
+}
+
+export interface UiModelContextUpdate {
+  summary: string;
+  truncated: boolean;
+  payload?: Record<string, unknown>;
 }
 
 export interface UiModelContextParams {
-  content?: unknown[];
+  content?: McpContentBlock[];
   structuredContent?: Record<string, unknown>;
-  [key: string]: unknown;
+}
+
+export function createUiModelContextUpdate(params: UiModelContextParams, maxChars = 12_000): UiModelContextUpdate | undefined {
+  const payload = Object.fromEntries(
+    Object.entries(params).filter(([, value]) => value !== undefined),
+  );
+  if (Object.keys(payload).length === 0) return undefined;
+
+  const serialized = JSON.stringify(payload);
+  if (serialized.length <= maxChars) {
+    return { payload, summary: serialized, truncated: false };
+  }
+
+  return {
+    summary: `${serialized.slice(0, Math.max(0, maxChars - 1))}…`,
+    truncated: true,
+  };
 }
 
 export interface UiOpenLinkResult {
@@ -272,6 +342,8 @@ export interface OAuthConfig {
   clientSecret?: string;
   /** Requested OAuth scopes */
   scope?: string;
+  /** Extra authorization URL parameters for provider-specific extensions. Flow-owned parameters cannot be overridden. */
+  authorizationParams?: Record<string, string>;
   /** Exact authorization-code redirect URI for pre-registered clients */
   redirectUri?: string;
   /** Client display name for dynamic registration */
@@ -284,6 +356,8 @@ export interface OAuthConfig {
 export interface ServerEntry {
   command?: string;
   args?: string[];
+  /** Explicit rmcp-mux Unix-domain socket path. Mutually exclusive with command and url. */
+  socket?: string;
   env?: Record<string, string>;
   cwd?: string;
   // HTTP fields
@@ -305,17 +379,39 @@ export interface ServerEntry {
    * Set to false to explicitly disable OAuth for this server.
    */
   oauth?: OAuthConfig | false;
-  lifecycle?: "keep-alive" | "lazy" | "eager";
+  lifecycle?: "keep-alive" | "lazy" | "lazy-keep-alive" | "eager";
   idleTimeout?: number; // minutes, overrides global setting
   requestTimeoutMs?: number; // milliseconds, overrides global request timeout when > 0
   // Resource handling
   exposeResources?: boolean;
   // Direct tool registration
   directTools?: boolean | string[];
-  // Exclude specific MCP tools/resources by original or prefixed name
+  // Override settings.toolPrefix for this server.
+  toolPrefix?: ToolPrefix;
+  // Include/exclude specific MCP tools/resources by original or prefixed name
+  includeTools?: string[];
   excludeTools?: string[];
+  // Require interactive approval before calling matching MCP tools/resources.
+  approveTools?: boolean | string[];
   // Debug
   debug?: boolean;  // Show server stderr (default: false)
+  /** Enable metadata-only JSONL protocol tracing for this server. */
+  trace?: boolean;
+  /**
+   * MCP protocol era negotiation for this server. Defaults to `"legacy"`
+   * (byte-equivalent to pre-2026 behavior — no `versionNegotiation` is sent).
+   * `"auto"` offers the SDK's default 2026-07-28+ modern versions with
+   * legacy fallback; `"2026-07-28"` pins the connection to that revision
+   * with no fallback. `auto` and `2026-07-28` must be set explicitly.
+   */
+  protocolVersion?: "legacy" | "auto" | "2026-07-28";
+  // Keep configuration visible without allowing connections or execution.
+  disabled?: boolean;
+}
+
+/** Only the literal boolean `true` disables a server. */
+export function isServerDisabled(definition: ServerEntry | undefined): boolean {
+  return definition?.disabled === true;
 }
 
 // Output guard tuning (settings.outputGuard object form)
@@ -329,12 +425,59 @@ export interface McpOutputGuardSettings {
 }
 
 // Settings
+export type ToolPrefix = "server" | "none" | "short" | "mcp";
+export type HostConfigDiscovery = "off" | "prompt" | "on";
+export type McpFooterStatus = "full" | "compact" | "off";
+
+export interface McpTraceSettings {
+  /** Enable tracing for all servers unless a server sets trace to false. */
+  enabled?: boolean;
+  /** JSONL destination; relative paths are resolved from the session cwd. */
+  file?: string;
+  /** Maximum per-session trace file size in bytes. */
+  maxBytes?: number;
+  /** Maximum events retained in the per-session trace file. */
+  maxEvents?: number;
+}
+
+export const MCP_TOOL_APPROVAL_REQUEST_EVENT = "pi-mcp-adapter:tool-approval-request" as const;
+
+export type McpToolApprovalOrigin = "proxy" | "direct" | "script" | "resource" | "iframe";
+export type McpToolApprovalDecision = "allow_once" | "allow_for_session" | "deny" | "abstain";
+export type McpToolApprovalHandler = () => McpToolApprovalDecision | Promise<McpToolApprovalDecision>;
+
+export interface McpToolApprovalRequest {
+  requestId: string;
+  serverName: string;
+  originalToolName: string;
+  prefixedToolName: string;
+  args: Record<string, unknown>;
+  origin: McpToolApprovalOrigin;
+  signal?: AbortSignal;
+  claim(handler: McpToolApprovalHandler): boolean;
+}
+
 export interface McpSettings {
-  toolPrefix?: "server" | "none" | "short";
+  toolPrefix?: ToolPrefix;
+  /** Show the plug prefix in MCP status and connection text (default: true). Set to false to disable it. */
+  showStatusIcon?: boolean;
+  /** Footer status verbosity: full details, compact connected/enabled count, or no footer status. Defaults to full. */
+  mcpFooterStatus?: McpFooterStatus;
+  /** Discover detected host-specific MCP configs only when explicitly enabled. */
+  hostConfigDiscovery?: HostConfigDiscovery;
   idleTimeout?: number; // minutes, default 10, 0 to disable
   requestTimeoutMs?: number; // milliseconds, overrides the SDK request timeout when > 0
   directTools?: boolean;
+  /** Register the trusted MCP-only JavaScript scripting tool. Defaults to true; set false to hide it. */
+  scriptMode?: boolean;
+  /** Default approval gate for matching tools/resources; per-server settings override it. */
+  approveTools?: boolean | string[];
   disableProxyTool?: boolean;
+  /** Freeze direct-tool registration after the initial sync. Automatic metadata updates
+   * (reconnects, lazy-connect, tool-list-changed) won't rebuild the system prompt,
+   * preserving the prompt-cache prefix. The agent rediscovers explicitly via
+   * mcp({ connect: "server" }). Default: false. */
+  freezeDirectTools?: boolean;
   autoAuth?: boolean;
   sampling?: boolean;
   samplingAutoApprove?: boolean;
@@ -347,11 +490,27 @@ export interface McpSettings {
    */
   outputGuard?: boolean | McpOutputGuardSettings;
   /**
+   * Opt-in metadata-only MCP protocol tracing. Payloads, prompts, tool
+   * arguments/results, authorization data, and URLs are never persisted.
+   */
+  trace?: McpTraceSettings;
+  /**
    * Message returned in tool results when a server needs (re-)authentication.
    * "${server}" is substituted with the server name. Defaults to a TUI
    * instruction when unset.
    */
   authRequiredMessage?: string;
+  /**
+   * Legacy OAuth tokens.json import directory.
+   * Relative paths are resolved from the project root (cwd).
+   * Takes precedence over the agent's mcp-oauth/ legacy import directory but
+   * can still be overridden by the MCP_OAUTH_DIR env variable.
+   *
+   * Persistent OAuth credentials are stored in the operating system credential
+   * store, not this directory. Existing plaintext tokens.json files found here
+   * are imported once and removed.
+   */
+  oauthDir?: string;
 }
 
 // Root config
@@ -359,6 +518,11 @@ export interface McpConfig {
   mcpServers: Record<string, ServerEntry>;
   imports?: ImportKind[];
   settings?: McpSettings;
+}
+
+export interface McpAdapterOptions {
+  config?: McpConfig;
+  configPath?: string;
 }
 
 // Alias for clarity
@@ -370,8 +534,18 @@ export interface ToolMetadata {
   description: string;
   resourceUri?: string;   // For resource tools: the URI to read
   uiResourceUri?: string; // For app-enabled tools: the UI resource URI
+  uiVisibility?: UiToolVisibility[];
   inputSchema?: unknown;  // JSON Schema for parameters (stored for describe/errors)
   uiStreamMode?: UiStreamMode;
+}
+
+export interface PromptMetadata {
+  serverName: string;
+  originalName: string;
+  commandName: string;
+  title?: string;
+  description: string;
+  arguments: McpPromptArgument[];
 }
 
 export interface DirectToolSpec {
@@ -396,12 +570,49 @@ export interface McpAuthResult {
   message?: string;
 }
 
+export interface CachedTool {
+  name: string;
+  description?: string;
+  inputSchema?: unknown;
+  uiResourceUri?: string;
+  uiVisibility?: UiToolVisibility[];
+  uiStreamMode?: "eager" | "stream-first";
+}
+
+export interface CachedResource {
+  uri: string;
+  name: string;
+  description?: string;
+}
+
+export interface CachedPrompt {
+  name: string;
+  title?: string;
+  description?: string;
+  arguments?: { name: string; description?: string; required?: boolean }[];
+}
+
+export interface ServerCacheEntry {
+  configHash: string;
+  tools: CachedTool[];
+  resources: CachedResource[];
+  prompts?: CachedPrompt[];
+  instructions?: string;
+  cachedAt: number;
+}
+
+export interface MetadataCache {
+  version: number;
+  servers: Record<string, ServerCacheEntry>;
+}
+
 export interface McpPanelCallbacks {
   reconnect: (serverName: string) => Promise<boolean>;
   canAuthenticate: (serverName: string) => boolean;
   authenticate: (serverName: string) => Promise<McpAuthResult>;
-  getConnectionStatus: (serverName: string) => "connected" | "idle" | "failed" | "needs-auth";
-  refreshCacheAfterReconnect: (serverName: string) => import("./metadata-cache.ts").ServerCacheEntry | null;
+  getConnectionStatus: (serverName: string) => "connected" | "idle" | "failed" | "needs-auth" | "disabled";
+  getFailureMessage?: (serverName: string) => string | null;
+  refreshCacheAfterReconnect: (serverName: string) => ServerCacheEntry | null;
 }
 
 export interface McpPanelResult {
@@ -414,7 +625,7 @@ export interface McpPanelResult {
  */
 export function getServerPrefix(
   serverName: string,
-  mode: "server" | "none" | "short"
+  mode: ToolPrefix
 ): string {
   if (mode === "none") return "";
   if (mode === "short") {
@@ -422,6 +633,7 @@ export function getServerPrefix(
     if (!short) short = "mcp";
     return short;
   }
+  if (mode === "mcp") return `mcp__${serverName.replace(/-/g, "_")}`;
   return serverName.replace(/-/g, "_");
 }
 
@@ -431,37 +643,124 @@ export function getServerPrefix(
 export function formatToolName(
   toolName: string,
   serverName: string,
-  prefix: "server" | "none" | "short"
+  prefix: ToolPrefix
 ): string {
   const p = getServerPrefix(serverName, prefix);
-  return p ? `${p}_${toolName}` : toolName;
+  const sanitized = toolName.replace(/\./g, "_");
+  return p ? `${p}_${sanitized}` : sanitized;
+}
+
+export function resolveToolPrefix(
+  definition?: Pick<ServerEntry, "toolPrefix">,
+  globalPrefix?: ToolPrefix,
+): ToolPrefix {
+  return definition?.toolPrefix ?? globalPrefix ?? "server";
+}
+
+/**
+ * Recover the configured server that owns a prefixed tool name. Longest-prefix
+ * matching handles nested names; normalized-prefix collisions return undefined
+ * so permission systems never enforce a rule against the wrong server.
+ */
+export function resolveServerFromToolName(
+  toolName: string,
+  serverNames: Iterable<string>,
+  prefix: ToolPrefix,
+): string | undefined {
+  if (prefix === "none") return undefined;
+  const candidates: { name: string; prefix: string }[] = [];
+  for (const name of serverNames) {
+    const candidate = getServerPrefix(name, prefix);
+    if (candidate && toolName.startsWith(`${candidate}_`)) {
+      candidates.push({ name, prefix: candidate });
+    }
+  }
+  if (candidates.length === 0) return undefined;
+  candidates.sort((left, right) => right.prefix.length - left.prefix.length);
+  const best = candidates[0]!;
+  if (candidates.some((candidate) => candidate.prefix === best.prefix && candidate.name !== best.name)) {
+    return undefined;
+  }
+  return best.name;
+}
+
+export function sanitizePromptName(name: string): string {
+  const cleaned = name.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^[_-]+|[_-]+$/g, "");
+  if (!cleaned) return "prompt";
+  return /^[0-9]/.test(cleaned) ? `_${cleaned}` : cleaned;
+}
+
+export function formatPromptCommandName(
+  promptName: string,
+  serverName: string,
+  prefix: ToolPrefix,
+): string {
+  const serverPart = getServerPrefix(serverName, prefix) || serverName.replace(/-/g, "_") || "server";
+  return `mcp__${serverPart}__${sanitizePromptName(promptName)}`;
 }
 
 function normalizeToolName(value: string): string {
   return value.replace(/-/g, "_");
 }
 
-export function isToolExcluded(
-  toolName: string,
-  serverName: string,
-  prefix: "server" | "none" | "short",
-  excludeTools?: unknown
-): boolean {
-  if (!Array.isArray(excludeTools) || excludeTools.length === 0) return false;
-
-  const candidates = new Set<string>([
+export function getToolNameCandidates(toolName: string, serverName: string, prefix: ToolPrefix): Set<string> {
+  return new Set<string>([
     normalizeToolName(toolName),
     normalizeToolName(formatToolName(toolName, serverName, prefix)),
     normalizeToolName(formatToolName(toolName, serverName, "server")),
     normalizeToolName(formatToolName(toolName, serverName, "short")),
+    normalizeToolName(formatToolName(toolName, serverName, "mcp")),
   ]);
+}
 
-  for (const excluded of excludeTools) {
-    if (typeof excluded !== "string") continue;
-    if (candidates.has(normalizeToolName(excluded))) {
+function globToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+  return new RegExp(`^${escaped}$`);
+}
+
+export function matchesToolPattern(candidates: Set<string>, patterns?: unknown): boolean {
+  if (!Array.isArray(patterns) || patterns.length === 0) return false;
+
+  for (const pattern of patterns) {
+    if (typeof pattern !== "string") continue;
+    const normalized = normalizeToolName(pattern);
+    if (!normalized.includes("*") && !normalized.includes("?") && candidates.has(normalized)) {
+      return true;
+    }
+    if ((normalized.includes("*") || normalized.includes("?")) && [...candidates].some(candidate => globToRegExp(normalized).test(candidate))) {
       return true;
     }
   }
 
   return false;
+}
+
+export function isToolIncluded(
+  toolName: string,
+  serverName: string,
+  prefix: ToolPrefix,
+  includeTools?: unknown
+): boolean {
+  if (!Array.isArray(includeTools) || includeTools.length === 0) return true;
+  return matchesToolPattern(getToolNameCandidates(toolName, serverName, prefix), includeTools);
+}
+
+export function isToolExcluded(
+  toolName: string,
+  serverName: string,
+  prefix: ToolPrefix,
+  excludeTools?: unknown
+): boolean {
+  return matchesToolPattern(getToolNameCandidates(toolName, serverName, prefix), excludeTools);
+}
+
+export function isToolAllowed(
+  toolName: string,
+  serverName: string,
+  prefix: ToolPrefix,
+  includeTools?: unknown,
+  excludeTools?: unknown,
+): boolean {
+  return isToolIncluded(toolName, serverName, prefix, includeTools)
+    && !isToolExcluded(toolName, serverName, prefix, excludeTools);
 }

@@ -25,6 +25,23 @@ function createConfig(): McpConfig {
   };
 }
 
+function createFailedPanel(
+  connectionStatus: "failed" | "idle",
+  failureMessage: string | null,
+  width: number,
+): string {
+  const config = createConfig();
+  const callbacks: McpPanelCallbacks = {
+    ...createCallbacks(),
+    getConnectionStatus: () => connectionStatus,
+    getFailureMessage: () => failureMessage,
+  };
+  const panel = createMcpPanel(config, createCache(config), new Map(), callbacks, { requestRender: () => {} }, () => {});
+  const output = stripAnsi(panel.render(width).join("\n"));
+  panel.dispose();
+  return output;
+}
+
 function createCache(config: McpConfig): MetadataCache {
   return {
     version: 1,
@@ -90,6 +107,39 @@ describe("mcp-panel rendering", () => {
     expect(output).not.toContain("\x1b]");
     expect(output).not.toContain("https://example.invalid/notice");
     panel.dispose();
+  });
+
+  it("strips an unterminated OSC payload from notices", () => {
+    const config = createConfig();
+    const panel = createMcpPanel(
+      config,
+      createCache(config),
+      new Map(),
+      createCallbacks(),
+      { requestRender: () => {} },
+      () => {},
+      { noticeLines: ["Open \x1b]8;;https://secret.invalid/truncated"] },
+    );
+
+    const output = stripAnsi(panel.render(120).join("\n"));
+
+    expect(output).toContain("Open");
+    expect(output).not.toContain("https://secret.invalid/truncated");
+    panel.dispose();
+  });
+
+  it("renders the selected failure reason wrapped without truncating useful context", () => {
+    const reason = "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is it running?";
+    const output = createFailedPanel("failed", reason, 60);
+
+    expect(output).toContain("failed");
+    for (const word of reason.split(/\s+/)) expect(output).toContain(word);
+    expect(output.split("\n").filter((line) => /docker/i.test(line)).length).toBeGreaterThan(1);
+    expect(output).not.toContain("…");
+  });
+
+  it("does not render a failure reason when the server is not failed", () => {
+    expect(createFailedPanel("idle", "should not appear", 60)).not.toContain("should not appear");
   });
 
   it("keeps dirty changes and closes when Keep & Close is confirmed", () => {

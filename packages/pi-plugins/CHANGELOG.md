@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Bump the pinned `@nklisch/pi-mcp-adapter` sibling to `2.11.0-nklisch.10`, carrying current Codex user and project TOML MCP configuration support into the release bundle.
+- Bump the pinned `@nklisch/pi-mcp-adapter` sibling to `2.20.1-nklisch.0`. The independent MCP runtime now includes current Codex TOML discovery, SDK v2 protocol negotiation, safer credential/config merging, session recovery, secure standalone OAuth storage, ranked agent discovery, approvals, prompts, scripting, and hardened MCP Apps while preserving Plugin Host's source-qualified lifecycle and compact schema-on-demand gateway.
 
 ## v0.3.1
 

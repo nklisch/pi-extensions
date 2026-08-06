@@ -154,4 +154,48 @@ describe("commands onboarding", () => {
     expect(callbacks.getConnectionStatus("legacy")).toBe("needs-auth");
     expect(callbacks.getConnectionStatus("stale")).toBe("needs-auth");
   });
+
+  it("panel reconnect force-clears stale needs-auth state", async () => {
+    process.env.HOME = mkdtempSync(join(tmpdir(), "pi-mcp-commands-reconnect-"));
+    const ui = createUi();
+    const { updateTokens } = await import("../mcp-auth.ts");
+    updateTokens("notion", { accessToken: "token" }, "https://mcp.notion.com/mcp");
+    let currentConnection: any = { status: "needs-auth" };
+    const close = vi.fn(async () => {
+      currentConnection = null;
+    });
+    const connect = vi.fn(async () => {
+      currentConnection = {
+        status: "connected",
+        tools: [{ name: "search", description: "Search" }],
+        resources: [],
+      };
+      return currentConnection;
+    });
+    const state = {
+      config: { mcpServers: { notion: { url: "https://mcp.notion.com/mcp", auth: "oauth" } } },
+      manager: {
+        close,
+        connect,
+        getConnection: vi.fn(() => currentConnection),
+        getAllConnections: vi.fn(() => new Map(currentConnection?.status === "connected" ? [["notion", currentConnection]] : [])),
+      },
+      toolMetadata: new Map(),
+      serverInstructions: new Map(),
+      failureTracker: new Map([["notion", Date.now()]]),
+      lifecycle: { markKeepAlive: vi.fn() },
+    } as any;
+    const { openMcpPanel } = await import("../commands.ts");
+
+    await openMcpPanel(state, { getFlag: () => undefined } as any, { hasUI: true, ui } as any);
+
+    const callbacks = mocks.createMcpPanel.mock.calls[0]?.[3];
+    await expect(callbacks.reconnect("notion")).resolves.toBe(true);
+
+    expect(close).toHaveBeenCalledWith("notion");
+    expect(connect).toHaveBeenCalledWith("notion", state.config.mcpServers.notion);
+    expect(state.failureTracker.has("notion")).toBe(false);
+    expect(state.toolMetadata.get("notion")?.[0]?.name).toBe("notion_search");
+    expect(callbacks.getConnectionStatus("notion")).toBe("connected");
+  });
 });

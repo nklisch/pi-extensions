@@ -14,6 +14,7 @@ function createState(prompts: string[]): McpExtensionState {
           prompts,
           notifications: [],
           intents: [],
+          contexts: [],
         },
       },
     ],
@@ -67,6 +68,28 @@ describe("executeUiMessages", () => {
     expect(result.details).toMatchObject({
       prompts: ["Please analyze this flow"],
       intents: [],
+    });
+  });
+
+  it("returns submitted model context updates", () => {
+    const state = createState([]);
+    state.completedUiSessions[0].messages.contexts.push({
+      payload: { content: [{ type: "text", text: "Selected node A" }] },
+      summary: '{"content":[{"type":"text","text":"Selected node A"}]}',
+      truncated: false,
+    });
+
+    const result = executeUiMessages(state);
+
+    expect(result.content[0]).toMatchObject({
+      text: expect.stringContaining("### Context updates:\n- {\"content\":[{\"type\":\"text\",\"text\":\"Selected node A\"}]}"),
+    });
+    expect(result.details).toMatchObject({
+      contexts: [{
+        payload: { content: [{ type: "text", text: "Selected node A" }] },
+        truncated: false,
+      }],
+      cleared: true,
     });
   });
 });

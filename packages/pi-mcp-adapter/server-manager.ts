@@ -1,48 +1,148 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
-import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import {
-  ElicitationCompleteNotificationSchema,
+  Client,
+  SdkHttpError,
+  SSEClientTransport,
+  StreamableHTTPClientTransport,
+  UnauthorizedError,
+  type GetPromptResult,
   type ReadResourceResult,
+  type RequestOptions,
   type UrlElicitationRequiredError,
-} from "@modelcontextprotocol/sdk/types.js";
-import type {
-  McpTool,
-  McpResource,
-  ServerDefinition,
-  ServerStreamResultPatchNotification,
-  Transport,
+  type VersionNegotiationOptions,
+} from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { UnixSocketClientTransport } from "./unix-socket-transport.ts";
+import { probeMcpEndpoint } from "./mcp-probe.ts";
+import {
+  isServerDisabled,
+  type McpTool,
+  type McpResource,
+  type McpPrompt,
+  type ServerDefinition,
+  type ServerStreamResultPatchNotification,
+  type Transport,
+  type McpTraceSettings,
+  SERVER_STREAM_RESULT_PATCH_METHOD,
+  serverStreamResultPatchNotificationSchema,
 } from "./types.ts";
-import { serverStreamResultPatchNotificationSchema } from "./types.ts";
 import { resolveNpxBinary } from "./npx-resolver.ts";
-import { createMcpJsonSchemaValidator } from "./schema-validator.ts";
+import { createJsonSchemaValidator } from "./json-schema-validator.ts";
 import { logger } from "./logger.ts";
 import { McpOAuthProvider } from "./mcp-oauth-provider.ts";
-import { extractOAuthConfig, supportsOAuth } from "./mcp-auth-flow.ts";
+import { extractOAuthConfig, supportsOAuth, type McpOAuthRuntime } from "./mcp-auth-flow.ts";
+import type { AuthStorageOptions } from "./mcp-auth.ts";
 import { registerSamplingHandler, type ServerSamplingConfig } from "./sampling-handler.ts";
 import {
   handleUrlElicitation,
   registerElicitationHandler,
   type ServerElicitationConfig,
 } from "./elicitation-handler.ts";
-import { interpolateEnvRecord, resolveBearerToken, resolveConfigPath } from "./utils.ts";
+import {
+  resolveBearerToken,
+  resolveCommandSecret,
+  resolveCommandSecretsRecord,
+  resolveConfigPath,
+  resolveServerUrl,
+} from "./utils.ts";
 import { abortable, throwIfAborted } from "./abort.ts";
+import { combineAbortSignals } from "./runtime-owner.ts";
+import {
+  createMcpTraceWriter,
+  isMcpTraceEnabled,
+  McpTraceWriter,
+  type McpTraceObserver,
+  traceTransportKind,
+  wrapTransportWithMcpTrace,
+} from "./mcp-trace.ts";
 
-interface ServerConnection {
+const MAX_CAPTURED_STDERR_BYTES = 8 * 1024;
+const MAX_CAPTURED_STDERR_LINES = 3;
+const abortCleanupPromises = new WeakMap<object, Promise<void>>();
+
+type HttpAuthProviderState =
+  | { status: "disabled" }
+  | { status: "implicit-deferred" }
+  | { status: "explicit"; provider: McpOAuthProvider }
+  | { status: "implicit-challenged"; provider: McpOAuthProvider };
+
+function isUnauthorizedHttpError(error: unknown): boolean {
+  return error instanceof UnauthorizedError || (error instanceof SdkHttpError && error.status === 401);
+}
+
+function shouldFallbackToSse(error: unknown, definition: ServerDefinition): boolean {
+  if (definition.protocolVersion === "2026-07-28") return false;
+  return error instanceof SdkHttpError && [404, 405, 406, 415].includes(error.status);
+}
+
+function resolveVersionNegotiation(definition: ServerDefinition): VersionNegotiationOptions | undefined {
+  switch (definition.protocolVersion) {
+    case undefined:
+    case "legacy":
+      return undefined;
+    case "auto":
+      return { mode: "auto" };
+    case "2026-07-28":
+      return { mode: { pin: "2026-07-28" } };
+    default:
+      throw new Error(`Invalid MCP protocolVersion: ${String(definition.protocolVersion)}`);
+  }
+}
+
+function boundedStderrChunk(chunk: Buffer | string): Buffer {
+  if (Buffer.isBuffer(chunk)) {
+    const start = Math.max(0, chunk.byteLength - MAX_CAPTURED_STDERR_BYTES);
+    return Buffer.from(chunk.subarray(start));
+  }
+
+  // Limit string conversion before encoding; Buffer.from(largeString) would
+  // otherwise allocate the entire stderr event before applying the cap.
+  const suffix = chunk.length > MAX_CAPTURED_STDERR_BYTES
+    ? chunk.slice(-MAX_CAPTURED_STDERR_BYTES)
+    : chunk;
+  const bytes = Buffer.from(suffix, "utf8");
+  return bytes.byteLength > MAX_CAPTURED_STDERR_BYTES
+    ? Buffer.from(bytes.subarray(bytes.byteLength - MAX_CAPTURED_STDERR_BYTES))
+    : bytes;
+}
+
+function appendStderrTail(tail: Buffer, chunk: Buffer | string): Buffer {
+  const bytes = boundedStderrChunk(chunk);
+  if (bytes.length === 0) return tail;
+  if (tail.length === 0) return bytes;
+  const combined = Buffer.concat([tail, bytes]);
+  return combined.length > MAX_CAPTURED_STDERR_BYTES
+    ? Buffer.from(combined.subarray(combined.length - MAX_CAPTURED_STDERR_BYTES))
+    : combined;
+}
+
+export interface ServerConnection {
   client: Client;
   transport: Transport;
   definition: ServerDefinition;
   tools: McpTool[];
   resources: McpResource[];
+  prompts: McpPrompt[];
+  /** True when prompts were advertised but prompts/list failed. */
+  promptDiscoveryFailed?: boolean;
+  instructions?: string;
   lastUsedAt: number;
   inFlight: number;
   status: "connected" | "closed" | "needs-auth";
 }
 
 type UiStreamListener = (serverName: string, notification: ServerStreamResultPatchNotification["params"]) => void;
+type MetadataListChangedListener = (serverName: string, reason: string) => void;
+
+function connectionServerUrl(definition: ServerDefinition, resolved: boolean): string {
+  if (!resolved) return resolveServerUrl(definition)!;
+  if (typeof definition.url !== "string") throw new Error("Resolved MCP server URL must be a string");
+  try {
+    new URL(definition.url);
+  } catch (error) {
+    throw new Error(`Invalid resolved MCP server URL: ${definition.url}`, { cause: error });
+  }
+  return definition.url;
+}
 
 interface ConnectOptions {
   /** Programmatic Streamable HTTP sources must never silently become legacy SSE. */
@@ -56,11 +156,22 @@ interface ConnectOptions {
 export class McpServerManager {
   private connections = new Map<string, ServerConnection>();
   private connectPromises = new Map<string, Promise<ServerConnection>>();
+  private reconnectPromises = new Map<string, Promise<ServerConnection>>();
   private uiStreamListeners = new Map<string, UiStreamListener>();
   private samplingConfig: ServerSamplingConfig | undefined;
+  private metadataListChangedListener: MetadataListChangedListener | undefined;
   private elicitationConfig: ServerElicitationConfig | undefined;
+  private authStorageOptions: AuthStorageOptions = {};
+  private oauthRuntime: McpOAuthRuntime | undefined;
   private acceptedUrlElicitations = new Map<string, Set<string>>();
   private defaultRequestTimeoutMs: number | undefined;
+  private runtimeSignal: AbortSignal | undefined;
+  private closePromises = new Map<string, Promise<void>>();
+  private closeGenerations = new Map<string, number>();
+  private connectAttempts = new Map<string, AbortController>();
+  private traceSettings: McpTraceSettings | undefined;
+  private traceWriter: McpTraceWriter | undefined;
+  private stopped = false;
 
   /** Default cwd for stdio servers without an explicit config `cwd`. */
   constructor(private readonly defaultCwd?: string) {}
@@ -69,12 +180,32 @@ export class McpServerManager {
     this.samplingConfig = config;
   }
 
+  setMetadataListChangedListener(listener: MetadataListChangedListener | undefined): void {
+    this.metadataListChangedListener = listener;
+  }
+
   setElicitationConfig(config: ServerElicitationConfig | undefined): void {
     this.elicitationConfig = config;
   }
 
+  setRuntimeSignal(signal: AbortSignal | undefined): void {
+    this.runtimeSignal = signal;
+  }
+
   setDefaultRequestTimeoutMs(timeoutMs: number | undefined): void {
     this.defaultRequestTimeoutMs = normalizeRequestTimeoutMs(timeoutMs);
+  }
+
+  setTraceConfig(settings: McpTraceSettings | undefined): void {
+    this.traceSettings = settings;
+  }
+
+  setAuthStorageOptions(options: AuthStorageOptions): void {
+    this.authStorageOptions = options;
+  }
+
+  setOAuthRuntime(runtime: McpOAuthRuntime): void {
+    this.oauthRuntime = runtime;
   }
 
   getRequestOptions(name: string, signal?: AbortSignal): RequestOptions | undefined {
@@ -94,13 +225,14 @@ export class McpServerManager {
     signal?: AbortSignal,
   ): RequestOptions | undefined {
     const timeout = this.getResolvedRequestTimeoutMs(definition);
+    const ownedSignal = combineAbortSignals(this.runtimeSignal, signal);
 
-    if (!signal && timeout === undefined) {
+    if (!ownedSignal && timeout === undefined) {
       return undefined;
     }
 
     return {
-      ...(signal ? { signal } : {}),
+      ...(ownedSignal ? { signal: ownedSignal } : {}),
       ...(timeout !== undefined ? { timeout } : {}),
     };
   }
@@ -111,117 +243,338 @@ export class McpServerManager {
     signal?: AbortSignal,
     options: ConnectOptions = {},
   ): Promise<ServerConnection> {
-    throwIfAborted(signal);
-    // Dedupe concurrent connection attempts
+    if (isServerDisabled(definition)) throw new Error(`MCP server "${name}" is disabled`);
+    if (this.stopped) throw new Error("MCP server manager is closed");
+    const ownedSignal = combineAbortSignals(this.runtimeSignal, signal);
+    throwIfAborted(ownedSignal);
+    const closing = this.closePromises.get(name);
+    if (closing) await abortable(closing, ownedSignal);
+    throwIfAborted(ownedSignal);
+
+    // Dedupe concurrent connection attempts.
     if (this.connectPromises.has(name)) {
-      return abortable(this.connectPromises.get(name)!, signal);
+      return abortable(this.connectPromises.get(name)!, ownedSignal);
     }
 
-    // Reuse existing connection if healthy
     const existing = this.connections.get(name);
     if (existing?.status === "connected") {
       existing.lastUsedAt = Date.now();
       return existing;
     }
 
-    const promise = this.createConnection(name, definition, signal, options);
+    const generation = this.closeGenerations.get(name) ?? 0;
+    const attemptController = new AbortController();
+    const attemptSignal = combineAbortSignals(ownedSignal, attemptController.signal);
+    const connectionAttempt = this.createConnection(name, definition, attemptSignal, ownedSignal, options);
+    const promise = definition.url
+      ? connectionAttempt.catch(async error => { throw await this.enrichHttpConnectionError(definition, error, options); })
+      : connectionAttempt;
     this.connectPromises.set(name, promise);
+    this.connectAttempts.set(name, attemptController);
 
     try {
       const connection = await promise;
+      if (attemptController.signal.aborted || (this.closeGenerations.get(name) ?? 0) !== generation) {
+        await this.disposeConnection(connection);
+        throwIfAborted(attemptSignal);
+        throw new Error(`MCP connection for ${name} was closed while connecting`);
+      }
       this.connections.set(name, connection);
       return connection;
     } finally {
-      this.connectPromises.delete(name);
+      if (this.connectPromises.get(name) === promise) this.connectPromises.delete(name);
+      if (this.connectAttempts.get(name) === attemptController) this.connectAttempts.delete(name);
     }
+  }
+
+  /**
+   * Reconnect a server whose connection was proven stale (e.g. by a 404
+   * "session no longer exists" response). Single-flight per server name —
+   * concurrent callers that raced to the same failure share one reconnect —
+   * and identity-guarded: `staleConnection` is only torn down if it is
+   * still the manager's current connection for `name`. If a concurrent
+   * reconnect (or an unrelated connect()) already replaced it with a fresh
+   * connection, that fresh connection is returned untouched.
+   */
+  async reconnect(
+    name: string,
+    definition: ServerDefinition,
+    staleConnection: ServerConnection,
+    signal?: AbortSignal,
+  ): Promise<ServerConnection> {
+    if (isServerDisabled(definition)) throw new Error(`MCP server "${name}" is disabled`);
+    if (this.stopped) throw new Error("MCP server manager is closed");
+    const ownedSignal = combineAbortSignals(this.runtimeSignal, signal);
+    throwIfAborted(ownedSignal);
+    const inFlight = this.reconnectPromises.get(name);
+    if (inFlight) {
+      return abortable(inFlight, ownedSignal);
+    }
+
+    const promise = this.doReconnect(name, definition, staleConnection, ownedSignal).finally(() => {
+      if (this.reconnectPromises.get(name) === promise) {
+        this.reconnectPromises.delete(name);
+      }
+    });
+    this.reconnectPromises.set(name, promise);
+    return abortable(promise, ownedSignal);
+  }
+
+  private async doReconnect(
+    name: string,
+    definition: ServerDefinition,
+    staleConnection: ServerConnection,
+    signal?: AbortSignal,
+  ): Promise<ServerConnection> {
+    throwIfAborted(signal);
+    const current = this.connections.get(name);
+
+    // Never tear down a connection we didn't prove stale: if the map no
+    // longer holds the connection we were asked to replace, someone else
+    // already reconnected (or connected) first.
+    if (current !== staleConnection) {
+      return current ?? this.connect(name, definition, signal);
+    }
+
+    const staleInFlight = staleConnection.inFlight;
+    await this.close(name);
+    const fresh = await this.connect(name, definition, signal);
+    fresh.inFlight = Math.max(fresh.inFlight, staleInFlight);
+    return fresh;
   }
 
   private async createConnection(
     name: string,
     definition: ServerDefinition,
     signal?: AbortSignal,
+    requestSignal?: AbortSignal,
     options: ConnectOptions = {},
   ): Promise<ServerConnection> {
     throwIfAborted(signal);
-    const client = this.createClient(name);
 
+    const tracingEnabled = isMcpTraceEnabled(definition, this.traceSettings);
+    const traceWriter = tracingEnabled
+      ? (this.traceWriter ??= createMcpTraceWriter(this.defaultCwd, this.traceSettings ?? {}))
+      : undefined;
+    const traceObserver: McpTraceObserver | undefined = traceWriter
+      ? { record: event => traceWriter.write(event) }
+      : undefined;
+
+    // Programmatic sources hand the manager fully-resolved launch values; the
+    // persisted secret-free definition is what the connection should expose.
+    const retainedDefinition = options.retainedDefinition ?? definition;
+
+    let client: Client;
     let transport: Transport;
+    let clientConnected = false;
+    let transportAlreadyTraced = false;
+    let stderrTail: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+    const configuredTransports = [definition.command, definition.url, definition.socket]
+      .filter(value => typeof value === "string" && value.length > 0);
+    if (configuredTransports.length !== 1) {
+      throw new Error(`Server ${name} must configure exactly one of command, url, or socket`);
+    }
+
+    const requestOptions = this.buildRequestOptions(definition, requestSignal);
 
     if (definition.command) {
+      client = this.createClient(name, definition);
       let command = definition.command;
       let args = definition.args ?? [];
 
       if (command === "npx" || command === "npm") {
-        const resolved = await resolveNpxBinary(command, args);
+        const resolved = await resolveNpxBinary(command, args, signal);
         if (resolved) {
           command = resolved.isJs ? "node" : resolved.binPath;
           args = resolved.isJs ? [resolved.binPath, ...resolved.extraArgs] : resolved.extraArgs;
           logger.debug(`${name} resolved to ${resolved.binPath} (skipping npm parent)`);
         }
       }
+      throwIfAborted(signal);
 
-      transport = new StdioClientTransport({
+      // Programmatic (resolved) sources supply env/cwd verbatim and must not
+      // inherit process.env or run command-secret resolvers; file-config
+      // sources go through the full interpolation + command-secret pipeline.
+      const env = options.values === "resolved" ? definition.env : resolveEnv(definition.env, name);
+      const cwd = options.values === "resolved"
+        ? (definition.cwd ?? this.defaultCwd)
+        : (resolveConfigPath(definition.cwd) ?? this.defaultCwd);
+      const stdioTransport = new StdioClientTransport({
         command,
         args,
-        env: options.values === "resolved" ? definition.env : resolveEnv(definition.env),
-        cwd: options.values === "resolved"
-          ? definition.cwd ?? this.defaultCwd
-          : resolveConfigPath(definition.cwd) ?? this.defaultCwd,
-        stderr: definition.debug ? "inherit" : "ignore",
+        ...(env !== undefined ? { env } : {}),
+        ...(cwd !== undefined ? { cwd } : {}),
+        stderr: definition.debug ? "inherit" : "pipe",
       });
+      // Keep non-debug child diagnostics available for connection failures without
+      // retaining an unbounded stream or changing the existing debug behavior.
+      if (stdioTransport.stderr) {
+        stdioTransport.stderr.on("data", (chunk: Buffer | string) => {
+          stderrTail = appendStderrTail(stderrTail, chunk);
+        });
+      }
+      transport = stdioTransport;
     } else if (definition.url) {
-      // HTTP transport with fallback for file-config users. Programmatic
-      // Streamable HTTP sources explicitly disable fallback.
-      transport = await this.createHttpTransport(definition, name, signal, options);
+      const httpConnection = await this.connectHttpClient(
+        definition,
+        name,
+        requestOptions,
+        signal,
+        traceObserver,
+        options,
+      );
+      client = httpConnection.client;
+      transport = httpConnection.transport;
+      if (httpConnection.status === "needs-auth") {
+        return {
+          client,
+          transport,
+          definition: retainedDefinition,
+          tools: [],
+          resources: [],
+          prompts: [],
+          lastUsedAt: Date.now(),
+          inFlight: 0,
+          status: "needs-auth",
+        };
+      }
+      clientConnected = true;
+      transportAlreadyTraced = traceObserver !== undefined;
     } else {
-      throw new Error(`Server ${name} has no command or url`);
+      client = this.createClient(name, definition);
+      transport = new UnixSocketClientTransport(resolveConfigPath(definition.socket!)!);
     }
 
-    const requestOptions = this.buildRequestOptions(definition, signal);
+    if (traceObserver && !transportAlreadyTraced) {
+      const traceTransportKindValue = traceTransportKind(definition, transport);
+      transport = wrapTransportWithMcpTrace(transport, name, traceTransportKindValue, traceObserver);
+    }
 
     try {
-      await client.connect(transport, requestOptions);
+      throwIfAborted(signal);
+      if (!clientConnected) {
+        await this.connectClientWithAbort(client, transport, requestOptions, signal);
+      }
       this.attachAdapterNotificationHandlers(name, client);
 
-      // Discover tools and resources
-      const [tools, resources] = await Promise.all([
-        this.fetchAllTools(client, requestOptions),
-        this.fetchAllResources(client, requestOptions),
-      ]);
-
-      return {
+      const instructions = client.getInstructions?.();
+      const connection: ServerConnection = {
         client,
         transport,
-        definition: options.retainedDefinition ?? definition,
-        tools,
-        resources,
+        definition: retainedDefinition,
+        tools: [],
+        resources: [],
+        prompts: [],
+        ...(instructions !== undefined ? { instructions } : {}),
         lastUsedAt: Date.now(),
         inFlight: 0,
         status: "connected",
       };
-    } catch (error) {
-      // Check for UnauthorizedError - server requires OAuth
-      if (error instanceof UnauthorizedError && supportsOAuth(definition)) {
-        // Clean up both client and transport before reporting needs-auth.
-        await client.close().catch(() => {});
-        await transport.close().catch(() => {});
 
+      // Reflect the SDK's own close signal in connection status, guarded by
+      // identity so a stale connection's late close can never clobber a fresh
+      // connection. The SDK client owns the transport callbacks.
+      client.onclose = () => {
+        if (this.connections.get(name) === connection) {
+          connection.status = "closed";
+        }
+      };
+
+      // Discover tools, resources, and prompts. Resource and prompt listing is
+      // optional: only servers advertising the capability are queried.
+      const [tools, resources, promptResult] = await Promise.all([
+        this.fetchAllTools(client, requestOptions),
+        this.fetchAllResources(client, requestOptions),
+        this.fetchAllPrompts(client, requestOptions),
+      ]);
+      connection.tools = tools;
+      connection.resources = resources;
+      connection.prompts = promptResult.prompts;
+      connection.promptDiscoveryFailed = promptResult.failed;
+
+      return connection;
+    } catch (error) {
+      // If connectClientWithAbort closed the transport, await that exact close.
+      // Otherwise the SDK client owns its transport and performs cleanup once.
+      const abortCleanup = abortCleanupPromises.get(transport);
+      const abortCleanupFailed = error instanceof AggregateError && error.message === "MCP connection abort cleanup failed";
+      const cleanupResults = abortCleanupFailed
+        ? []
+        : await Promise.allSettled([
+            abortCleanup ?? Promise.resolve().then(() => client.close()),
+          ]);
+      const cleanupFailures = cleanupResults.flatMap(result => result.status === "rejected" ? [result.reason] : []);
+      let reportedError: unknown = error;
+      if (cleanupFailures.length > 0) {
+        reportedError = new AggregateError([error, ...cleanupFailures], "MCP connection setup failed");
+      }
+
+      // A cleanup failure remains a setup failure rather than being hidden
+      // behind needs-auth.
+      if (isUnauthorizedHttpError(error) && supportsOAuth(definition) && cleanupFailures.length === 0) {
         return {
           client,
           transport,
-          definition: options.retainedDefinition ?? definition,
+          definition: retainedDefinition,
           tools: [],
           resources: [],
+          prompts: [],
           lastUsedAt: Date.now(),
           inFlight: 0,
           status: "needs-auth",
         };
       }
 
-      // Clean up both client and transport on any error
-      await client.close().catch(() => {});
-      await transport.close().catch(() => {});
+      if (stderrTail.length > 0) {
+        const stderrText = stderrTail.toString("utf8").trim();
+        const lines = stderrText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        if (lines.length > 0) {
+          const baseMessage = reportedError instanceof Error ? reportedError.message : String(reportedError);
+          const detail = lines.slice(-MAX_CAPTURED_STDERR_LINES).join(" — ");
+          throw new Error(`${baseMessage} (${detail})`, { cause: reportedError });
+        }
+      }
+      throw reportedError;
+    }
+  }
+
+  private async enrichHttpConnectionError(definition: ServerDefinition, error: unknown, options: ConnectOptions): Promise<Error> {
+    const originalMessage = error instanceof Error ? error.message : String(error);
+    try {
+      const probe = await probeMcpEndpoint(connectionServerUrl(definition, options.values === "resolved"));
+      return new Error(`${originalMessage} — probe: ${probe.classification}`, { cause: error });
+    } catch {
+      return error instanceof Error ? error : new Error(originalMessage);
+    }
+  }
+
+  private async connectClientWithAbort(
+    client: Client,
+    transport: Transport,
+    requestOptions?: RequestOptions,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
+    let abortCleanup: Promise<void> | undefined;
+    const closeTransport = () => {
+      abortCleanup = Promise.resolve().then(() => transport.close());
+      abortCleanupPromises.set(transport, abortCleanup);
+    };
+    signal?.addEventListener("abort", closeTransport, { once: true });
+    try {
+      await abortable(client.connect(transport, requestOptions), signal);
+      await abortCleanup;
+    } catch (error) {
+      if (abortCleanup) {
+        try {
+          await abortCleanup;
+        } catch (cleanupError) {
+          throw new AggregateError([error, cleanupError], "MCP connection abort cleanup failed");
+        }
+      }
       throw error;
+    } finally {
+      signal?.removeEventListener("abort", closeTransport);
     }
   }
 
@@ -239,16 +592,38 @@ export class McpServerManager {
     };
   }
 
-  private createClient(serverName: string): Client {
+  private createClient(serverName: string, definition: ServerDefinition): Client {
     const capabilities = this.buildClientCapabilities();
-    const client = new Client(
+    const versionNegotiation = resolveVersionNegotiation(definition);
+    let client: Client;
+    client = new Client(
       { name: `pi-mcp-${serverName}`, version: "1.0.0" },
       {
-        ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
         // Custom validator: the SDK default Ajv logs a warning for every
         // schemars-style integer-width format (int64, uint64, ...) it meets
-        // in a tool outputSchema. Ours registers them as pass-throughs.
-        jsonSchemaValidator: createMcpJsonSchemaValidator(),
+        // in a tool outputSchema. The shared validator registers them as
+        // real range-checked formats, both silencing the warning and making
+        // the annotation true.
+        jsonSchemaValidator: createJsonSchemaValidator(),
+        ...(versionNegotiation ? { versionNegotiation } : {}),
+        ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
+        listChanged: {
+          tools: {
+            onChanged: (error: Error | null, tools: McpTool[] | null) => {
+              this.handleToolsListChanged(serverName, client, error, tools);
+            },
+          },
+          resources: {
+            onChanged: (error: Error | null, resources: McpResource[] | null) => {
+              this.handleResourcesListChanged(serverName, client, error, resources);
+            },
+          },
+          prompts: {
+            onChanged: (error: Error | null, prompts: McpPrompt[] | null) => {
+              this.handlePromptsListChanged(serverName, client, error, prompts);
+            },
+          },
+        },
       },
     );
     if (this.samplingConfig) {
@@ -261,7 +636,8 @@ export class McpServerManager {
         onUrlAccepted: elicitationId => this.rememberUrlElicitation(serverName, elicitationId),
       });
       if (this.elicitationConfig.allowUrl) {
-        client.setNotificationHandler(ElicitationCompleteNotificationSchema, notification => {
+        client.setNotificationHandler("notifications/elicitation/complete", notification => {
+          if (this.runtimeSignal?.aborted) return;
           const accepted = this.acceptedUrlElicitations.get(serverName);
           if (!accepted?.delete(notification.params.elicitationId)) return;
           this.elicitationConfig?.ui.notify(
@@ -274,11 +650,63 @@ export class McpServerManager {
     return client;
   }
 
+  private handleToolsListChanged(
+    serverName: string,
+    client: Client,
+    error: Error | null,
+    tools: McpTool[] | null,
+  ): void {
+    if (error) {
+      logger.debug(`MCP: tools/list_changed refresh failed for ${serverName}: ${error.message}`);
+      return;
+    }
+    if (!tools) return;
+    const connection = this.connections.get(serverName);
+    if (!connection || connection.client !== client || connection.status !== "connected") return;
+    connection.tools = tools;
+    this.metadataListChangedListener?.(serverName, "tools-list-changed");
+  }
+
+  private handlePromptsListChanged(
+    serverName: string,
+    client: Client,
+    error: Error | null,
+    prompts: McpPrompt[] | null,
+  ): void {
+    if (error) {
+      logger.debug(`MCP: prompts/list_changed refresh failed for ${serverName}: ${error.message}`);
+      return;
+    }
+    if (!prompts) return;
+    const connection = this.connections.get(serverName);
+    if (!connection || connection.client !== client || connection.status !== "connected") return;
+    connection.prompts = prompts;
+    connection.promptDiscoveryFailed = false;
+    this.metadataListChangedListener?.(serverName, "prompts-list-changed");
+  }
+
+  private handleResourcesListChanged(
+    serverName: string,
+    client: Client,
+    error: Error | null,
+    resources: McpResource[] | null,
+  ): void {
+    if (error) {
+      logger.debug(`MCP: resources/list_changed refresh failed for ${serverName}: ${error.message}`);
+      return;
+    }
+    if (!resources) return;
+    const connection = this.connections.get(serverName);
+    if (!connection || connection.client !== client || connection.status !== "connected") return;
+    connection.resources = resources;
+    this.metadataListChangedListener?.(serverName, "resources-list-changed");
+  }
+
   async handleUrlElicitationRequired(
     serverName: string,
     error: UrlElicitationRequiredError,
   ): Promise<"accept" | "decline" | "cancel"> {
-    if (!this.elicitationConfig?.allowUrl) return "cancel";
+    if (this.runtimeSignal?.aborted || !this.elicitationConfig?.allowUrl) return "cancel";
     for (const params of error.elicitations) {
       const result = await handleUrlElicitation({
         ...this.elicitationConfig,
@@ -291,6 +719,7 @@ export class McpServerManager {
   }
 
   private rememberUrlElicitation(serverName: string, elicitationId: string): void {
+    if (this.runtimeSignal?.aborted) return;
     let accepted = this.acceptedUrlElicitations.get(serverName);
     if (!accepted) {
       accepted = new Set();
@@ -299,83 +728,143 @@ export class McpServerManager {
     accepted.add(elicitationId);
   }
 
-  private async createHttpTransport(
+  private async connectHttpClient(
     definition: ServerDefinition,
     serverName: string,
+    requestOptions: RequestOptions | undefined,
     signal?: AbortSignal,
+    traceObserver?: McpTraceObserver,
     options: ConnectOptions = {},
-  ): Promise<Transport> {
+  ): Promise<{ client: Client; transport: Transport; status: "connected" | "needs-auth" }> {
     throwIfAborted(signal);
-    const url = new URL(definition.url!);
+    const serverUrl = connectionServerUrl(definition, options.values === "resolved");
+    const url = new URL(serverUrl);
 
-    // Build headers first (including any bearer token)
-    const headers = options.values === "resolved"
+    // Programmatic sources supply fully-resolved header/bearer values; skip
+    // command-secret resolution, env interpolation, and the resulting header
+    // validation. File-config sources go through the secret-aware pipeline.
+    const resolved = options.values === "resolved";
+    const hasCommandHeader = resolved
+      ? false
+      : Object.values(definition.headers ?? {})
+        .some(value => value.startsWith("!") && !value.startsWith("!!"));
+    const headers = resolved
       ? { ...(definition.headers ?? {}) }
-      : resolveHeaders(definition.headers) ?? {};
+      : (resolveCommandSecretsRecord(
+        definition.headers,
+        key => `MCP server "${serverName}" HTTP header "${key}"`,
+      ) ?? {});
 
-    // For bearer auth, add the token to headers BEFORE creating requestInit
+    // Resolve bearer auth before creating requestInit so every attempted
+    // transport receives the same headers.
+    const rawBearer = definition.bearerToken;
+    const commandBearer = !resolved && rawBearer !== undefined
+      && rawBearer.startsWith("!") && !rawBearer.startsWith("!!")
+      ? rawBearer
+      : undefined;
     if (definition.auth === "bearer") {
-      const token = options.values === "resolved"
-        ? definition.bearerToken
-        : resolveBearerToken(definition);
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
+      const token = resolved
+        ? rawBearer
+        : commandBearer
+          ? resolveCommandSecret(commandBearer, `MCP server "${serverName}" HTTP bearer token`)
+          : resolveBearerToken(definition);
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    if (!resolved && (hasCommandHeader || commandBearer)) {
+      try {
+        new Headers(headers);
+      } catch {
+        throw new Error(`Failed to resolve MCP server "${serverName}" HTTP command secret: command returned an invalid header value`);
       }
     }
 
-    // Create request init with headers (Authorization now included for bearer auth)
     const requestInit = Object.keys(headers).length > 0 ? { headers } : undefined;
+    const createAuthProvider = (): McpOAuthProvider => new McpOAuthProvider(
+      serverName,
+      serverUrl,
+      extractOAuthConfig(definition),
+      { onRedirect: async () => {} },
+      this.authStorageOptions,
+      this.oauthRuntime?.signal,
+    );
 
-    // For OAuth servers, create an auth provider
-    let authProvider: McpOAuthProvider | undefined;
-    if (supportsOAuth(definition)) {
-      const oauthConfig = extractOAuthConfig(definition);
-      authProvider = new McpOAuthProvider(
-        serverName,
-        definition.url!,
-        oauthConfig,
-        {
-          onRedirect: async (_authUrl) => {
-            // URL is captured by startAuth, no need to log
-          },
+    // Explicit OAuth checks secure storage immediately. Implicit OAuth defers
+    // provider construction until the server proves authentication is needed.
+    let authState: HttpAuthProviderState = supportsOAuth(definition)
+      ? definition.auth === undefined
+        ? { status: "implicit-deferred" }
+        : { status: "explicit", provider: createAuthProvider() }
+      : { status: "disabled" };
+
+    const attempt = async (
+      kind: "streamable-http" | "sse",
+    ): Promise<
+      | { status: "connected"; client: Client; transport: Transport }
+      | { status: "failed"; client: Client; transport: Transport; error: unknown }
+    > => {
+      const authProvider = "provider" in authState ? authState.provider : undefined;
+      const transportOptions = {
+        ...(requestInit !== undefined ? { requestInit } : {}),
+        ...(authProvider !== undefined ? { authProvider } : {}),
+      };
+      const baseTransport: Transport = kind === "streamable-http"
+        ? new StreamableHTTPClientTransport(url, transportOptions)
+        : new SSEClientTransport(url, transportOptions);
+      const transport = traceObserver
+        ? wrapTransportWithMcpTrace(baseTransport, serverName, kind, traceObserver)
+        : baseTransport;
+      const client = this.createClient(serverName, definition);
+
+      try {
+        await this.connectClientWithAbort(client, transport, requestOptions, signal);
+        return { status: "connected", client, transport };
+      } catch (error) {
+        const abortCleanupFailed = error instanceof AggregateError
+          && error.message === "MCP connection abort cleanup failed";
+        if (!abortCleanupFailed) {
+          try {
+            await (abortCleanupPromises.get(transport) ?? client.close());
+          } catch (cleanupError) {
+            throw new AggregateError([error, cleanupError], "MCP HTTP connection cleanup failed");
+          }
         }
-      );
-    }
+        return { status: "failed", client, transport, error };
+      }
+    };
 
-    // Try StreamableHTTP first (modern MCP servers)
-    const streamableTransport = new StreamableHTTPClientTransport(url, {
-      requestInit,
-      authProvider,
-    });
+    // Connect the real client once. Retry Streamable HTTP only for an implicit
+    // OAuth challenge; use SSE only for definitive endpoint incompatibility
+    // and only when the caller has not pinned Streamable HTTP as exact
+    // (programmatic sources opt out of legacy SSE via allowLegacySseFallback).
+    let kind: "streamable-http" | "sse" = "streamable-http";
+    for (;;) {
+      const result = await attempt(kind);
+      if (result.status === "connected") return result;
+      if (result.error instanceof AggregateError
+        && result.error.message === "MCP connection abort cleanup failed") {
+        throw result.error;
+      }
+      if (signal?.aborted) throwIfAborted(signal);
 
-    try {
-      // Create a test client to verify the transport works
-      const testClient = new Client({ name: "pi-mcp-probe", version: "2.1.2" });
-      await testClient.connect(streamableTransport, this.buildRequestOptions(definition, signal));
-      await testClient.close().catch(() => {});
-      // Close probe transport before creating fresh one
-      await streamableTransport.close().catch(() => {});
-
-      // StreamableHTTP works - create fresh transport for actual use
-      return new StreamableHTTPClientTransport(url, { requestInit, authProvider });
-    } catch (error) {
-      // StreamableHTTP failed, close and try SSE fallback
-      await streamableTransport.close().catch(() => {});
-
-      // Host cancellation is not transport capability evidence; do not fall
-      // through to SSE when the caller is trying to cancel the connect.
-      if (signal?.aborted) {
-        throwIfAborted(signal);
+      if (authState.status === "implicit-deferred" && isUnauthorizedHttpError(result.error)) {
+        authState = { status: "implicit-challenged", provider: createAuthProvider() };
+        continue;
+      }
+      if (isUnauthorizedHttpError(result.error)) {
+        if (supportsOAuth(definition)) {
+          return { client: result.client, transport: result.transport, status: "needs-auth" };
+        }
+        throw result.error;
       }
 
-      // If this was an UnauthorizedError, don't try SSE - the server needs auth.
-      // Programmatic Streamable HTTP declarations are exact and never fall back.
-      if (error instanceof UnauthorizedError || options.allowLegacySseFallback === false) {
-        throw error;
+      if (kind === "streamable-http"
+        && options.allowLegacySseFallback !== false
+        && shouldFallbackToSse(result.error, definition)) {
+        kind = "sse";
+        continue;
       }
-
-      // SSE is the legacy transport for ordinary file configuration only.
-      return new SSEClientTransport(url, { requestInit, authProvider });
+      throw result.error;
     }
   }
 
@@ -392,7 +881,34 @@ export class McpServerManager {
     return allTools;
   }
 
+  private async fetchAllPrompts(
+    client: Client,
+    requestOptions?: RequestOptions,
+  ): Promise<{ prompts: McpPrompt[]; failed: boolean }> {
+    const capabilities = client.getServerCapabilities?.();
+    if (!capabilities?.prompts) return { prompts: [], failed: false };
+
+    try {
+      const prompts: McpPrompt[] = [];
+      let cursor: string | undefined;
+      do {
+        const result = await client.listPrompts(cursor ? { cursor } : undefined, requestOptions);
+        prompts.push(...(result.prompts ?? []));
+        cursor = result.nextCursor;
+      } while (cursor);
+      return { prompts, failed: false };
+    } catch (error) {
+      if (requestOptions?.signal?.aborted) throwIfAborted(requestOptions.signal);
+      const message = error instanceof Error ? error.message : String(error);
+      logger.debug(`MCP: prompts/list failed: ${message}`);
+      return { prompts: [], failed: true };
+    }
+  }
+
   private async fetchAllResources(client: Client, requestOptions?: RequestOptions): Promise<McpResource[]> {
+    const capabilities = client.getServerCapabilities?.();
+    if (!capabilities?.resources) return [];
+
     try {
       const allResources: McpResource[] = [];
       let cursor: string | undefined;
@@ -408,17 +924,21 @@ export class McpServerManager {
       if (requestOptions?.signal?.aborted) {
         throwIfAborted(requestOptions.signal);
       }
-      // Server may not support resources
+      // The server advertises resources but the listing failed
       return [];
     }
   }
 
   private attachAdapterNotificationHandlers(serverName: string, client: Client): void {
-    client.setNotificationHandler(serverStreamResultPatchNotificationSchema, (notification) => {
-      const listener = this.uiStreamListeners.get(notification.params.streamToken);
-      if (!listener) return;
-      listener(serverName, notification.params);
-    });
+    client.setNotificationHandler(
+      SERVER_STREAM_RESULT_PATCH_METHOD,
+      { params: serverStreamResultPatchNotificationSchema.shape.params },
+      params => {
+        const listener = this.uiStreamListeners.get(params.streamToken);
+        if (!listener) return;
+        listener(serverName, params);
+      },
+    );
   }
 
   registerUiStreamListener(streamToken: string, listener: UiStreamListener): void {
@@ -429,7 +949,33 @@ export class McpServerManager {
     this.uiStreamListeners.delete(streamToken);
   }
 
+  async getPrompt(
+    name: string,
+    promptName: string,
+    args?: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<GetPromptResult> {
+    const connection = this.connections.get(name);
+    if (!connection || connection.status !== "connected") {
+      throw new Error(`Server "${name}" is not connected`);
+    }
+    try {
+      this.touch(name);
+      this.incrementInFlight(name);
+      return await connection.client.getPrompt(
+        { name: promptName, ...(args ? { arguments: args } : {}) },
+        this.getRequestOptions(name, signal),
+      );
+    } finally {
+      this.decrementInFlight(name);
+      this.touch(name);
+    }
+  }
+
   async readResource(name: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult> {
+    if (isServerDisabled(this.connections.get(name)?.definition)) {
+      throw new Error(`MCP server "${name}" is disabled`);
+    }
     const connection = this.connections.get(name);
     if (!connection || connection.status !== "connected") {
       throw new Error(`Server "${name}" is not connected`);
@@ -446,22 +992,91 @@ export class McpServerManager {
   }
 
   async close(name: string): Promise<void> {
-    const connection = this.connections.get(name);
-    if (!connection) return;
+    this.closeGenerations.set(name, (this.closeGenerations.get(name) ?? 0) + 1);
+    this.connectAttempts.get(name)?.abort(new Error(`MCP connection ${name} was closed`));
 
-    // Delete from map BEFORE async cleanup to prevent a race where a
-    // concurrent connect() creates a new connection that our deferred
-    // delete() would then remove, orphaning the new server process.
+    const connection = this.connections.get(name);
+    if (!connection) {
+      const pendingClose = this.closePromises.get(name);
+      if (pendingClose) {
+        await pendingClose;
+        return;
+      }
+      const pendingConnect = this.connectPromises.get(name);
+      if (pendingConnect) {
+        try {
+          await pendingConnect;
+        } catch (error) {
+          if (this.containsCleanupFailure(error)) throw error;
+        }
+      }
+      return;
+    }
+
+    // Delete before awaiting SDK cleanup so a replacement cannot be removed by
+    // an old close operation finishing later.
     connection.status = "closed";
     this.connections.delete(name);
     this.acceptedUrlElicitations.delete(name);
-    await connection.client.close().catch(() => {});
-    await connection.transport.close().catch(() => {});
+    const closing = this.disposeConnection(connection).finally(() => {
+      if (this.closePromises.get(name) === closing) this.closePromises.delete(name);
+    });
+    this.closePromises.set(name, closing);
+    return closing;
+  }
+
+  private async disposeConnection(connection: ServerConnection): Promise<void> {
+    const results = await Promise.allSettled([
+      // Only client.close() is needed; the client owns the transport and will close it internally.
+      Promise.resolve().then(() => connection.client.close()),
+      this.traceWriter?.flush() ?? Promise.resolve(),
+    ]);
+    const failures = results.flatMap(result => result.status === "rejected" ? [result.reason] : []);
+    if (failures.length > 0) throw new AggregateError(failures, "MCP connection cleanup failed");
   }
 
   async closeAll(): Promise<void> {
-    const names = [...this.connections.keys()];
-    await Promise.all(names.map(name => this.close(name)));
+    this.stopped = true;
+    const names = new Set([...this.connections.keys(), ...this.connectPromises.keys()]);
+    for (const name of names) {
+      this.closeGenerations.set(name, (this.closeGenerations.get(name) ?? 0) + 1);
+      this.connectAttempts.get(name)?.abort(new Error(`MCP connection ${name} was closed`));
+    }
+
+    const pendingConnects = [...this.connectPromises.values()];
+    const currentNames = [...this.connections.keys()];
+    const pendingResults = await Promise.allSettled(pendingConnects);
+    const results = await Promise.allSettled(currentNames.map(name => this.close(name)));
+
+    // A connect that resolved during the first close snapshot is still fenced;
+    // close any handle that was already inserted before its attempt settled.
+    const lateNames = [...this.connections.keys()];
+    const lateResults = await Promise.allSettled(lateNames.map(name => this.close(name)));
+    const failures = [...pendingResults, ...results, ...lateResults]
+      .flatMap(result => result.status === "rejected" ? [result.reason] : [])
+      .filter(error => this.containsCleanupFailure(error));
+    this.uiStreamListeners.clear();
+    this.acceptedUrlElicitations.clear();
+    this.samplingConfig = undefined;
+    this.elicitationConfig = undefined;
+    await this.traceWriter?.flush();
+    if (failures.length > 0) throw new AggregateError(failures, "MCP manager cleanup failed");
+  }
+
+  private containsCleanupFailure(error: unknown): boolean {
+    const pending: unknown[] = [error];
+    const seen = new Set<unknown>();
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (!(current instanceof Error) || seen.has(current)) continue;
+      seen.add(current);
+      if (current instanceof AggregateError) {
+        if (/cleanup failed|setup failed/.test(current.message)) return true;
+        pending.push(...current.errors);
+      }
+      if (current.cause !== undefined) pending.push(current.cause);
+    }
+    return false;
   }
 
   getConnection(name: string): ServerConnection | undefined {
@@ -502,28 +1117,19 @@ export class McpServerManager {
 }
 
 /**
- * Resolve environment variables with interpolation.
+ * Resolve environment variables with interpolation. Programmatic (resolved)
+ * sources bypass this entirely and pass their env verbatim.
  */
-function resolveEnv(env?: Record<string, string>): Record<string, string> {
-  // Copy process.env, filtering out undefined values
+function resolveEnv(env: Record<string, string> | undefined, serverName: string): Record<string, string> {
   const resolved: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) {
-      resolved[key] = value;
-    }
+    if (value !== undefined) resolved[key] = value;
   }
-
-  if (!env) return resolved;
-
-  const overrides = interpolateEnvRecord(env);
+  const overrides = resolveCommandSecretsRecord(
+    env,
+    key => `MCP server "${serverName}" stdio env "${key}"`,
+  );
   return overrides ? { ...resolved, ...overrides } : resolved;
-}
-
-/**
- * Resolve headers with environment variable interpolation.
- */
-function resolveHeaders(headers?: Record<string, string>): Record<string, string> | undefined {
-  return interpolateEnvRecord(headers);
 }
 
 function normalizeRequestTimeoutMs(timeoutMs: number | undefined): number | undefined {

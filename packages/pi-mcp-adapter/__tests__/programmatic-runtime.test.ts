@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SdkErrorCode, SdkHttpError } from "@modelcontextprotocol/client";
 import type {
   McpConfigSource,
   McpLaunchValueProvider,
@@ -13,13 +14,19 @@ const managerMocks = vi.hoisted(() => ({
   connect: vi.fn(),
   close: vi.fn().mockResolvedValue(undefined),
   closeAll: vi.fn().mockResolvedValue(undefined),
+  existing: undefined as unknown,
+  onGetConnection: undefined as (() => void) | undefined,
 }));
 
 vi.mock("../server-manager.ts", () => ({
   McpServerManager: class {
     setSamplingConfig() {}
     setElicitationConfig() {}
-    getConnection() { return undefined; }
+    getConnection() {
+      const existing = managerMocks.existing;
+      managerMocks.onGetConnection?.();
+      return existing;
+    }
     connect(...args: unknown[]) { return managerMocks.connect(...args); }
     close(...args: unknown[]) { return managerMocks.close(...args); }
     closeAll(...args: unknown[]) { return managerMocks.closeAll(...args); }
@@ -123,6 +130,8 @@ function runtime() {
 
 beforeEach(() => {
   managerMocks.connect.mockReset();
+  managerMocks.existing = undefined;
+  managerMocks.onGetConnection = undefined;
   managerMocks.connect.mockResolvedValue({
     status: "connected",
     tools: [{ name: "echo", description: "Echo" }],
@@ -137,6 +146,105 @@ beforeEach(() => {
 });
 
 describe("programmatic source lifecycle", () => {
+  it("rejects OAuth sources before any credential or connection path is reachable", async () => {
+    const base = registration(identity("o"));
+    const source = structuredClone(base.source) as McpConfigSource;
+    const key = Object.keys(source.servers)[0]!;
+    (source.servers[key]!.options as Record<string, unknown>).auth = {
+      kind: "oauth",
+      flow: "client-credentials",
+    };
+    const hash = createHash("sha256")
+      .update(`mcp-source-registration-v1\0${canonical(source)}`)
+      .digest("hex");
+    const oauthRegistration: McpSourceRegistration = {
+      schemaVersion: 1,
+      source,
+      digest: `sha256:${hash}`,
+    };
+    const subject = runtime();
+    const providerSet = providers();
+
+    expect(() => subject.installInitialSources([{ registration: oauthRegistration, ...providerSet }]))
+      .toThrow("MCP programmatic runtime operation failed");
+    expect(await subject.validateSource(oauthRegistration, new AbortController().signal)).toMatchObject({ ok: false });
+    expect(managerMocks.connect).not.toHaveBeenCalled();
+    expect(providerSet.counters.resolved).toBe(0);
+  });
+
+  it("does not close a reused connection when cancellation arrives after reuse", async () => {
+    const subject = runtime();
+    const sourceIdentity = identity("e");
+    const sourceRegistration = registration(sourceIdentity);
+    const key = Object.keys(sourceRegistration.source.servers)[0]!;
+    const providerSet = providers();
+    subject.installInitialSources([{ registration: sourceRegistration, ...providerSet }]);
+    await subject.attachSession({ cwd: process.cwd(), hasUI: false } as any);
+
+    managerMocks.existing = {
+      status: "connected",
+      tools: [{ name: "echo" }],
+      resources: [],
+      client: { callTool: vi.fn(), readResource: vi.fn() },
+    };
+    const controller = new AbortController();
+    managerMocks.onGetConnection = () => controller.abort(new Error("cancelled after reuse"));
+
+    await expect(subject.openExecution(sourceIdentity, key, controller.signal)).rejects.toThrow("cancelled after reuse");
+    expect(managerMocks.close).not.toHaveBeenCalled();
+    expect(providerSet.counters).toMatchObject({ resolved: 0, acquired: 1, released: 1 });
+  });
+
+  it("re-resolves late values once when a Streamable HTTP session expires", async () => {
+    const subject = runtime();
+    const sourceIdentity = identity("f");
+    const sourceRegistration = registration(sourceIdentity);
+    const key = Object.keys(sourceRegistration.source.servers)[0]!;
+    const source = structuredClone(sourceRegistration.source) as McpConfigSource;
+    source.servers[key] = {
+      ...source.servers[key]!,
+      transport: "streamable-http",
+      launchTemplate: { schemaVersion: 1, transport: "streamable-http", url: "https://template.invalid/mcp" },
+    };
+    const hash = createHash("sha256")
+      .update(`mcp-source-registration-v1\0${canonical(source)}`)
+      .digest("hex");
+    const httpRegistration: McpSourceRegistration = { schemaVersion: 1, source, digest: `sha256:${hash}` };
+    const providerSet = providers({ values: { transport: "streamable-http", url: "https://resolved.example/mcp" } });
+    subject.installInitialSources([{ registration: httpRegistration, ...providerSet }]);
+    await subject.attachSession({ cwd: process.cwd(), hasUI: false } as any);
+
+    const staleCall = vi.fn().mockRejectedValue(new SdkHttpError(
+      SdkErrorCode.ClientHttpNotImplemented,
+      "Session not found",
+      { status: 404 },
+    ));
+    const freshCall = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "recovered" }] });
+    managerMocks.connect
+      .mockResolvedValueOnce({
+        status: "connected",
+        tools: [{ name: "echo" }],
+        resources: [],
+        transport: { sessionId: "stale-session" },
+        client: { callTool: staleCall, readResource: vi.fn() },
+      })
+      .mockResolvedValueOnce({
+        status: "connected",
+        tools: [{ name: "echo" }],
+        resources: [],
+        transport: { sessionId: "fresh-session" },
+        client: { callTool: freshCall, readResource: vi.fn() },
+      });
+
+    await expect(subject.callTool(undefined, key, "echo", {}, new AbortController().signal))
+      .resolves.toMatchObject({ content: [{ type: "text", text: "recovered" }] });
+    expect(staleCall).toHaveBeenCalledTimes(1);
+    expect(freshCall).toHaveBeenCalledTimes(1);
+    expect(managerMocks.close).toHaveBeenCalledTimes(1);
+    expect(managerMocks.close).toHaveBeenCalledWith(expect.stringMatching(/^programmatic:[0-9a-f]{64}$/));
+    expect(providerSet.counters).toMatchObject({ resolved: 2, disposed: 2, acquired: 2, released: 2 });
+  });
+
   it("searches tool names and descriptions across source servers and tolerates unstartable servers", async () => {
     const subject = runtime();
     const sourceIdentity = identity("c");
@@ -146,6 +254,8 @@ describe("programmatic source lifecycle", () => {
       status: "connected",
       tools: [
         { name: "zai_web_search", description: "Search the web via Z.ai" },
+        { name: "repo_search", description: "Search repository contents" },
+        { name: "search_docs", description: "Search documentation" },
         { name: "read_repo_file", description: "Read one file" },
       ],
       resources: [],
@@ -157,6 +267,14 @@ describe("programmatic source lifecycle", () => {
     expect(byName.matches.map((match) => match.name)).toEqual(["zai_web_search"]);
     expect(byName.matches[0]?.server).toBe(serverKey("a"));
     expect(byName.unavailableServers).toEqual([]);
+    expect(byName).toMatchObject({ total: 1, hasMore: false, nextOffset: null });
+
+    const firstPage = await subject.searchTools(sourceIdentity, "search", { limit: 1 }, signal);
+    const secondPage = await subject.searchTools(sourceIdentity, "search", { limit: 1, offset: 1 }, signal);
+    expect(firstPage.matches).toHaveLength(1);
+    expect(firstPage).toMatchObject({ total: 3, hasMore: true, nextOffset: 1 });
+    expect(secondPage.matches).toHaveLength(1);
+    expect(secondPage.matches[0]?.name).not.toBe(firstPage.matches[0]?.name);
 
     const byDescription = await subject.searchTools(sourceIdentity, "one file", {}, signal);
     expect(byDescription.matches.map((match) => match.name)).toEqual(["read_repo_file"]);
@@ -175,7 +293,10 @@ describe("programmatic source lifecycle", () => {
     managerMocks.connect.mockResolvedValue({ status: "connected", tools: [], resources: [], client: { callTool: vi.fn(), readResource: vi.fn() } });
     await expect(subject.searchTools(sourceIdentity, "", {}, signal)).rejects.toMatchObject({ code: "SEARCH_INVALID" });
     await expect(subject.searchTools(sourceIdentity, "[", { regex: true }, signal)).rejects.toMatchObject({ code: "SEARCH_INVALID" });
+    await expect(subject.searchTools(sourceIdentity, "(a+)+$", { regex: true }, signal)).rejects.toMatchObject({ code: "SEARCH_INVALID" });
     await expect(subject.searchTools(sourceIdentity, "x".repeat(300), {}, signal)).rejects.toMatchObject({ code: "SEARCH_INVALID" });
+    await expect(subject.searchTools(sourceIdentity, "search", { limit: 0 }, signal)).rejects.toMatchObject({ code: "SEARCH_INVALID" });
+    await expect(subject.searchTools(sourceIdentity, "search", { offset: -1 }, signal)).rejects.toMatchObject({ code: "SEARCH_INVALID" });
 
     // Server keys alone are exact: no identity JSON needed to list or call.
     const tools = await subject.listTools(undefined, serverKey("a"), signal);
@@ -184,8 +305,10 @@ describe("programmatic source lifecycle", () => {
       status: "connected",
       tools: [{ name: "echo", description: "Echo" }],
       resources: [],
+      instructions: "Use exact repository-relative paths.",
       client: { callTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "ok" }] }), readResource: vi.fn() },
     });
+    expect(await subject.getServerInstructions(undefined, serverKey("a"), signal)).toBe("Use exact repository-relative paths.");
     const called = await subject.callTool(undefined, serverKey("a"), "echo", {}, signal);
     expect(called).toMatchObject({ content: [{ type: "text", text: "ok" }] });
     await expect(subject.listTools(undefined, "mcp-server-v1:missing", signal)).rejects.toMatchObject({ code: "SOURCE_INVALID" });

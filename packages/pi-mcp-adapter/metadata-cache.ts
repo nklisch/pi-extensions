@@ -3,40 +3,37 @@ import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "
 import { dirname } from "node:path";
 import { getAgentPath } from "./agent-dir.ts";
 import { createHash } from "node:crypto";
-import { getToolUiResourceUri } from "@modelcontextprotocol/ext-apps/app-bridge";
-import type { McpTool, McpResource, ServerEntry, ToolMetadata } from "./types.ts";
-import { formatToolName, isToolExcluded } from "./types.ts";
+import { getToolUiResourceUri } from "./ui-app-bridge-helpers.ts";
+import type {
+  CachedPrompt,
+  CachedResource,
+  CachedTool,
+  McpConfig,
+  McpTool,
+  McpResource,
+  McpPrompt,
+  McpPromptArgument,
+  MetadataCache,
+  ServerCacheEntry,
+  ServerEntry,
+  ToolMetadata,
+  PromptMetadata,
+} from "./types.ts";
+import { formatPromptCommandName, formatToolName, isServerDisabled, isToolAllowed, resolveToolPrefix, type ToolPrefix } from "./types.ts";
 import { resourceNameToToolName } from "./resource-tools.ts";
-import { extractToolUiStreamMode, interpolateEnvRecord, resolveBearerToken, resolveConfigPath } from "./utils.ts";
+import {
+  extractToolUiStreamMode,
+  interpolateEnvRecord,
+  resolveBearerToken,
+  resolveConfigPath,
+  resolveServerUrl,
+} from "./utils.ts";
+import { extractUiToolVisibility, isUiToolVisibleToModel } from "./ui-tool-visibility.ts";
 
 const CACHE_VERSION = 1;
 const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
-export interface CachedTool {
-  name: string;
-  description?: string;
-  inputSchema?: unknown;
-  uiResourceUri?: string;
-  uiStreamMode?: "eager" | "stream-first";
-}
-
-export interface CachedResource {
-  uri: string;
-  name: string;
-  description?: string;
-}
-
-export interface ServerCacheEntry {
-  configHash: string;
-  tools: CachedTool[];
-  resources: CachedResource[];
-  cachedAt: number;
-}
-
-export interface MetadataCache {
-  version: number;
-  servers: Record<string, ServerCacheEntry>;
-}
+export type { CachedPrompt, CachedResource, CachedTool, MetadataCache, ServerCacheEntry } from "./types.ts";
 
 export function getMetadataCachePath(): string {
   return getAgentPath("mcp-cache.json");
@@ -88,14 +85,17 @@ export function computeServerHash(definition: ServerEntry): string {
   const identity: Record<string, unknown> = {
     command: definition.command,
     args: definition.args,
+    socket: resolveConfigPath(definition.socket),
     env: interpolateEnvRecord(definition.env),
     cwd: resolveConfigPath(definition.cwd),
-    url: definition.url,
+    url: resolveServerUrl(definition),
     headers: interpolateEnvRecord(definition.headers),
     auth: definition.auth,
+    protocolVersion: definition.protocolVersion,
     bearerToken: resolveBearerToken(definition),
     bearerTokenEnv: definition.bearerTokenEnv,
     exposeResources: definition.exposeResources,
+    includeTools: definition.includeTools,
     excludeTools: definition.excludeTools,
   };
   const normalized = stableStringify(identity);
@@ -107,46 +107,124 @@ export function isServerCacheValid(
   definition: ServerEntry,
   maxAgeMs: number = CACHE_MAX_AGE_MS
 ): boolean {
-  if (!entry || entry.configHash !== computeServerHash(definition)) return false;
+  let configHash: string;
+  try {
+    configHash = computeServerHash(definition);
+  } catch {
+    return false;
+  }
+  if (!entry || entry.configHash !== configHash) return false;
   if (!entry.cachedAt || typeof entry.cachedAt !== "number") return false;
   if (maxAgeMs > 0 && Date.now() - entry.cachedAt > maxAgeMs) return false;
   return true;
 }
 
+export function parseDirectToolSelectors(selectors: string[]): {
+  servers: Set<string>;
+  tools: Map<string, Set<string>>;
+} {
+  const servers = new Set<string>();
+  const tools = new Map<string, Set<string>>();
+
+  for (let selector of selectors) {
+    selector = selector.replace(/\/+$/, "");
+    if (selector.includes("/")) {
+      const [server, tool] = selector.split("/", 2);
+      if (server && tool) {
+        const serverTools = tools.get(server) ?? new Set<string>();
+        serverTools.add(tool);
+        tools.set(server, serverTools);
+      } else if (server) {
+        servers.add(server);
+      }
+    } else if (selector) {
+      servers.add(selector);
+    }
+  }
+
+  return { servers, tools };
+}
+
+export function getMissingConfiguredDirectToolServers(
+  config: McpConfig,
+  cache: MetadataCache | null,
+  envOverride?: string[],
+): string[] {
+  const missing: string[] = [];
+  const globalDirect = config.settings?.directTools;
+  const envSelection = envOverride ? parseDirectToolSelectors(envOverride) : null;
+
+  for (const [serverName, definition] of Object.entries(config.mcpServers)) {
+    if (isServerDisabled(definition)) continue;
+    const hasDirectTools = envSelection
+      ? envSelection.servers.has(serverName) || envSelection.tools.has(serverName)
+      : definition.directTools !== undefined
+        ? !!definition.directTools
+        : !!globalDirect;
+
+    if (!hasDirectTools) continue;
+
+    const serverCache = cache?.servers?.[serverName];
+    if (!serverCache || !isServerCacheValid(serverCache, definition)) {
+      missing.push(serverName);
+    }
+  }
+
+  return missing;
+}
+
 export function reconstructToolMetadata(
   serverName: string,
   entry: ServerCacheEntry,
-  prefix: "server" | "none" | "short",
-  definition: Pick<ServerEntry, "exposeResources" | "excludeTools">
+  prefix: ToolPrefix,
+  definition: Pick<ServerEntry, "exposeResources" | "includeTools" | "excludeTools" | "toolPrefix">
 ): ToolMetadata[] {
   const metadata: ToolMetadata[] = [];
+  const seenNames = new Set<string>();
+  const effectivePrefix = resolveToolPrefix(definition, prefix);
 
   for (const tool of entry.tools ?? []) {
     if (!tool?.name) continue;
-    if (isToolExcluded(tool.name, serverName, prefix, definition.excludeTools)) {
+    if (!isUiToolVisibleToModel(tool.uiVisibility)) {
+      continue;
+    }
+    if (!isToolAllowed(tool.name, serverName, effectivePrefix, definition.includeTools, definition.excludeTools)) {
       continue;
     }
 
+    const name = formatToolName(tool.name, serverName, effectivePrefix);
+    if (seenNames.has(name)) {
+      continue;
+    }
+    seenNames.add(name);
+
     metadata.push({
-      name: formatToolName(tool.name, serverName, prefix),
+      name,
       originalName: tool.name,
       description: tool.description ?? "",
-      inputSchema: tool.inputSchema,
-      uiResourceUri: tool.uiResourceUri,
-      uiStreamMode: tool.uiStreamMode,
+      ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}),
+      ...(tool.uiResourceUri !== undefined ? { uiResourceUri: tool.uiResourceUri } : {}),
+      ...(tool.uiVisibility !== undefined ? { uiVisibility: tool.uiVisibility } : {}),
+      ...(tool.uiStreamMode !== undefined ? { uiStreamMode: tool.uiStreamMode } : {}),
     });
   }
 
   if (definition.exposeResources !== false) {
     for (const resource of entry.resources ?? []) {
       if (!resource?.name || !resource?.uri) continue;
-      const baseName = `get_${resourceNameToToolName(resource.name)}`;
-      if (isToolExcluded(baseName, serverName, prefix, definition.excludeTools)) {
+      const baseName = `read_${resourceNameToToolName(resource.name)}`;
+      if (!isToolAllowed(baseName, serverName, effectivePrefix, definition.includeTools, definition.excludeTools)) {
         continue;
       }
 
+      const name = formatToolName(baseName, serverName, effectivePrefix);
+      if (seenNames.has(name)) {
+        continue;
+      }
+      seenNames.add(name);
+
       metadata.push({
-        name: formatToolName(baseName, serverName, prefix),
+        name,
         originalName: baseName,
         description: resource.description ?? `Read resource: ${resource.uri}`,
         resourceUri: resource.uri,
@@ -160,13 +238,19 @@ export function reconstructToolMetadata(
 export function serializeTools(tools: McpTool[]): CachedTool[] {
   return tools
     .filter(t => t?.name)
-    .map(t => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: t.inputSchema,
-      uiResourceUri: tryGetToolUiResourceUri(t),
-      uiStreamMode: extractToolUiStreamMode(t._meta),
-    }));
+    .map(t => {
+      const uiResourceUri = tryGetToolUiResourceUri(t);
+      const uiVisibility = extractUiToolVisibility(t._meta);
+      const uiStreamMode = extractToolUiStreamMode(t._meta);
+      return {
+        name: t.name,
+        ...(t.description !== undefined ? { description: t.description } : {}),
+        ...(t.inputSchema !== undefined ? { inputSchema: t.inputSchema } : {}),
+        ...(uiResourceUri !== undefined ? { uiResourceUri } : {}),
+        ...(uiVisibility !== undefined ? { uiVisibility } : {}),
+        ...(uiStreamMode !== undefined ? { uiStreamMode } : {}),
+      };
+    });
 }
 
 export function serializeResources(resources: McpResource[]): CachedResource[] {
@@ -175,8 +259,53 @@ export function serializeResources(resources: McpResource[]): CachedResource[] {
     .map(r => ({
       uri: r.uri,
       name: r.name,
-      description: r.description,
+      ...(r.description !== undefined ? { description: r.description } : {}),
     }));
+}
+
+export function serializePrompts(prompts: McpPrompt[]): CachedPrompt[] {
+  return (prompts ?? [])
+    .filter(prompt => prompt?.name)
+    .map(prompt => ({
+      name: prompt.name,
+      ...(prompt.title !== undefined ? { title: prompt.title } : {}),
+      ...(prompt.description !== undefined ? { description: prompt.description } : {}),
+      ...(Array.isArray(prompt.arguments)
+        ? {
+            arguments: prompt.arguments.filter(argument => argument?.name).map(argument => ({
+              name: argument.name,
+              ...(argument.description !== undefined ? { description: argument.description } : {}),
+              ...(argument.required !== undefined ? { required: argument.required } : {}),
+            })),
+          }
+        : {}),
+    }));
+}
+
+export function reconstructPromptMetadata(
+  serverName: string,
+  prompts: ReadonlyArray<McpPrompt | CachedPrompt>,
+  prefix: ToolPrefix,
+  definition?: Pick<ServerEntry, "toolPrefix">,
+): PromptMetadata[] {
+  const effectivePrefix = resolveToolPrefix(definition, prefix);
+  return (prompts ?? []).filter(prompt => prompt?.name).map(prompt => {
+    const args: McpPromptArgument[] = Array.isArray(prompt.arguments)
+      ? prompt.arguments.filter(argument => argument?.name).map(argument => ({
+          name: argument.name,
+          ...(argument.description !== undefined ? { description: argument.description } : {}),
+          ...(argument.required !== undefined ? { required: argument.required } : {}),
+        }))
+      : [];
+    return {
+      serverName,
+      originalName: prompt.name,
+      commandName: formatPromptCommandName(prompt.name, serverName, effectivePrefix),
+      ...(prompt.title !== undefined ? { title: prompt.title } : {}),
+      description: prompt.description ?? "",
+      arguments: args,
+    };
+  });
 }
 
 function stableStringify(value: unknown): string {

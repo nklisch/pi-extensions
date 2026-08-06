@@ -10,34 +10,30 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("open", () => ({ default: mocks.open }));
 
-vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
+vi.mock("@modelcontextprotocol/client", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   Client: vi.fn().mockImplementation(function (this: any, info: unknown, options: unknown) {
     this.info = info;
     this.options = options;
     this.setRequestHandler = vi.fn();
     this.setNotificationHandler = vi.fn();
     this.connect = vi.fn(async () => undefined);
+    this.getServerCapabilities = vi.fn(() => ({ tools: {}, resources: {} }));
     this.listTools = vi.fn(async () => ({ tools: [] }));
     this.listResources = vi.fn(async () => ({ resources: [] }));
     this.close = vi.fn(async () => undefined);
     mocks.clients.push(this);
   }),
+  StreamableHTTPClientTransport: vi.fn(),
+  SSEClientTransport: vi.fn(),
 }));
 
-vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
+vi.mock("@modelcontextprotocol/client/stdio", () => ({
   StdioClientTransport: vi.fn().mockImplementation(function (this: any, options: unknown) {
     this.options = options;
     this.close = vi.fn(async () => undefined);
     mocks.transports.push(this);
   }),
-}));
-
-vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
-  StreamableHTTPClientTransport: vi.fn(),
-}));
-
-vi.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({
-  SSEClientTransport: vi.fn(),
 }));
 
 vi.mock("../npx-resolver.ts", () => ({
@@ -74,8 +70,11 @@ describe("McpServerManager sampling", () => {
     await manager.connect("demo", { command: "node", args: ["server.js"] });
 
     const client = mocks.clients[0];
-    expect(client.options).toMatchObject({ capabilities: { sampling: {} } });
-    expect(client.options.jsonSchemaValidator).toBeDefined();
+    expect(client.options).toMatchObject({
+      capabilities: { sampling: {} },
+      // The schemars integer-width validator is wired through every client.
+      jsonSchemaValidator: expect.any(Object),
+    });
     expect(client.setRequestHandler).toHaveBeenCalledTimes(1);
     expect(client.setRequestHandler.mock.invocationCallOrder[0]).toBeLessThan(
       client.connect.mock.invocationCallOrder[0],
@@ -155,7 +154,7 @@ describe("McpServerManager sampling", () => {
   });
 
   it("handles every URL in a URL-required error", async () => {
-    const { UrlElicitationRequiredError } = await import("@modelcontextprotocol/sdk/types.js");
+    const { UrlElicitationRequiredError } = await import("@modelcontextprotocol/client");
     const { McpServerManager } = await import("../server-manager.ts");
     const ui = {
       select: vi.fn().mockResolvedValue("Open"),
@@ -209,11 +208,56 @@ describe("McpServerManager sampling", () => {
     await manager.connect("demo", { command: "node", args: ["server.js"] });
 
     const client = mocks.clients[0];
-    // Options always carry the adapter's JSON Schema validator; capabilities
-    // stay absent when neither sampling nor elicitation is configured.
-    expect(client.options?.capabilities).toBeUndefined();
+    // Options always carry the adapter's JSON Schema validator (with the
+    // schemars integer-width formats folded in); capabilities stay absent
+    // when neither sampling nor elicitation is configured.
+    expect(client.options).not.toHaveProperty("capabilities");
     expect(client.options?.jsonSchemaValidator).toBeDefined();
+    expect(client.options.listChanged.tools.onChanged).toBeTypeOf("function");
+    expect(client.options.listChanged.resources.onChanged).toBeTypeOf("function");
     expect(client.setRequestHandler).not.toHaveBeenCalled();
+  });
+
+  it("refreshes cached lists and ignores notifications from replaced clients", async () => {
+    const { McpServerManager } = await import("../server-manager.ts");
+    const manager = new McpServerManager();
+    const metadataChanged = vi.fn();
+    manager.setMetadataListChangedListener(metadataChanged);
+
+    await manager.connect("demo", { command: "node", args: ["server.js"] });
+    const oldClient = mocks.clients[0];
+    await manager.close("demo");
+    await manager.connect("demo", { command: "node", args: ["server.js"] });
+    const freshClient = mocks.clients[1];
+    const freshTools = [{ name: "fresh_tool", description: "Fresh tool" }];
+    const freshResources = [{ uri: "file://fresh", name: "Fresh resource" }];
+
+    oldClient.options.listChanged.tools.onChanged(null, [{ name: "stale_tool" }]);
+    oldClient.options.listChanged.resources.onChanged(null, [{ uri: "file://stale", name: "Stale resource" }]);
+    expect(manager.getConnection("demo")?.tools).toEqual([]);
+    expect(manager.getConnection("demo")?.resources).toEqual([]);
+    expect(metadataChanged).not.toHaveBeenCalled();
+
+    freshClient.options.listChanged.tools.onChanged(null, freshTools);
+    freshClient.options.listChanged.resources.onChanged(null, freshResources);
+    expect(manager.getConnection("demo")?.tools).toEqual(freshTools);
+    expect(manager.getConnection("demo")?.resources).toEqual(freshResources);
+    expect(metadataChanged).toHaveBeenCalledWith("demo", "tools-list-changed");
+    expect(metadataChanged).toHaveBeenCalledWith("demo", "resources-list-changed");
+  });
+
+  it("logs list-change callback errors without replacing cached metadata", async () => {
+    const { McpServerManager } = await import("../server-manager.ts");
+    const manager = new McpServerManager();
+    await manager.connect("demo", { command: "node", args: ["server.js"] });
+    const client = mocks.clients[0];
+    const error = new Error("refresh failed");
+
+    client.options.listChanged.tools.onChanged(error, null);
+    client.options.listChanged.resources.onChanged(error, null);
+
+    expect(manager.getConnection("demo")?.tools).toEqual([]);
+    expect(manager.getConnection("demo")?.resources).toEqual([]);
   });
 
   it("expands environment variables and tilde in stdio cwd", async () => {

@@ -1,0 +1,11 @@
+# Generated from .research/attestations. Do not edit by hand.
+schema: 1
+sources:
+  - source_handle: pi-mcp-adapter-2-20-1
+    title: "nicobailon/pi-mcp-adapter v2.20.1 source and changelog"
+    source_url: "https://github.com/nicobailon/pi-mcp-adapter/tree/1dbdef96f674410ac37067de70f10a3de3d48d98"
+    fetched: "2026-08-06"
+  - source_handle: pi-mcp-adapter-post-2-20-1
+    title: "nicobailon/pi-mcp-adapter fixes after v2.20.1 through 08fe82b"
+    source_url: "https://github.com/nicobailon/pi-mcp-adapter/compare/v2.20.1...08fe82be1d55036d3960c4bb3fa77ed8707f2bca"
+    fetched: "2026-08-06"

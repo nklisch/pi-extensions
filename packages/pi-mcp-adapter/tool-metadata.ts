@@ -1,28 +1,42 @@
-import { getToolUiResourceUri } from "@modelcontextprotocol/ext-apps/app-bridge";
+import { getToolUiResourceUri } from "./ui-app-bridge-helpers.ts";
 import type { McpExtensionState } from "./state.ts";
-import type { ToolMetadata, McpTool, McpResource, ServerEntry } from "./types.ts";
-import { formatToolName, isToolExcluded } from "./types.ts";
+import type { ToolMetadata, McpTool, McpResource, ServerEntry, ToolPrefix } from "./types.ts";
+import { formatToolName, isToolAllowed, resolveToolPrefix } from "./types.ts";
 import { resourceNameToToolName } from "./resource-tools.ts";
 import { extractToolUiStreamMode } from "./utils.ts";
+import { extractUiToolVisibility, isUiToolVisibleToModel } from "./ui-tool-visibility.ts";
 
 export function buildToolMetadata(
   tools: McpTool[],
   resources: McpResource[],
   definition: ServerEntry,
   serverName: string,
-  prefix: "server" | "none" | "short"
+  prefix: ToolPrefix
 ): { metadata: ToolMetadata[]; failedTools: string[] } {
   const metadata: ToolMetadata[] = [];
   const failedTools: string[] = [];
+  const seenNames = new Set<string>();
+  const effectivePrefix = resolveToolPrefix(definition, prefix);
 
   for (const tool of tools) {
     if (!tool?.name) {
       failedTools.push("(unnamed)");
       continue;
     }
-    if (isToolExcluded(tool.name, serverName, prefix, definition.excludeTools)) {
+    if (!isToolAllowed(tool.name, serverName, effectivePrefix, definition.includeTools, definition.excludeTools)) {
       continue;
     }
+
+    const name = formatToolName(tool.name, serverName, effectivePrefix);
+    if (seenNames.has(name)) {
+      continue;
+    }
+
+    const uiVisibility = extractUiToolVisibility(tool._meta);
+    if (!isUiToolVisibleToModel(uiVisibility)) {
+      continue;
+    }
+    seenNames.add(name);
 
     let uiResourceUri: string | undefined;
     try {
@@ -30,25 +44,33 @@ export function buildToolMetadata(
     } catch {
       failedTools.push(tool.name);
     }
+    const uiStreamMode = extractToolUiStreamMode(tool._meta);
     metadata.push({
-      name: formatToolName(tool.name, serverName, prefix),
+      name,
       originalName: tool.name,
       description: tool.description ?? "",
-      inputSchema: tool.inputSchema,
-      uiResourceUri,
-      uiStreamMode: extractToolUiStreamMode(tool._meta),
+      ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}),
+      ...(uiResourceUri !== undefined ? { uiResourceUri } : {}),
+      ...(uiVisibility !== undefined ? { uiVisibility } : {}),
+      ...(uiStreamMode !== undefined ? { uiStreamMode } : {}),
     });
   }
 
   if (definition.exposeResources !== false) {
     for (const resource of resources) {
-      const baseName = `get_${resourceNameToToolName(resource.name)}`;
-      if (isToolExcluded(baseName, serverName, prefix, definition.excludeTools)) {
+      const baseName = `read_${resourceNameToToolName(resource.name)}`;
+      if (!isToolAllowed(baseName, serverName, effectivePrefix, definition.includeTools, definition.excludeTools)) {
         continue;
       }
 
+      const name = formatToolName(baseName, serverName, effectivePrefix);
+      if (seenNames.has(name)) {
+        continue;
+      }
+      seenNames.add(name);
+
       metadata.push({
-        name: formatToolName(baseName, serverName, prefix),
+        name,
         originalName: baseName,
         description: resource.description ?? `Read resource: ${resource.uri}`,
         resourceUri: resource.uri,
