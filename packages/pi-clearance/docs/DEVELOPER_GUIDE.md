@@ -44,18 +44,16 @@ Node-API addon, not a package-install build:
       "./src/skill/clearance-pack-authoring/SKILL.md"
     ]
   },
-  "files": ["src", "native/index.d.ts", "README.md", "docs", "LICENSE"]
+  "files": ["src", "native", "README.md", "docs", "LICENSE"]
 }
 ```
 
 Pi loads `src/index.ts` as the extension composition root. `src/native/loader.ts`
-resolves the local development artifact or the matching scoped optional package
-(`@nklisch/pi-clearance-linux-x64-gnu` or
-`@nklisch/pi-clearance-darwin-arm64`). A missing artifact refuses to arm the
-extension; no install script or Cargo fallback exists. Native builds are
-contributor- and release-only. Release CI builds every declared target, and the
-shared publisher stages and publishes exact-version platform packages before the
-root package.
+resolves the matching artifact from the package's `native/` directory. A missing
+artifact refuses to arm the extension; no install script or Cargo fallback exists.
+Native builds are contributor- and release-only. Release CI builds every declared
+target and stages all artifacts into the existing Pi Clearance package before
+publishing.
 
 Shipped interfaces:
 

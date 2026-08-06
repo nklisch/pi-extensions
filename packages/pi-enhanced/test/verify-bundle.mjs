@@ -7,7 +7,7 @@
  * resource path actually land in the pack?"
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -49,23 +49,23 @@ for (const dep of manifest.bundledDependencies ?? []) {
 }
 
 const clearancePrefix = "node_modules/@nklisch/pi-clearance/";
-const expectedNativePackages = [
-  "@nklisch/pi-clearance-darwin-arm64",
-  "@nklisch/pi-clearance-linux-x64-gnu",
-];
-for (const nativePackage of expectedNativePackages) {
-  if (clearanceManifest.optionalDependencies?.[nativePackage] !== clearanceManifest.version) {
-    failures.push(`${nativePackage} must exactly match bundled pi-clearance ${clearanceManifest.version}`);
+const targetSuffix = new Map([
+  ["x86_64-unknown-linux-gnu", "linux-x64-gnu"],
+  ["aarch64-apple-darwin", "darwin-arm64"],
+]);
+const nativeArtifacts = clearanceManifest.napi.targets.map((target) => {
+  const suffix = targetSuffix.get(target);
+  if (suffix === undefined) throw new Error(`Unknown Pi Clearance native target: ${target}`);
+  return `${clearanceManifest.napi.binaryName}.${suffix}.node`;
+});
+for (const artifact of nativeArtifacts) {
+  const staged = existsSync(join(root, "../pi-clearance/native", artifact));
+  if (process.env.PI_NATIVE_RELEASE_ARTIFACTS === "1" && !staged) {
+    failures.push(`release artifact was not staged: ${artifact}`);
   }
-  if (manifest.optionalDependencies?.[nativePackage] !== clearanceManifest.version) {
-    failures.push(`${nativePackage} must be forwarded by pi-enhanced at ${clearanceManifest.version}`);
+  if (staged && !files.has(`${clearancePrefix}native/${artifact}`)) {
+    failures.push(`bundled pi-clearance is missing native/${artifact}`);
   }
-}
-const leakedNativeBinaries = [...files].filter(
-  (file) => file.startsWith(clearancePrefix) && file.endsWith(".node"),
-);
-if (leakedNativeBinaries.length > 0) {
-  failures.push(`pi-clearance bundle leaked host binaries: ${leakedNativeBinaries.join(", ")}`);
 }
 
 if (failures.length > 0) {

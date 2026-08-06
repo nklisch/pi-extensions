@@ -4,9 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPackages } from "./package-catalog.mjs";
 import {
-  isNativePlatformPackage,
-  nativePackageDescriptors,
-  stageNativePackages,
+  nativeArtifactDescriptors,
+  requireNativeArtifacts,
 } from "./native-packages.mjs";
 
 const selector = process.argv[2];
@@ -14,55 +13,26 @@ const local = process.argv.includes("--local");
 if (!selector) {
   console.error("Usage: npm run publish:package -- <all|directory|@nklisch/package> [--local]");
   console.error("  --local: interactive publish from this machine (2FA prompt, no CI provenance).");
-  console.error("           Needed once per never-published package before trust can be configured.");
   process.exit(2);
 }
 
 const catalog = await loadPackages();
-const roots = catalog.filter((pkg) => !isNativePlatformPackage(pkg.manifest));
 const selected = selector === "all"
-  ? roots
-  : roots.filter((pkg) => pkg.directoryName === selector || pkg.manifest.name === selector);
+  ? catalog
+  : catalog.filter((pkg) => pkg.directoryName === selector || pkg.manifest.name === selector);
 
 if (selected.length === 0) {
-  const nativeMatch = catalog.find(
-    (pkg) =>
-      isNativePlatformPackage(pkg.manifest) &&
-      (pkg.directoryName === selector || pkg.manifest.name === selector),
-  );
-  if (nativeMatch) {
-    console.error(
-      `${selector} is published through its Pi Clearance root package so every target stays synchronized.`,
-    );
-  } else {
-    console.error(`Unknown package: ${selector}`);
-  }
-  console.error(`Available: all, ${roots.map((pkg) => pkg.directoryName).join(", ")}`);
+  console.error(`Unknown package: ${selector}`);
+  console.error(`Available: all, ${catalog.map((pkg) => pkg.directoryName).join(", ")}`);
   process.exit(2);
 }
 
 for (const pkg of selected) {
-  // Platform packages must exist before the root package advertises them as
-  // optional dependencies. Stage all targets as one set, but publish only the
-  // versions that are not already present in the registry.
-  const missingNativeNames = nativePackageDescriptors(pkg)
-    .map(({ name, version }) => ({ name, version }))
-    .filter(({ name, version }) => !isPublished(`${name}@${version}`));
-
-  let staged;
-  try {
-    if (missingNativeNames.length > 0) {
-      staged = stageNativePackages(pkg);
-      const missing = new Set(missingNativeNames.map(({ name }) => name));
-      for (const nativePkg of staged.packages) {
-        if (missing.has(nativePkg.manifest.name)) publishOne(nativePkg);
-      }
-    }
-    assertOptionalDependenciesPublished(pkg);
-    publishOne(pkg);
-  } finally {
-    staged?.cleanup();
-  }
+  // CI stages every cross-built artifact into the existing package before this
+  // point. Refuse partial releases even if the publisher host can load one.
+  if (nativeArtifactDescriptors(pkg).length > 0) requireNativeArtifacts(pkg);
+  assertOptionalDependenciesPublished(pkg);
+  publishOne(pkg);
 }
 
 function isPublished(spec) {

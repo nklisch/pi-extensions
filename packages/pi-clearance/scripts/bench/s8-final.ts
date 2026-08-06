@@ -254,7 +254,7 @@ function formatReport(input: {
     `| Parse throughput (${input.parseThroughput.operations.toLocaleString()} parses) | 22,634 ops/s | ${formatRate(input.parseThroughput)} |`,
     `| Replay throughput (${input.replayThroughput.operations.toLocaleString()} modeled rows) | 8,900 ops/s | ${formatRate(input.replayThroughput)} |`,
     `| Root package size (packed / unpacked, ${input.packageSize.fileCount} files) | 494.0 KiB / 2.14 MiB | ${formatBytes(input.packageSize.packedBytes)} / ${formatBytes(input.packageSize.unpackedBytes)} |`,
-    "| Platform package shape | source TypeScript only | linux-x64-gnu + darwin-arm64 optional packages; release preparation fails if either artifact is absent |",
+    "| Native package shape | source TypeScript only | linux-x64-gnu + darwin-arm64 artifacts bundled in Pi Clearance; release preparation fails if either artifact is absent |",
     "",
     "The S7 residual was measured as native matcher evaluation plus the synchronous JSON shape/decision boundary. S8 compiles common matcher fields and regular expressions into Rust-owned IR and adds a batch decision seam that amortizes that boundary for grouped callers. Native replay already stays inside Rust, so its crossing is amortized over the entire corpus.",
   ].join("\n");

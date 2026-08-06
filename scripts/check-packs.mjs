@@ -3,21 +3,11 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPackages } from "./package-catalog.mjs";
-import { isNativePlatformPackage } from "./native-packages.mjs";
+import { nativeArtifactDescriptors } from "./native-packages.mjs";
 
 const packScript = join(dirname(fileURLToPath(import.meta.url)), "pack-package.mjs");
 
 for (const pkg of await loadPackages()) {
-  if (
-    isNativePlatformPackage(pkg.manifest) &&
-    !existsSync(join(pkg.directory, pkg.manifest.main))
-  ) {
-    console.log(
-      `Validated ${pkg.manifest.name}@${pkg.manifest.version} platform manifest (binary is release-staged).`,
-    );
-    continue;
-  }
-
   const result = spawnSync("node", [packScript, pkg.directory, "--dry-run"], {
     encoding: "utf8",
   });
@@ -39,11 +29,18 @@ for (const pkg of await loadPackages()) {
   }
 
   if (pkg.manifest.napi !== undefined) {
-    const nativeBinaries = files.filter((file) => file.endsWith(".node"));
-    if (nativeBinaries.length > 0) {
-      throw new Error(
-        `${pkg.manifest.name}: root tarball must not contain host-specific native binaries: ${nativeBinaries.join(", ")}`,
-      );
+    const descriptors = nativeArtifactDescriptors(pkg);
+    const staged = descriptors.filter(({ artifactPath }) => existsSync(artifactPath));
+    // Contributor checks validate artifacts available on the current host;
+    // release CI alone has cross-built every target and therefore requires all.
+    if (process.env.PI_NATIVE_RELEASE_ARTIFACTS === "1" && staged.length !== descriptors.length) {
+      throw new Error(`${pkg.manifest.name}: release check requires every declared native artifact`);
+    }
+    for (const { binaryFile } of staged) {
+      const path = `native/${binaryFile}`;
+      if (!files.includes(path)) {
+        throw new Error(`${pkg.manifest.name}: staged native artifact ${path} is missing from tarball`);
+      }
     }
   }
 

@@ -6,10 +6,7 @@ import {
   REQUIRED_SCOPE,
   REPOSITORY_URL,
 } from "./package-catalog.mjs";
-import {
-  isNativePlatformPackage,
-  validateNativePackageContract,
-} from "./native-packages.mjs";
+import { validateNativePackageContract } from "./native-packages.mjs";
 
 const errors = [];
 const packages = await loadPackages();
@@ -24,7 +21,6 @@ if (packages.length === 0) errors.push("No packages found under packages/.");
 for (const pkg of packages) {
   const { directory, directoryName, manifest } = pkg;
   const expectedName = `${REQUIRED_SCOPE}${directoryName}`;
-  const nativePlatformPackage = isNativePlatformPackage(manifest);
   const report = (message) => errors.push(`${directoryName}: ${message}`);
 
   if (!directoryName.startsWith(PACKAGE_PREFIX)) report(`directory must start with ${PACKAGE_PREFIX}`);
@@ -33,12 +29,10 @@ for (const pkg of packages) {
   names.add(manifest.name);
   if (manifest.private !== false) report("private must explicitly be false");
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version ?? "")) report("version must be semver");
-  if (!nativePlatformPackage) {
-    if (!manifest.keywords?.includes("pi-package")) report("keywords must include pi-package");
-    if (!manifest.keywords?.includes("pi-extension")) report("keywords must include pi-extension");
-    if (!Array.isArray(manifest.pi?.extensions) || manifest.pi.extensions.length === 0) {
-      report("pi.extensions must declare at least one entrypoint");
-    }
+  if (!manifest.keywords?.includes("pi-package")) report("keywords must include pi-package");
+  if (!manifest.keywords?.includes("pi-extension")) report("keywords must include pi-extension");
+  if (!Array.isArray(manifest.pi?.extensions) || manifest.pi.extensions.length === 0) {
+    report("pi.extensions must declare at least one entrypoint");
   }
   if (manifest.publishConfig?.access !== "public") report("publishConfig.access must be public");
   if (manifest.publishConfig?.provenance !== true) report("publishConfig.provenance must be true");
@@ -47,8 +41,8 @@ for (const pkg of packages) {
   for (const error of validateNativePackageContract(pkg)) report(error);
 
   // npm does not install optional dependencies declared only by a bundled
-  // child package. Meta-packages must forward them so platform/runtime
-  // capabilities survive a clean consumer install.
+  // child package. Meta-packages must forward them so clean consumer installs
+  // preserve the child's optional capabilities.
   for (const dependency of manifest.bundledDependencies ?? manifest.bundleDependencies ?? []) {
     const bundledManifest =
       packagesByName.get(dependency)?.manifest ??
@@ -76,8 +70,7 @@ for (const pkg of packages) {
   }
 }
 
-// Generated native packages are staged outside the repository. Any other
-// nested public manifest is invisible to the workspace catalog and would be
+// A nested public manifest is invisible to the workspace catalog and would be
 // silently skipped by validation and publishing, so reject it explicitly.
 for (const pkg of packages) {
   for (const manifestPath of await nestedManifestPaths(pkg.directory)) {

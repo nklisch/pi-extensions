@@ -186,7 +186,6 @@ export type NativeEngineStatus =
 
 const require = createRequire(import.meta.url);
 const NATIVE_MODULE_BASENAME = "clearance-core";
-const NATIVE_PACKAGE_NAME = "@nklisch/pi-clearance";
 let cachedStatus: NativeEngineStatus | undefined;
 
 /**
@@ -203,11 +202,6 @@ export function nativePlatformTriple(): string | undefined {
     return "darwin-arm64";
   }
   return undefined;
-}
-
-/** Resolve the scoped optional package produced for one supported target. */
-export function nativePlatformPackageName(triple: string): string {
-  return `${NATIVE_PACKAGE_NAME}-${triple}`;
 }
 
 /**
@@ -230,43 +224,25 @@ export function loadNativeEngine(): NativeEngineStatus {
   }
 
   const packageRoot = fileURLToPath(new URL("../../", import.meta.url));
-  // Keep the repository-local artifact first for contributors and CI. Published
-  // packages use napi-rs optional dependencies, so the second candidate resolves
-  // the platform package without a source build or an install hook.
-  const attemptedPaths = [
-    join(packageRoot, "native", `${NATIVE_MODULE_BASENAME}.${triple}.node`),
-    nativePlatformPackageName(triple),
-  ];
+  const modulePath = join(
+    packageRoot,
+    "native",
+    `${NATIVE_MODULE_BASENAME}.${triple}.node`,
+  );
+  const attemptedPaths = [modulePath];
 
-  for (const modulePath of attemptedPaths) {
-    try {
-      const candidate: unknown = require(modulePath);
-      const engine = asNativeEngine(candidate);
-      const health = engine.health();
-      cachedStatus = { ok: true, engine, health, modulePath };
-      return cachedStatus;
-    } catch (error: unknown) {
-      // Continue through the candidate list. The final message includes the
-      // loader error so a missing prebuild is actionable rather than opaque.
-      if (modulePath === attemptedPaths[attemptedPaths.length - 1]) {
-        cachedStatus = {
-          ok: false,
-          reason: nativeLoadError(error),
-          attemptedPaths,
-        };
-        return cachedStatus;
-      }
-    }
+  try {
+    const candidate: unknown = require(modulePath);
+    const engine = asNativeEngine(candidate);
+    const health = engine.health();
+    cachedStatus = { ok: true, engine, health, modulePath };
+  } catch (error: unknown) {
+    cachedStatus = {
+      ok: false,
+      reason: nativeLoadError(error),
+      attemptedPaths,
+    };
   }
-
-  // `attemptedPaths` always contains at least one path, but keep the fallback
-  // explicit so future platform additions cannot accidentally arm without a
-  // validated engine.
-  cachedStatus = {
-    ok: false,
-    reason: "native engine did not expose a supported module",
-    attemptedPaths,
-  };
   return cachedStatus;
 }
 

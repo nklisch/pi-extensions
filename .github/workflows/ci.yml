@@ -58,8 +58,5 @@ jobs:
       - run: npm ci
       - name: Build native engine
         run: npm run build:native:target --workspace @nklisch/pi-clearance -- ${{ matrix.target }}
-      - name: Exercise installed optional-package fallback
-        run: |
-          cp packages/pi-clearance/native/clearance-core.${{ matrix.artifact }}.node packages/pi-clearance-${{ matrix.artifact }}/
-          rm packages/pi-clearance/native/clearance-core.${{ matrix.artifact }}.node
-          npm test --workspace @nklisch/pi-clearance -- test/native-loader.test.ts
+      - name: Exercise bundled native loader
+        run: npm test --workspace @nklisch/pi-clearance -- test/native-loader.test.ts

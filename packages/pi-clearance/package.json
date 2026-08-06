@@ -39,7 +39,7 @@
   },
   "files": [
     "src",
-    "native/index.d.ts",
+    "native",
     "README.md",
     "docs",
     "LICENSE"
@@ -61,10 +61,6 @@
   "dependencies": {
     "@sinclair/typebox": "^0.34.49",
     "jiti": "^2.7.0"
-  },
-  "optionalDependencies": {
-    "@nklisch/pi-clearance-darwin-arm64": "0.1.1",
-    "@nklisch/pi-clearance-linux-x64-gnu": "0.1.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

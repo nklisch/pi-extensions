@@ -54,6 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CI: "1"
+      PI_NATIVE_RELEASE_ARTIFACTS: "1"
       PI_PLUGIN_HOST_E2E_REQUIRE_PTY: "1"
       PI_PLUGIN_HOST_E2E_REQUIRE_LIBFAKETIME: "1"
     steps:
