@@ -266,7 +266,7 @@ Package-shape facts to carry forward:
 - Bash parser grammar source: `tree-sitter-bash`; the active product target routes runtime
   parsing through the Rust native clearance core rather than a JavaScript/WASM parser
   dependency shape.
-- Node engine: `node >=22.18`, matching the `--experimental-strip-types` postinstall requirement and Pi host runtime expectation.
+- Node engine: `node >=22.18`, matching the Pi host runtime expectation. Pi loads the package's TypeScript extension entrypoint directly.
 
 Cleanup inputs only:
 

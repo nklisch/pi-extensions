@@ -16,7 +16,7 @@ Setup presents one selector:
 
 Selecting Auto shows the model/provider, prompt posture, context, and untrusted-context disclosure in the confirmation card before writing `mode: "auto"` to `global.json`.
 
-Global and project config is persisted sparsely; package installation repairs existing materialized config with a backup before rewriting and never creates an absent file. Symlinked global files, overlays, and project directories are skipped and warned about rather than followed or replaced, without failing installation.
+Global and project config written through Clearance is persisted sparsely. Package installation does not read, create, repair, or rewrite user config.
 
 ## Commands
 

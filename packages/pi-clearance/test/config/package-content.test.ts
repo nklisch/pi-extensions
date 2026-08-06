@@ -9,17 +9,19 @@ const packScript = fileURLToPath(
 );
 
 describe("pi-clearance package contents", () => {
-  it("ships the npm postinstall entrypoint", () => {
+  it("ships as a source-based Pi extension without npm install hooks", () => {
     const manifest = JSON.parse(
       readFileSync(`${packageDirectory}/package.json`, "utf8"),
     ) as {
+      readonly dependencies?: Readonly<Record<string, string>>;
       readonly engines?: { readonly node?: string };
-      readonly scripts?: { readonly postinstall?: string };
+      readonly scripts?: Readonly<Record<string, string>>;
     };
     expect(manifest.engines?.node).toBe(">=22.18");
-    expect(manifest.scripts?.postinstall).toContain(
-      "src/config/postinstall.ts",
-    );
+    expect(manifest.scripts?.preinstall).toBeUndefined();
+    expect(manifest.scripts?.install).toBeUndefined();
+    expect(manifest.scripts?.postinstall).toBeUndefined();
+    expect(manifest.dependencies?.jiti).toBeUndefined();
 
     const report = JSON.parse(
       execFileSync(
@@ -30,7 +32,6 @@ describe("pi-clearance package contents", () => {
     ) as readonly { readonly files?: readonly { readonly path: string }[] }[];
     const files = report[0]?.files?.map((file) => file.path) ?? [];
     for (const file of [
-      "src/config/postinstall.ts",
       "src/config/persistence.ts",
       "src/config/paths.ts",
       "src/config/schema.ts",
@@ -39,5 +40,7 @@ describe("pi-clearance package contents", () => {
     ]) {
       expect(files).toContain(file);
     }
+    expect(files).not.toContain("src/config/postinstall.ts");
+    expect(files).not.toContain("install/postinstall.js");
   });
 });

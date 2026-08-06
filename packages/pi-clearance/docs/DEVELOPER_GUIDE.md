@@ -50,14 +50,10 @@ Node-API addon, not a package-install build:
 
 Pi loads `src/index.ts` as the extension composition root. `src/native/loader.ts`
 resolves the matching artifact from the package's `native/` directory. A missing
-artifact refuses to arm the extension; installation never invokes Cargo. The
-package `postinstall` runs `src/config/postinstall.ts` with Node's built-in type
-stripping and repairs only existing user-owned config files; it does not create
-missing files. Symlinked global files, overlays, and project directories are
-reported as skipped rather than followed or replaced; those deliberate skips do
-not fail installation. Native builds are contributor- and release-only. Release CI builds every declared
-target and stages all artifacts into the existing Pi Clearance package before
-publishing.
+artifact refuses to arm the extension. The package has no npm install lifecycle
+hooks: installation neither invokes Cargo nor reads or writes user config. Native
+builds are contributor- and release-only. Release CI builds every declared target
+and stages all artifacts into the existing Pi Clearance package before publishing.
 
 Shipped interfaces:
 
@@ -101,8 +97,7 @@ README.md or docs/*.md    # docs linked from pack metadata
 The registration payload provides package provenance (`name`, optional `version`, install kind,
 source spec, package path, entrypoint path) for display and audit. Provenance is not trust:
 installation makes packs visible in the registry, while user-owned config enables them later.
-The package install repair may also compact existing Clearance settings, but it never
-activates a pack or creates a missing settings file.
+Installation does not change Clearance settings.
 Bad registrations produce issues and no active policy. `/reload` clears the in-memory snapshot
 and asks package extensions to register again. Contributor extensions should keep the unsubscribe
 returned by `pi.events.on` and call it from `session_shutdown`; Pi reuses the event bus across

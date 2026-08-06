@@ -1,6 +1,6 @@
 # Configuration reference
 
-Pi Clearance uses strict JSON schemas. Missing config is safe and normalizes to `mode: "ask"`; unknown fields are rejected and invalid config causes the composer to use the sealed floor only. Persisted global and project files are sparse: they contain `version` plus only non-default user choices. Defaults remain runtime-only, so the examples below intentionally omit default scaffolding. The npm `postinstall` repair compacts existing materialized files, backs up every rewrite, resets invalid or obsolete files to `{ "version": 1 }`, and never creates an absent file. It deliberately skips symlinked `global.json`, `overlay.json`, and project directories without following or replacing them; each skip is warned about and does not fail installation.
+Pi Clearance uses strict JSON schemas. Missing config is safe and normalizes to `mode: "ask"`; unknown fields are rejected and invalid config causes the composer to use the sealed floor only. Config written through Clearance is sparse: persisted global and project files contain `version` plus only non-default user choices. Defaults remain runtime-only, so the examples below intentionally omit default scaffolding. Package installation never reads, creates, repairs, or rewrites user config.
 
 ## Files
 

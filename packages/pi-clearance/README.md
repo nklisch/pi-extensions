@@ -16,7 +16,7 @@ Pi Clearance is a Pi extension that structurally evaluates tool calls against a 
 
 The default runtime mode is `ask`; a default persisted config is only `{ "version": 1 }`. Choosing Auto through `/clearance`, `/clearance setup`, `/clearance settings`, or `/clearance mode auto` shows the model/provider, prompt posture, context, and untrusted-context disclosure before writing global config.
 
-User-owned `global.json` and project overlays are sparse: they contain `version` and only choices that differ from runtime defaults. Package installation runs a non-creating repair for existing Clearance config files, compacting valid materialized defaults and replacing invalid or obsolete files with `{ "version": 1 }`; absent files are never created, and rewrites are backed up and idempotent. Symlinked global files, overlays, and project directories are deliberately skipped rather than followed or replaced; postinstall warns about each skip while keeping installation successful.
+User-owned `global.json` and project overlays written through Clearance are sparse: they contain `version` and only choices that differ from runtime defaults. Package installation does not read, create, repair, or rewrite user config.
 
 ## Commands
 
@@ -32,7 +32,7 @@ User-owned `global.json` and project overlays are sparse: they contain `version`
 /clearance why
 ```
 
-The former profile and auto commands are removed with no aliases. Package installation makes contributed packs available but does not enable them; user-owned `packEnablement.enabledPackagePacks` must explicitly enable them. The install repair may rewrite existing user-owned config only to enforce sparse persistence. It never follows or replaces symlinks; deliberate symlink skips are warned about without failing installation.
+The former profile and auto commands are removed with no aliases. Package installation makes contributed packs available but does not enable them or change Clearance config; user-owned `packEnablement.enabledPackagePacks` must explicitly enable them.
 
 ## Safety model
 

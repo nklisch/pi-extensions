@@ -12,8 +12,8 @@ export interface ConfigPaths {
 }
 
 export function resolveUserConfigRoot(): string {
-  // Read the environment explicitly so package install repair and isolated
-  // callers honor the process environment even when os.homedir() is cached.
+  // Read the environment explicitly so isolated callers honor the process
+  // environment even when os.homedir() is cached.
   const home = firstNonEmpty(
     process.env.HOME,
     process.env.USERPROFILE,

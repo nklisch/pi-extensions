@@ -34,12 +34,8 @@ stages both `clearance-core.<platform>.node` artifacts into the existing
 `@nklisch/pi-clearance` package. The loader selects the matching bundled artifact
 at runtime. Publishing fails unless every declared target is present, preventing a
 release that works only on the publisher's host. Installation never builds Rust and
-does not create separate platform packages. The npm `postinstall` entrypoint only
-repairs existing platform-specific Clearance config files: it compacts valid
-materialized defaults, resets invalid or obsolete files after backing them up, and
-never creates absent config files. It does not follow or replace symlinked global
-files, overlays, or project directories; each deliberate skip is reported as a
-warning while installation remains successful.
+does not create separate platform packages. Clearance defines no npm install
+lifecycle hooks and does not read or write user config during package installation.
 
 ## Policy and dispatch
 

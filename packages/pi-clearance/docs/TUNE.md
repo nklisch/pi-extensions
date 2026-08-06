@@ -25,7 +25,7 @@ The safe loop is:
 6. write only user-owned config;
 7. reload, validate, and replay again.
 
-Runtime reviewer decisions are evidence, not permanent policy. Package installation makes packs available but does not enable them; Tune must still show and approve explicit enablement. Installation may compact existing user-owned Clearance config into its sparse form, with a backup before each rewrite, and never creates absent files. Trusted TypeScript rule-module proposals are removed; Tune emits only inspectable data-pack and core-matcher design inputs.
+Runtime reviewer decisions are evidence, not permanent policy. Package installation makes packs available but does not enable them or change Clearance config; Tune must still show and approve explicit enablement. Trusted TypeScript rule-module proposals are removed; Tune emits only inspectable data-pack and core-matcher design inputs.
 
 The product interface is Pi-native. Helper executables are plumbing for tests and debugging, not the user's control surface.
 
