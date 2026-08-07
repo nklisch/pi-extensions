@@ -4,6 +4,18 @@ All publishable workspaces live under `packages/pi-*` and must publish as `@nkli
 
 Run `npm run check` after changing package source, metadata, tests, build configuration, or publishing infrastructure. Keep packages independently versioned and do not publish the private root workspace.
 
+Fail-closed guards must defend against a real threat (see
+`docs/PRINCIPLES.md`). A guard that refuses to start, activate, read, or
+install on legitimate real-world input — unknown filesystem, missing
+platform prebuild, unfamiliar magic number, no-SHA-512 packument,
+revoked keyring, private-registry hostname — is a bug wearing a security
+costume unless it names the threat it stops and ships an override or a
+degraded path. Do not add a "conservative" allowlist, magic-number table,
+or platform allowlist/denylist without (a) a one-sentence threat model
+in a comment and (b) an env or config override. If a class of guard has
+broken twice already, remove the category instead of writing the third
+variant.
+
 <!-- workbench:start -->
 ## Workbench
 

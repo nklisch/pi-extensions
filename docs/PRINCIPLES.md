@@ -94,3 +94,82 @@ contributors (human and agent) to ignore failures.
 Brittle-by-design pinning tests (registry bytes, packed surfaces) are exempt
 from the "breaks on every refactor" deletion rule; they are supposed to
 demand attention when bytes change.
+
+## Fail-closed guards must defend against a real threat
+
+A guard that refuses to operate — refuses to start, refuses to activate,
+refuses to read, refuses to install — must justify the refusal with a concrete
+threat model and a protection the guard actually provides. "Conservative" is
+not a substitute for a threat model. A fail-closed stance that breaks
+legitimate real-world input without protecting against a real attack is a
+bug wearing a security costume. Three rounds of the same anti-pattern in
+pi-plugins cost real uptime before this rule was named.
+
+### Why
+
+The pi-plugins filesystem gate failed closed three times in a row, each time
+on a different common platform, each time after a "conservative" fix to the
+previous round:
+
+1. **v0.2.3** — treated `st_dev` as stable file identity. btrfs and overlayfs
+   assign anonymous device numbers per mount, so every reboot changed device
+   while files and inodes were unchanged. The host hard-failed startup.
+2. **v0.2.4** — the entire sqlite file-identity machinery (`.identity`
+   markers, `.initializing` claims, root identity markers, device/inode
+   validation, hard-link handle aliases, per-transaction root re-verification)
+   was ripped out. The CHANGELOG's own verdict: *"the guards false-positive-
+   broke normal operation after every routine reboot on btrfs/overlayfs…
+   while never catching a real replacement."*
+3. **v0.3.3 (issue #2)** — a fresh "conservative" magic-number `f_type`
+   allowlist failed closed on every real macOS APFS volume because Node returns
+   a vestigial `0x1a` on Darwin regardless of filesystem. The package refused
+   to start on macOS.
+
+The shared shape: each guard read as thorough, had a plausible-sounding
+comment, and shipped over real user-visible breakage because reviewers could
+not tell ceremonial security from real security. The category is the enemy,
+not any one guard.
+
+### Implications
+
+- **Name the threat before writing the guard.** A comment that says "intentionally
+  conservative" or "unknown mounts are a capability failure" without naming
+  the attack and how the guard stops it is the smell. If you cannot state the
+  threat in one sentence, the guard is ceremony.
+- **The threat model is this product's, not a server's.** These extensions run
+  on the user's own machine, against the user's own filesystem, registry, and
+  keyring. SSRF defenses, filesystem magic-number allowlists, and address-class
+  blocking defend against *untrusted input driving the host's network and disk*,
+  which is a real threat for servers and a much narrower one here. Scale the
+  guard to the actual attack surface.
+- **Prefer a degraded path over a refusal.** If the capability probe fails, the
+  question is "what does the user lose?" — not "how do we refuse?". Unknown
+  filesystem → log and continue with SQLite locking as-is. Missing native
+  prebuild → fall back to a slower path or clearly mark the surface as
+  unavailable, do not brick the extension. No binary on this platform → degrade
+  the feature, do not refuse to arm.
+- **Provide an override, or do not ship the guard.** A fail-closed guard with
+  no env, config, or programmable escape hatch will eventually trap a real
+  user on a legitimate input. Build the override at the same time as the guard.
+- **Do not write a regression test that accepts either failure or success.**
+  That test is a confession that the behavior is underspecified. Pin the
+  behavior per platform or pin the override semantics. (The capability gate
+  regression was hidden for exactly this reason.)
+- **After two rounds of the same breakage, remove the category, not the
+  instance.** If a class of guard has bitten twice, the third conservative
+  variant of it will bite too. Either drop the category or replace it with a
+  behavior probe that measures what it claims to enforce.
+
+### Boundaries
+
+This principle governs *operational* fail-closed — startup, activation,
+filesystem and platform capability, registry and network acquisition, secret
+store availability. It does **not** govern product security policy.
+pi-clearance denying an unknown bash command is the product's whole purpose;
+policy fail-closed is correct by construction. The test is whether the
+refusal protects against a real threat (policy denial does; a missing platform
+prebuild does not).
+
+Genuine capability gaps — "this platform has no SQLite," "this filesystem
+doesn't support POSIX modes" — are still allowed to throw. The principle is
+about guards whose "capability" is a guess or an allowlist, not a fact.
