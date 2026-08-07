@@ -4,21 +4,23 @@ import {
   mkdir,
   statfs,
 } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep, parse } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_DATABASE_MODE = 0o600;
 
 /**
- * Filesystem types whose locking semantics are known to be local enough for
- * the SQLite adapter. The allowlist is intentionally conservative: an
- * unknown mount is a capability failure, not permission to silently fall back
- * to process-local coordination.
+ * Platforms where `statfs.f_type` carries a Linux-style filesystem magic
+ * number that identifies local-enough locking semantics for the SQLite
+ * adapter. This is a Linux-only signal: libuv returns `0` on Windows
+ * (libuv does not expose an NTFS magic via `statfs`), and on FreeBSD
+ * `statfs.f_type` is the kernel-assigned `vfc_typenum` (a small enum like
+ * `0x0095` for UFS, `0x0023` for ZFS), not the disk magics people sometimes
+ * copy from Linux headers — so an integer allowlist keyed on Linux magics
+ * would always fail closed there. Darwin is the same story (vestigial
+ * `0x1a`); see `verifyLocalFilesystemCapability` for the platform dispatch.
  */
-const LOCAL_FILESYSTEM_TYPES_BY_PLATFORM: Readonly<Record<string, ReadonlySet<number>>> = {
-  // Only filesystems whose SQLite locking behavior is covered by this
-  // adapter's capability boundary are accepted. Unknown platform/type pairs
-  // fail closed rather than inheriting a Linux guess.
+const LOCAL_FILESYSTEM_MAGIC_BY_PLATFORM: Readonly<Record<string, ReadonlySet<number>>> = {
   linux: new Set([
     0x0000ef53, // ext2/3/4
     0x01021994, // tmpfs
@@ -31,9 +33,6 @@ const LOCAL_FILESYSTEM_TYPES_BY_PLATFORM: Readonly<Record<string, ReadonlySet<nu
     0x2fc12fc1, // zfs
     0x858458f6, // ramfs
   ]),
-  win32: new Set([0x5346544e]), // NTFS
-  darwin: new Set([0x41504653, 0x48465300]), // APFS, HFS+
-  freebsd: new Set([0x011954, 0x09011954]), // UFS, UFS2
 };
 
 function filesystemMode(mode: number): number {
@@ -44,41 +43,29 @@ function filesystemFailure(message: string): Error {
   return new Error(message);
 }
 
-async function ensureDirectory(path: string): Promise<void> {
-  try {
-    const stats = await lstat(path);
-    if (stats.isSymbolicLink()) throw filesystemFailure("lock root contains a symbolic link");
-    if (!stats.isDirectory()) throw filesystemFailure("lock root component is not a directory");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    try {
-      await mkdir(path, { mode: PRIVATE_DIRECTORY_MODE });
-    } catch (mkdirError) {
-      // Another process may create the same first-use component after our
-      // ENOENT observation. Accept only that race, then revalidate the winner
-      // without following a symlink below.
-      if ((mkdirError as NodeJS.ErrnoException).code !== "EEXIST") throw mkdirError;
-    }
-    const stats = await lstat(path);
-    if (stats.isSymbolicLink() || !stats.isDirectory()) {
-      throw filesystemFailure("lock root component is not a private directory");
-    }
-  }
-}
-
-/** Create and validate a private root without following any path symlink. */
+/**
+ * Create and validate the lock root, then enforce that the leaf itself is
+ * private. The 0o700 leaf mode is the actual security boundary: no other
+ * local user can write into a directory the runtime user owns at 0o700,
+ * regardless of how the path arrived there.
+ *
+ * Earlier versions walked every ancestor and rejected any path component
+ * symlink. That defense assumed an attacker with write access to a parent of
+ * the lock root — at which point the user is already compromised — while it
+ * broke legitimate OS-managed symlinks such as macOS `/tmp → /private/tmp`.
+ * The walk is gone; the leaf check is what carries the guarantee.
+ */
 export async function ensurePrivateLockRoot(input: string): Promise<string> {
   if (typeof input !== "string" || input.length === 0 || !isAbsolute(input)) {
     throw new TypeError("lockRoot must be a non-empty absolute path");
   }
   const root = resolve(input);
-  const parsed = parse(root);
-  const remainder = relative(parsed.root, root);
-  let current = parsed.root;
-  for (const component of remainder.split(sep)) {
-    if (component.length === 0) continue;
-    current = join(current, component);
-    await ensureDirectory(current);
+  try {
+    await mkdir(root, { mode: PRIVATE_DIRECTORY_MODE, recursive: true });
+  } catch (mkdirError) {
+    // A concurrent creator may win the race after our first attempt. Accept
+    // only that race; the leaf revalidation below catches anything else.
+    if ((mkdirError as NodeJS.ErrnoException).code !== "EEXIST") throw mkdirError;
   }
   await chmod(root, PRIVATE_DIRECTORY_MODE);
   const stats = await lstat(root);
@@ -92,12 +79,24 @@ export async function ensurePrivateLockRoot(input: string): Promise<string> {
  * Verify the mounted filesystem rather than assuming that a successful SQLite
  * open proves cross-process exclusion. Callers may inject a stricter policy
  * when a platform has a better local-filesystem classifier.
+ *
+ * The integer magic-number allowlist applies only to Linux, where
+ * `statfs.f_type` carries a filesystem magic. On every other platform
+ * (Darwin, Windows, FreeBSD, AIX, etc.) the gate is a no-op: libuv returns
+ * `0` on Windows, FreeBSD's `f_type` is a kernel enum (`vfc_typenum`), and
+ * Darwin's is vestigial `0x1a` (issue #2). A fail-closed stance on those
+ * platforms has no signal and breaks real startup. SQLite locking works
+ * empirically on those platforms; the allowlist is a defense against
+ * known-broken network filesystems on Linux, not a pre-condition for the
+ * adapter to function. Callers needing a real classification on other
+ * platforms must inject `verifyLocalFilesystem`.
  */
 export async function verifyLocalFilesystemCapability(root: string): Promise<void> {
+  const supportedTypes = LOCAL_FILESYSTEM_MAGIC_BY_PLATFORM[process.platform];
+  if (supportedTypes === undefined) return;
   const stats = await statfs(root);
   const type = Number(stats.type);
-  const supportedTypes = LOCAL_FILESYSTEM_TYPES_BY_PLATFORM[process.platform];
-  if (supportedTypes === undefined || !Number.isSafeInteger(type) || !supportedTypes.has(type >>> 0)) {
+  if (!Number.isSafeInteger(type) || !supportedTypes.has(type >>> 0)) {
     throw filesystemFailure("filesystem locking capability is unknown or unsupported on this platform");
   }
 }

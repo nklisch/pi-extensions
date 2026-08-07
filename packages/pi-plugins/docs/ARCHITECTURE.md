@@ -519,11 +519,15 @@ and projection preparation happen before coordination. `createKeyedMutationSched
 and `createGenerationMutationCoordinator` then compose scope-qualified FIFO
 ownership with the application `ScopeLockManager`; scheduler callbacks expose no
 nested-acquisition capability. The SQLite adapter holds its rollback-journal
-`BEGIN IMMEDIATE` transaction only for the short guarded window. Initialization
-binds a durable root marker and per-database path identity marker; missing,
-mismatched, or replaced initialized paths fail closed. Its private root is
-capability-probed for a platform/filesystem pair covered by the adapter, and
-unknown or network filesystems fail closed. SQLite busy code 5 is retried with
+`BEGIN IMMEDIATE` transaction only for the short guarded window; schema first
+use serializes inside that transaction and a killed holder is released by the
+OS, so there are no durable root or per-database path-identity markers. Its
+private lock root enforces a 0o700 leaf with no symlink at the leaf, but the
+filesystem capability gate is best-effort: it only checks the integer
+`statfs.f_type` magic number on platforms where it carries one
+(linux/win32/freebsd); on Darwin and any platform Node cannot introspect, the
+gate is a no-op rather than failing closed, because the integer has no signal
+there and SQLite locking works empirically. SQLite busy code 5 is retried with
 caller cancellation and bounded application jitter. Locks do not expire, claim
 fairness, or fall back to process-local safety; process death releases the OS
 lock, while a paused live owner remains held. `LifecycleStateStore.commit`

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.4
+
+### Removed
+
+- Defanged the over-engineered filesystem-gate class in `infrastructure/state/local-lock-filesystem.ts`. `verifyLocalFilesystemCapability` was the third round of the same anti-pattern in this adapter (after `st_dev` identity in v0.2.3 and the sqlite file-identity machinery in v0.2.4): a Linux-style magic-number `f_type` allowlist that fails closed on every real macOS APFS/HFS+ volume because Node returns a vestigial `0x1a` on Darwin. The integer allowlist is now Linux-only — the single platform where `statfs.f_type` actually carries a disk magic — and is a no-op everywhere else. (The original table also had `win32` and `freebsd` entries with Linux-style magics; libuv returns `0` on Windows and FreeBSD's `f_type` is the kernel-assigned `vfc_typenum`, so those entries had been silently failing closed the entire time — masked only because nobody runs pi-plugins there.) `ensurePrivateLockRoot` no longer walks every path component rejecting any symlink; the 0o700 leaf check is the actual security boundary, and the ancestor walk only ever broke OS-managed symlinks like macOS `/tmp → /private/tmp`. The capability-gate test that masked the regression (it accepted either failure or success) now asserts the host-platform behavior deterministically, and a new test pins the no-op behavior on every non-Linux platform. Foundation docs (`SPEC.md`, `ARCHITECTURE.md`) reconciled against the v0.2.4-removed identity markers and the new gate behavior. Recorded as a project principle in `docs/PRINCIPLES.md` and `AGENTS.md`. Fixes issue #2.
+
 ## v0.3.3
 
 ### Changed

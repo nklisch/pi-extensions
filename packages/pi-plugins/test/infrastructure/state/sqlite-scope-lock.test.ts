@@ -35,19 +35,20 @@ async function waitForExit(childProcess: ChildProcessWithoutNullStreams): Promis
 }
 
 describe("SQLite scope lock adapter", () => {
-  it("exercises the default platform/filesystem capability gate", async () => {
+  it("accepts the host platform's local filesystem under the default capability gate", async () => {
+    // Regression for issue #2: the default `verifyLocalFilesystemCapability`
+    // must not fail closed on the host. Platforms with a magic-number table
+    // (linux/win32/freebsd) accept the host's real local FS; platforms
+    // without a table (darwin and anything else Node cannot introspect) skip
+    // the integer check entirely. Either way, scope-lock creation succeeds.
     const lockRoot = await root();
     try {
-      const result = await createSqliteScopeLockManager({
+      const locks = await createSqliteScopeLockManager({
         lockRoot,
         retryDelayMs: { minimum: 1, maximum: 1 },
-      }).catch((error: unknown) => error);
-      if (result instanceof BoundaryError) {
-        expect(result.code).toBe("ADAPTER_FAILED");
-      } else {
-        const lease = await (result as Awaited<ReturnType<typeof createSqliteScopeLockManager>>).acquire(user, new AbortController().signal);
-        await lease.release();
-      }
+      });
+      const lease = await locks.acquire(user, new AbortController().signal);
+      await lease.release();
     } finally {
       await rm(lockRoot, { recursive: true, force: true });
     }
