@@ -51,7 +51,11 @@ for (const dep of manifest.bundledDependencies ?? []) {
 const clearancePrefix = "node_modules/@nklisch/pi-clearance/";
 const targetSuffix = new Map([
   ["x86_64-unknown-linux-gnu", "linux-x64-gnu"],
+  ["aarch64-unknown-linux-gnu", "linux-arm64-gnu"],
+  ["x86_64-apple-darwin", "darwin-x64"],
   ["aarch64-apple-darwin", "darwin-arm64"],
+  ["x86_64-pc-windows-msvc", "win32-x64-msvc"],
+  ["aarch64-pc-windows-msvc", "win32-arm64-msvc"],
 ]);
 const nativeArtifacts = clearanceManifest.napi.targets.map((target) => {
   const suffix = targetSuffix.get(target);

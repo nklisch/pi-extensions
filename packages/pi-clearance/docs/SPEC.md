@@ -15,7 +15,7 @@ Pi Clearance is a Pi extension that structurally analyzes tool calls, evaluates 
 - Package installation makes packs available, not active. Explicit user-owned enablement is required. Clearance defines no npm install lifecycle hooks and package installation never reads or writes user config.
 - Global and project config written through Clearance is sparse: `version` plus recursively retained non-default user choices. Defaults remain runtime-only. Invalid or obsolete files fail strict validation and runtime falls back to floor-only policy; package installation does not migrate them.
 - Pre-public migrations are clean cutovers. Removed keys fail strict schema validation; there are no translators or aliases. Trusted TypeScript rule modules are deliberately cut and are never loaded.
-- The native engine is distributed as prebuilt Node-API artifacts for Linux x64 glibc and macOS arm64. Installation never runs Cargo; a missing or unsupported artifact fails closed.
+- The native engine is distributed as prebuilt Node-API artifacts for Linux x64 glibc, Linux arm64 glibc, macOS x64, macOS arm64, Windows x64 MSVC, and Windows arm64 MSVC. Installation never runs Cargo; a missing or unsupported artifact fails closed.
 
 ## Config
 

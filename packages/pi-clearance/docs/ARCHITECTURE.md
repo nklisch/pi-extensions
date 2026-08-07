@@ -30,7 +30,7 @@ TypeScript owns Pi lifecycle, config I/O, package discovery, settings, audit, an
 - `src/replay/` — TypeScript corpus acquisition and proposal/presentation adapters; replay computation is delegated to native kernels.
 
 Release CI builds every declared native target on an appropriate runner, then
-stages both `clearance-core.<platform>.node` artifacts into the existing
+stages all six `clearance-core.<platform>.node` artifacts into the existing
 `@nklisch/pi-clearance` package. The loader selects the matching bundled artifact
 at runtime. Publishing fails unless every declared target is present, preventing a
 release that works only on the publisher's host. Installation never builds Rust and

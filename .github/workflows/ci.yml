@@ -39,12 +39,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Native runners wherever GA: cheaper, simpler, and the loader test
+          # can actually exercise the freshly-built binary.
           - runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: linux-x64-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: linux-arm64-gnu
           - runner: macos-14
             target: aarch64-apple-darwin
             artifact: darwin-arm64
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: win32-x64-msvc
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            artifact: win32-arm64-msvc
+          # Intel Mac: macos-13 is retired Dec 2025, so cross-compile from
+          # Apple Silicon. clang on macOS targets x86_64-apple-darwin natively;
+          # cc-rs auto-selects the right --target from the cargo triple.
+          - runner: macos-14
+            target: x86_64-apple-darwin
+            artifact: darwin-x64
+            cross: true
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -58,5 +76,9 @@ jobs:
       - run: npm ci
       - name: Build native engine
         run: npm run build:native:target --workspace @nklisch/pi-clearance -- ${{ matrix.target }}
-      - name: Exercise bundled native loader
+      - name: Exercise bundled native loader (host-platform builds only)
+        # Cross-compiled prebuilds (Intel Mac from Apple Silicon) cannot be
+        # loaded by the host runner. Native-runner entries run the loader
+        # test; the build step above already verifies compilation for the rest.
+        if: ${{ matrix.cross != true }}
         run: npm test --workspace @nklisch/pi-clearance -- test/native-loader.test.ts

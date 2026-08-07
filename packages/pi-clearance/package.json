@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-clearance",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Configurable auto-reviewer Pi extension for parsed, structural command policy",
   "type": "module",
   "license": "MIT",
@@ -21,7 +21,11 @@
     "binaryName": "clearance-core",
     "targets": [
       "x86_64-unknown-linux-gnu",
-      "aarch64-apple-darwin"
+      "aarch64-unknown-linux-gnu",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc"
     ]
   },
   "exports": {

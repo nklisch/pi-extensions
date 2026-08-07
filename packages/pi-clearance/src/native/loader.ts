@@ -195,12 +195,18 @@ let cachedStatus: NativeEngineStatus | undefined;
  * prebuild files staged by `native:prepare`.
  */
 export function nativePlatformTriple(): string | undefined {
-  if (process.platform === "linux" && process.arch === "x64") {
-    return "linux-x64-gnu";
-  }
-  if (process.platform === "darwin" && process.arch === "arm64") {
-    return "darwin-arm64";
-  }
+  // Map the host platform/arch to a napi-rs platform-package suffix. Every
+  // common dev platform is covered. The list of *built* prebuilds is the
+  // narrower one in `package.json` `napi.targets`; this function returns a
+  // suffix for any platform Node can run on so the load path produces a
+  // precise "no prebuild for this platform" error rather than a generic
+  // "unsupported native platform" when the host is genuinely novel.
+  if (process.platform === "linux" && process.arch === "x64") return "linux-x64-gnu";
+  if (process.platform === "linux" && process.arch === "arm64") return "linux-arm64-gnu";
+  if (process.platform === "darwin" && process.arch === "x64") return "darwin-x64";
+  if (process.platform === "darwin" && process.arch === "arm64") return "darwin-arm64";
+  if (process.platform === "win32" && process.arch === "x64") return "win32-x64-msvc";
+  if (process.platform === "win32" && process.arch === "arm64") return "win32-arm64-msvc";
   return undefined;
 }
 
