@@ -120,8 +120,9 @@ session start; command-time writes validate before touching disk.
 ### Writing styles
 
 An optional writing style controls conversational communication independently
-of the active mode. Bundled styles are `clear`, `compact`, `explanatory`, and
-`expressive`.
+of the active mode. Bundled styles are `clear`, `compact`, `explanatory`,
+`expressive`, and `straight`. `straight` leads with direct technical judgment,
+removes sugarcoating and false balance, and keeps explanations self-contained.
 
 | Command | Effect |
 |---|---|
@@ -143,7 +144,12 @@ For example:
 /style none                       # temporarily mask either default
 /style off                        # reveal the configured default
 /style default off                # clear project default; reveal global
+/mode straight                       # direct premise-checking behavior
+/style straight                      # direct, self-contained prose
 ```
+
+The `straight` mode and style are independent. Use either one alone, or select
+both when you want the behavioral base and the writing posture together.
 
 The same durable selection can be edited directly in config:
 
@@ -182,7 +188,7 @@ take effect immediately.
 **Base** voice (default `pi` = no overlay, identity only):
 
 - `pi` — no voice overlay
-- `chill`, `flow`, `pi-direct` — overlay voices (`prompts/base/*.md`)
+- `chill`, `flow`, `pi-direct`, `straight` — overlay voices (`prompts/base/*.md`)
 
 **Agency** — `autonomous` · `collaborative` · `surgical` · `partner`
 
@@ -211,13 +217,16 @@ take effect immediately.
 | `flow` | flow | autonomous | architect | adjacent | flow |
 | `tinker` | flow | autonomous | pragmatic | unrestricted | flow, playful |
 | `spark` | chill | autonomous | architect | unrestricted | muse, playful |
+| `straight` | straight | autonomous | pragmatic | adjacent | — |
 | `none` | — | — | — | — | virtual no-mode override |
 
 Preset definitions live in [`presets.json`](presets.json), except `none`, which
 is virtual and injects no mode fragments. The fragment text lives in
 [`prompts/`](prompts) (`base/`, `axis/{agency,quality,scope}/`, `modifiers/`).
 Fragment files are cached by mtime, so editing one takes effect on the next turn
-— no `/reload` needed.
+— no `/reload` needed. The `straight` base was adapted from the intent of
+`claude-code-modes`: correctness over agreement, explicit premise checking, and
+direct criticism of the work without turning abrasiveness into a persona.
 
 ## How it works
 

@@ -226,12 +226,16 @@ describe("loadFragment — trimming + mtime invalidation", () => {
   it("does NOT re-read when mtime is unchanged (out-of-band write proves the cache hit)", () => {
     const root = freshRoot();
     const p = write(root, "axis/agency/x.md", "cached-value");
+    // Normalize before populating the cache. Some filesystems round fractional
+    // milliseconds differently when an mtime passes through utimes(2).
+    const stableSeconds = Math.floor(Date.now() / 1000);
+    utimesSync(p, stableSeconds, stableSeconds);
+    const { mtimeMs } = statSync(p);
     expect(loadFragment(p)).toBe("cached-value"); // populates the cache
 
-    // Capture the current mtime, write new content out-of-band, then restore the
-    // exact mtime so the cache cannot observe the change. A correct stat-gated
-    // cache returns the STALE cached value; a read-every-call cache would not.
-    const { mtimeMs } = statSync(p);
+    // Write new content out-of-band, then restore the exact normalized mtime so
+    // the cache cannot observe the change. A correct stat-gated cache returns
+    // the STALE cached value; a read-every-call cache would not.
     writeFileSync(p, "stale-should-not-surface", "utf8");
     const secs = mtimeMs / 1000;
     utimesSync(p, secs, secs);
@@ -304,12 +308,13 @@ describe("starter-set sanity (real package root, no override)", () => {
     ]);
   });
 
-  it("base overlays resolves to the shipped overlays in manifest order (chill, flow, pi-direct)", () => {
+  it("base overlays resolve to every shipped overlay in manifest order", () => {
     const overlays = discoverBaseOverlays();
     expect(overlays.map((p) => basename(p, ".md"))).toEqual([
       "chill",
       "flow",
       "pi-direct",
+      "straight",
     ]);
   });
 
@@ -319,7 +324,7 @@ describe("starter-set sanity (real package root, no override)", () => {
       ...discoverModifiers(),
       ...discoverBaseOverlays(),
     ];
-    expect(paths.length).toBe(24); // agency(4)+quality(3)+scope(3) + 11 modifiers + 3 overlays
+    expect(paths.length).toBe(25); // agency(4)+quality(3)+scope(3) + 11 modifiers + 4 overlays
     for (const p of paths) {
       const content = loadFragment(p);
       expect(content.length).toBeGreaterThan(0);

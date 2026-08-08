@@ -82,12 +82,13 @@ describe("resolveCustomStylePath — containment boundary", () => {
 });
 
 describe("style catalog and resolution", () => {
-  it("discovers the four bundled styles in sorted order", () => {
+  it("discovers the five bundled styles in sorted order", () => {
     expect(discoverBundledStyles().map((path) => basename(path))).toEqual([
       "clear.md",
       "compact.md",
       "explanatory.md",
       "expressive.md",
+      "straight.md",
     ]);
   });
 
@@ -112,6 +113,18 @@ describe("style catalog and resolution", () => {
     expect(bundled.fragmentSource).toBe("bundled");
     expect(bundled.content.length).toBeGreaterThan(0);
     expect(bundled.signature).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("ships straight as direct, self-contained technical writing", () => {
+    setActiveStyle("straight");
+    const straight = resolveActiveStylePlan();
+    expect(straight).toMatchObject({
+      name: "straight",
+      fragmentSource: "bundled",
+      selectionSource: "override",
+    });
+    expect(straight.content).toContain("Do not sugarcoat technical conclusions");
+    expect(straight.content).toContain("The user does not see every tool call");
   });
 
   it("resolves override none with empty content and signature", () => {
@@ -198,6 +211,7 @@ describe("style catalog and resolution", () => {
       { name: "compact", fragmentSource: "bundled" },
       { name: "explanatory", fragmentSource: "bundled" },
       { name: "expressive", fragmentSource: "bundled" },
+      { name: "straight", fragmentSource: "bundled" },
       { name: "team", fragmentSource: "custom-global" },
     ]);
   });
@@ -226,6 +240,7 @@ describe("style catalog and resolution", () => {
       { name: "compact", fragmentSource: "bundled" },
       { name: "explanatory", fragmentSource: "bundled" },
       { name: "expressive", fragmentSource: "bundled" },
+      { name: "straight", fragmentSource: "bundled" },
       { name: "team", fragmentSource: "custom-global" },
     ]);
   });

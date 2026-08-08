@@ -73,4 +73,13 @@ describe("preset catalog — every shipped preset is settable against the real p
       }
     }
   });
+
+  it("straight materializes premise-checking behavior from its own base", () => {
+    setActiveMode("straight");
+    const plan = resolveActiveModePlan();
+    const base = plan.fragments.find((fragment) => fragment.slot === "base");
+    expect(base?.value).toBe("straight");
+    expect(base?.content).toContain("Optimize for the correct result, not agreement");
+    expect(base?.content).toContain("Do not manufacture disagreement");
+  });
 });

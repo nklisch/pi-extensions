@@ -185,7 +185,9 @@ One optional writing style controls conversational communication across every
 mode. Its effective selection is an ephemeral `/style` session override over a
 durable `writingStyle` config default. Project config wins over global config,
 and `"none"` at either tier explicitly suppresses style injection. The bundled
-styles are `clear`, `compact`, `explanatory`, and `expressive`.
+styles are `clear`, `compact`, `explanatory`, `expressive`, and `straight`.
+`straight` requires direct technical judgment, no sugarcoating or false balance,
+and self-contained explanations that do not assume private tool context.
 
 `customStyles` maps validated names to relative `.md` paths. Maps merge per key
 (project wins), while selection remains scalar. Each path resolves relative to
@@ -246,6 +248,9 @@ Two built-in paths converge on one resolver, with one global keybinding opt-in:
    `base:… • agency:… • quality:… • scope:…` plus any `+modifier`s; a broken
    active mode degrades to an `(unresolvable — …)` line) and the **available
    presets** (the sorted `presets.json` names plus the virtual `none` mode).
+   The shipped `straight` preset selects the `straight` base with
+   autonomous/pragmatic/adjacent axes; writing style remains an independent
+   `/style straight` selection rather than an implicit side effect of `/mode`.
    In TUI mode, the first argument is discoverable via autocomplete: preset
    names (including the virtual `none`) plus the literals `off` and `default`.
    With a **`<preset>`** argument `/mode` sets the session override and confirms

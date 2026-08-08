@@ -231,6 +231,7 @@ describe("starter-set sanity / load-from-disk", () => {
       "refactor",
       "safe",
       "spark",
+      "straight",
       "tinker",
     ]);
   });
@@ -250,8 +251,19 @@ describe("starter-set sanity / load-from-disk", () => {
       "refactor",
       "safe",
       "spark",
+      "straight",
       "tinker",
     ]);
+  });
+
+  it("straight uses the direct base with autonomous pragmatic adjacent axes", () => {
+    expect(getPreset("straight", loadPresets())).toEqual({
+      base: "straight",
+      agency: "autonomous",
+      quality: "pragmatic",
+      scope: "adjacent",
+      modifiers: [],
+    });
   });
 
   it("every shipped preset is well-formed (all five components, correct types)", () => {
@@ -329,6 +341,7 @@ describe("memoization + reset", () => {
       "refactor",
       "safe",
       "spark",
+      "straight",
       "tinker",
     ]);
   });

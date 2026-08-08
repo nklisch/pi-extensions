@@ -171,6 +171,7 @@ describe("selectModeGlyph", () => {
   it("maps each known base voice to its Catppuccin-harmonic glyph", () => {
     expect(glyphFor("pi")).toBe("◆");
     expect(glyphFor("pi-direct")).toBe("◆");
+    expect(glyphFor("straight")).toBe("◆");
     expect(glyphFor("chill")).toBe("◇");
     expect(glyphFor("flow")).toBe("⬡");
   });
@@ -196,6 +197,7 @@ describe("glyphForBase", () => {
   it("maps known bases the same way selectModeGlyph does", () => {
     expect(glyphForBase("pi")).toBe("◆");
     expect(glyphForBase("pi-direct")).toBe("◆");
+    expect(glyphForBase("straight")).toBe("◆");
     expect(glyphForBase("chill")).toBe("◇");
     expect(glyphForBase("flow")).toBe("⬡");
   });

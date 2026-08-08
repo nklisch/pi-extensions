@@ -32,15 +32,15 @@ pi-model-modes/
 │   └─ keybinding.ts         cycle keybinding helper, registered only when globally opted in
 ├─ prompts/
 │   ├─ base.json  overlay manifest (slot order) — at the prompts/ root
-│   ├─ base/      voice overlays (chill.md, flow.md, pi-direct.md)
+│   ├─ base/      voice overlays (chill.md, flow.md, pi-direct.md, straight.md)
 │   ├─ axis/
 │   │   ├─ agency/   autonomous, collaborative, surgical, partner
 │   │   ├─ quality/  architect, pragmatic, minimal
 │   │   └─ scope/    unrestricted, adjacent, narrow
 │   ├─ modifiers/   bold, tdd, debug, flow, muse, readonly, methodical,
 │   │                director, speak-plain, context-pacing, playful
-│   └─ styles/      clear, compact, explanatory, expressive
-├─ presets.json              named bundles (e.g. "flow", "refactor", "create")
+│   └─ styles/      clear, compact, explanatory, expressive, straight
+├─ presets.json              named bundles (e.g. "flow", "straight", "create")
 └─ tests/
     ├─ assemble.test.ts
     ├─ autocomplete-seam.test.ts

@@ -76,6 +76,13 @@
     "scope": "adjacent",
     "modifiers": ["flow"]
   },
+  "straight": {
+    "base": "straight",
+    "agency": "autonomous",
+    "quality": "pragmatic",
+    "scope": "adjacent",
+    "modifiers": []
+  },
   "tinker": {
     "base": "flow",
     "agency": "autonomous",

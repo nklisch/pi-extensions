@@ -1,3 +1,8 @@
 {
-  "overlays": ["base/chill.md", "base/flow.md", "base/pi-direct.md"]
+  "overlays": [
+    "base/chill.md",
+    "base/flow.md",
+    "base/pi-direct.md",
+    "base/straight.md"
+  ]
 }

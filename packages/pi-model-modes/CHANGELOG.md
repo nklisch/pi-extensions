@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.3 — 2026-08-08
+
+### Features
+
+- Add a `straight` mode with autonomous/pragmatic/adjacent axes and a dedicated base that prioritizes correctness over agreement, checks bad premises, and states technical judgments directly without manufacturing disagreement.
+- Add an independent bundled `straight` writing style for plain, self-contained technical explanations without sugarcoating, praise padding, false balance, or private repository shorthand.
+
+### Tests
+
+- Canonicalize macOS temporary paths and normalize cache-test mtimes so the full package suite is portable across APFS and Linux filesystems.
+
 ## v0.3.2 — 2026-08-08
 
 ### Changed

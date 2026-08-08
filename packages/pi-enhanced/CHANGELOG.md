@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.8
+
+### Changed
+
+- Rebundle `@nklisch/pi-model-modes` v0.3.3 with the new independent `straight` behavioral base/preset and `straight` writing style.
+
 ## v0.1.7
 
 ### Changed

@@ -20,8 +20,8 @@ export const MODE_FOOTER_KEY = "pi-model-modes";
  * Leading marker glyph per base voice. Echoes pi-catppuccin-tui's ◆ vocabulary
  * so the mode footer reads as part of the same family as the model/git/context
  * line rather than a foreign symbol. Glyph choice tracks voice *character*:
- * solid for pi-family voices (default `pi` and the more-terse `pi-direct`),
- * outline for `chill`'s softer voice, hex for `flow`'s distinct character.
+ * solid for direct voices (`pi`, `pi-direct`, and `straight`), outline for
+ * `chill`'s softer voice, and hex for `flow`'s distinct character.
  *
  * The raw glyphs stay plain Unicode for stable tests and fallback renderers;
  * the pi seam applies theme-aware color so Catppuccin footers inherit the
@@ -30,6 +30,7 @@ export const MODE_FOOTER_KEY = "pi-model-modes";
 const BASE_VOICE_GLYPHS: Readonly<Record<string, string>> = {
   pi: "◆",
   "pi-direct": "◆",
+  straight: "◆",
   chill: "◇",
   flow: "⬡",
 };
