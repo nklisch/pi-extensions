@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.2 — 2026-08-08
+
+### Changed
+
+- Make global mode persistence discoverable: `/mode default ` autocomplete now leads with `--global`, the leading-flag form continues with preset completion, and the bare `/mode` panel shows both project and global durable commands.
+
 ## v0.3.1 — 2026-07-12
 
 ### Features

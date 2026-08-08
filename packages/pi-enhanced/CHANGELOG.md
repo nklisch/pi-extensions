@@ -5,6 +5,7 @@
 ### Changed
 
 - Rebundle `@nklisch/pi-clearance` v0.2.3 so confirmed mode and settings changes update the active-session footer immediately instead of waiting for another tool call or restart.
+- Rebundle `@nklisch/pi-model-modes` v0.3.2 so global mode persistence is visible in autocomplete and the bare `/mode` panel.
 
 ## v0.1.6
 

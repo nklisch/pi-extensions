@@ -53,7 +53,7 @@ const FIXTURE_JSON = JSON.stringify({
 const NONE_DESCRIPTION = "explicit no-mode override — wins over default";
 const OFF_DESCRIPTION = "clear override — fall back to default";
 const DEFAULT_DESCRIPTION = "manage the durable default — writes pi-model-modes.json";
-const GLOBAL_FLAG_DESCRIPTION = "target the global (~/.pi/agent) config file";
+const GLOBAL_FLAG_DESCRIPTION = "persist globally in ~/.pi/agent (instead of this project)";
 
 function fixtureRegistry(): PresetRegistry {
   return loadPresets({ json: FIXTURE_JSON });
@@ -262,15 +262,34 @@ describe("getModeArgSuggestions", () => {
     });
   });
 
-  it("stage 2: `/mode default ` returns the full preset + off list", () => {
+  it("stage 2: `/mode default ` leads with the global flag, then presets + off", () => {
     const registry = fixtureRegistry();
     const result = getModeArgSuggestions("/mode default ", registry);
 
     expect(result?.prefix).toBe("");
-    expect(result?.items.map((item) => item.value)).toEqual(
+    expect(result?.items.map((item) => item.value)).toEqual([
+      MODE_DEFAULT_GLOBAL_FLAG,
+      ...buildModeArgItems(registry).map((item) => item.value),
+    ]);
+    expect(result?.items.map((item) => item.value)).not.toContain(MODE_DEFAULT_ARG);
+  });
+
+  it("stage 2: typing a dash discovers the global scope flag", () => {
+    expect(getModeArgSuggestions("/mode default -", fixtureRegistry())).toEqual({
+      prefix: "-",
+      items: [expect.objectContaining({ value: MODE_DEFAULT_GLOBAL_FLAG })],
+    });
+  });
+
+  it("stage 2b: leading --global continues with preset + off completion", () => {
+    const registry = fixtureRegistry();
+    expect(getModeArgSuggestions("/mode default --global fl", registry)).toEqual({
+      prefix: "fl",
+      items: [expect.objectContaining({ value: "flow" })],
+    });
+    expect(getModeArgSuggestions("/mode default --global ", registry)?.items.map((item) => item.value)).toEqual(
       buildModeArgItems(registry).map((item) => item.value),
     );
-    expect(result?.items.map((item) => item.value)).not.toContain(MODE_DEFAULT_ARG);
   });
 
   it("stage 2: `/mode default o` suggests off", () => {

@@ -25,11 +25,14 @@ export const MODE_DEFAULT_GLOBAL_FLAG = "--global";
 const OFF_DESCRIPTION = "clear override — fall back to default";
 const NONE_DESCRIPTION = "explicit no-mode override — wins over default";
 const DEFAULT_DESCRIPTION = "manage the durable default — writes pi-model-modes.json";
-const GLOBAL_FLAG_DESCRIPTION = "target the global (~/.pi/agent) config file";
+const GLOBAL_FLAG_DESCRIPTION = "persist globally in ~/.pi/agent (instead of this project)";
 
 const MODE_ARG_TRIGGER = /^\/mode[ \t]+([^\s]*)$/;
 /** Stage 2: `<action>` token after `/mode default ` (no further tokens). */
 const MODE_DEFAULT_ACTION_TRIGGER = /^\/mode[ \t]+default[ \t]+([^\s]*)$/;
+/** Stage 2b: action after the discoverable leading `--global` form. */
+const MODE_DEFAULT_GLOBAL_ACTION_TRIGGER =
+  /^\/mode[ \t]+default[ \t]+--global[ \t]+([^\s]*)$/;
 /** Stage 3: a leading-dash token after `/mode default <action> `. */
 const MODE_DEFAULT_FLAG_TRIGGER = /^\/mode[ \t]+default[ \t]+[^\s]+[ \t]+(--?[^\s]*)$/;
 
@@ -69,7 +72,7 @@ export function buildModeTopLevelItems(
   ];
 }
 
-/** PURE: build the single-item `--global` suggestion list for stage 3. */
+/** PURE: build the single-item `--global` suggestion list. */
 export function buildDefaultGlobalFlagItems(): AutocompleteItem[] {
   return [
     {
@@ -93,8 +96,9 @@ export function filterModeArgItems(
  * should delegate. Three-stage dispatch for the `/mode default` subcommand:
  *
  *   - Stage 3: `/mode default <action> <--flag>` → `[--global]`
- *   - Stage 2: `/mode default <action>` → presets + `off` (NO `default` —
- *     `default default` is meaningless)
+ *   - Stage 2b: `/mode default --global <action>` → presets + `off`
+ *   - Stage 2: `/mode default <action>` → `--global` + presets + `off` (NO
+ *     `default` — `default default` is meaningless)
  *   - Stage 1: `/mode <partial>` → presets + `off` + `default` (top level)
  *
  * The three triggers are structurally mutually exclusive (trailing-space gates
@@ -115,12 +119,26 @@ export function getModeArgSuggestions(
     };
   }
 
-  // Stage 2: action after `/mode default `.
+  // Stage 2b: action after the leading, discoverable global flag form.
+  const globalActionToken = beforeCursor.match(
+    MODE_DEFAULT_GLOBAL_ACTION_TRIGGER,
+  )?.[1];
+  if (globalActionToken !== undefined) {
+    return {
+      prefix: globalActionToken,
+      items: filterModeArgItems(buildModeArgItems(registry), globalActionToken),
+    };
+  }
+
+  // Stage 2: action or global scope after `/mode default `.
   const actionToken = beforeCursor.match(MODE_DEFAULT_ACTION_TRIGGER)?.[1];
   if (actionToken !== undefined) {
     return {
       prefix: actionToken,
-      items: filterModeArgItems(buildModeArgItems(registry), actionToken),
+      items: filterModeArgItems(
+        [...buildDefaultGlobalFlagItems(), ...buildModeArgItems(registry)],
+        actionToken,
+      ),
     };
   }
 

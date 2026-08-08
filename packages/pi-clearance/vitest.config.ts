@@ -1,13 +1,15 @@
-import { mkdtempSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 // Tests that intentionally exercise config writers must never fall through to
-// the developer's real platform config root. Use one canonical throwaway home
-// for the Vitest process; individual fixtures may still override it further.
+// the developer's real platform config root. Keep the throwaway home under the
+// ignored dependency cache—not the OS temp tree—because path-policy fixtures
+// intentionally classify OS temp ahead of home and sensitive-home scopes.
+const testHomeParent = path.join(process.cwd(), "node_modules", ".cache");
+mkdirSync(testHomeParent, { recursive: true });
 const testHome = mkdtempSync(
-  path.join(realpathSync(tmpdir()), "pi-clearance-vitest-home-"),
+  path.join(testHomeParent, "pi-clearance-vitest-home-"),
 );
 
 export default defineConfig({

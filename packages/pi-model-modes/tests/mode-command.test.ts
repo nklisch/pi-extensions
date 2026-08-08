@@ -164,6 +164,8 @@ describe("/mode (no arg) — listing", () => {
     expect(msg.content).toContain("Effective mode: unset");
     expect(msg.content).toContain("Available presets:");
     expect(msg.content).toContain("safe");
+    expect(msg.content).toContain("/mode default <preset> — persist for this project");
+    expect(msg.content).toContain("/mode default --global <preset> — persist globally");
   });
 
 

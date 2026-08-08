@@ -280,8 +280,10 @@ Two built-in paths converge on one resolver, with one global keybinding opt-in:
 
    Autocomplete for the default subcommand is multi-stage but keeps the original
    `/mode <partial>` trigger intact: top-level `/mode <partial>` suggests
-   presets + `off` + `default`; `/mode default <partial>` suggests presets +
-   `off`; `/mode default <action> <--flag>` suggests `--global`.
+   presets + `off` + `default`; `/mode default <partial>` leads with `--global`
+   and then suggests presets + `off`; `/mode default --global <partial>` resumes
+   preset + `off` completion; `/mode default <action> <--flag>` also suggests
+   `--global`. The bare `/mode` panel prints both project and global durable forms.
 2. **Config default** — a `defaultMode` key in the plugin-owned
    `pi-model-modes.json`, read from `~/.pi/agent/pi-model-modes.json` (global)
    and `<cwd>/.pi/pi-model-modes.json` (project), shallow-merged with the

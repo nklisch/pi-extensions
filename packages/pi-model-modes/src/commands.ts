@@ -241,6 +241,9 @@ export function formatModeListing(
     `  ${summary}`,
     "Available presets:",
     presetList,
+    "Durable defaults:",
+    "  /mode default <preset> — persist for this project",
+    "  /mode default --global <preset> — persist globally",
   ].join("\n");
 }
 

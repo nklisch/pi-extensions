@@ -107,6 +107,11 @@ The command surface mirrors that merge model:
 /mode default off --global  # clear global default
 ```
 
+Autocomplete surfaces `--global` as the first choice after `/mode default ` and
+continues with preset completion after `/mode default --global `. The bare `/mode`
+panel also prints both durable forms so persistence is discoverable without reading
+documentation.
+
 Writes preserve sibling keys such as `cycleKeybinding`, format JSON with two-space
 indentation, and refuse to overwrite malformed/non-object JSON files. An invalid
 `defaultMode` (unknown preset / missing fragment) warns and is skipped during
