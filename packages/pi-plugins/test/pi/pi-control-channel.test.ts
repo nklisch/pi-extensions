@@ -11,6 +11,16 @@ function capture(stream: PassThrough): string {
 }
 
 describe("Pi control channel", () => {
+  it("names the exact suffixed command in collision guidance", () => {
+    const notify = vi.fn();
+    const channel = createPiControlChannel({ pi: { appendEntry: vi.fn() } as never, output: new PassThrough() });
+    channel.publishCollision({ hasUI: true, ui: { notify } } as never, "plugins-pi-plugins");
+    expect(notify).toHaveBeenCalledWith(
+      "Plugin Host command collision: use /plugins-pi-plugins for this package.",
+      "warning",
+    );
+  });
+
   it("prints pre-admission help reports once and leaves admitted reports to their frame sink", async () => {
     const output = new PassThrough();
     const channel = createPiControlChannel({ pi: { appendEntry: vi.fn() } as never, output });

@@ -424,9 +424,11 @@ the command path:
 Value-taking controls accept `--name value` or `--name=value`; flags do not
 accept values. A global control or non-repeatable command option may appear only
 once. The three JSON input channels are mutually exclusive. `--output human` is
-the default concise presentation; `--output json` emits the versioned result
-envelope and, when a sink is active, JSON-lines progress frames. Timeout
-cancellation still emits a terminal cancelled envelope. `--non-interactive`
+the default concise presentation; rejected source registrations include an
+actionable reason and next step rather than only the coarse envelope status.
+`--output json` emits the versioned result envelope and, when a sink is active,
+JSON-lines progress frames. Timeout cancellation still emits a terminal
+cancelled envelope. `--non-interactive`
 never opens a TUI or prompt: a command whose declared input class cannot be
 satisfied by the selected channel returns explicit input-required evidence.
 
@@ -553,7 +555,7 @@ commits successfully.
 
 ## Install transaction
 
-Source materializers do not allocate installed, cache, or marketplace storage. The lifecycle operation supplies an empty private staging slot. The Node factory composes Git, npm, bounded HTTPS, archive, filesystem, process, crypto, and credential adapters behind the application ports; those adapter details are not public API. Materialization writes only inside that slot, keeps Git/npm scratch under `<slot>/.work`, and returns an exact `<slot>/content` root, a disk-verified resolved source, a deterministic content manifest, and a source/content binding; cancellation or failure returns no partial result and cleans materializer-owned writes. A cleanup failure is explicit and cannot become a successful handoff. Lifecycle code owns atomic promotion, state and locks, journaling/fsync, rollback, recovery, retention, and garbage collection.
+Source materializers do not allocate installed, cache, or marketplace storage. The lifecycle operation supplies an empty private staging slot. Staging ownership uses a PID plus stable process-start evidence from procfs on Linux and native process queries on macOS/BSD and Windows; an unavailable platform probe degrades ownership classification to unknown rather than making legitimate hosts unusable. The Node factory composes Git, npm, bounded HTTPS, archive, filesystem, process, crypto, and credential adapters behind the application ports; those adapter details are not public API. Materialization writes only inside that slot, keeps Git/npm scratch under `<slot>/.work`, and returns an exact `<slot>/content` root, a disk-verified resolved source, a deterministic content manifest, and a source/content binding; cancellation or failure returns no partial result and cleans materializer-owned writes. A cleanup failure is explicit and cannot become a successful handoff. Lifecycle code owns atomic promotion, state and locks, journaling/fsync, rollback, recovery, retention, and garbage collection.
 
 Lifecycle mutation coordination uses a scope-qualified in-process FIFO scheduler plus a cross-process `ScopeLockManager`. The shipped scheduler callback has no nested-acquisition capability. The Node adapter uses one rollback-journal SQLite database per user or project scope and holds `BEGIN IMMEDIATE` only for the guarded promotion/compare-and-commit window; schema first use serializes inside that transaction and a killed holder is released by the OS, so there are no durable root or per-database path-identity markers. The lock root must be private (0o700 leaf, no symlink at the leaf) but the filesystem capability gate is best-effort: `verifyLocalFilesystemCapability` only checks the integer `statfs.f_type` magic number on platforms where it carries one (linux/win32/freebsd); on Darwin and any other platform Node cannot introspect, the gate is a no-op rather than failing closed, because the integer has no signal there and SQLite locking works empirically. SQLite busy code 5 is retried only through the caller's abort signal and bounded application jitter. There is no lock expiry, PID takeover, heartbeat, fairness guarantee, or process-local fallback: process termination releases the operating-system lock, while a paused live owner remains the owner. If a commit response is lost or cancellation arrives after a possible write, the coordinator reconciles authoritative state under the lock and returns committed evidence only for exact expected-generation-plus-one; otherwise it returns explicit failed or ambiguous evidence.
 

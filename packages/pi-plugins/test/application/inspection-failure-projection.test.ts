@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { projectInspectionFailureFindings } from "../../src/application/inspection-failure-projection.js";
-import { presentNativeDiagnostics, presentControlFailure } from "../../src/application/native-failure-presenter.js";
+import { presentMarketplaceAddFailure, presentNativeDiagnostics, presentControlFailure } from "../../src/application/native-failure-presenter.js";
 import { compileNativeDiagnostics } from "../../src/application/native-diagnostic-compiler.js";
 import { createHash } from "node:crypto";
 import type { Diagnostic } from "../../src/domain/errors.js";
@@ -84,5 +84,23 @@ describe("native failure presenter", () => {
   it("maps control failure codes to marketplace/plugin language", () => {
     expect(presentControlFailure("CONTROL_REQUEST_INVALID")?.text).toContain("@<marketplace>");
     expect(presentControlFailure("CONTROL_TARGET_SELECTION_FAILED")?.text).not.toContain("CONTROL_");
+  });
+
+  it.each([
+    ["INVALID_SOURCE", "owner/repository"],
+    ["PROJECT_UNTRUSTED", "isn't trusted"],
+    ["NOT_PORTABLE", "local checkout"],
+    ["NAME_CONFLICT", "same marketplace name"],
+    ["SOURCE_NAME_CHANGED", "different marketplace name"],
+    ["SOURCE_UNAVAILABLE", "couldn't be fetched"],
+    ["CATALOG_INVALID", ".claude-plugin/marketplace.json"],
+    ["PROMOTION_FAILED", "storage permissions"],
+    ["STATE_CORRUPT", "/plugins doctor"],
+    ["STATE_STALE", "Refresh and retry"],
+  ] as const)("explains marketplace-add rejection %s with a next step", (code, expected) => {
+    const text = presentMarketplaceAddFailure(code).text;
+    expect(text).toContain(expected);
+    expect(text).not.toContain(code);
+    expect(text).not.toBe("wasn't allowed");
   });
 });

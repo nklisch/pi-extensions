@@ -170,7 +170,7 @@ export const MarketplaceRefreshMemorySchema = z.object({
     expiresAt: EpochMillisecondsSchema,
     owner: z.object({
       pid: z.number().int().positive().safe(),
-      startToken: z.string().regex(/^\d+$/),
+      startToken: z.string().regex(/^(?:\d+|fallback:\d+)$/),
     }).strict().readonly().optional(),
   }).strict().readonly().superRefine((claim, context) => {
     if (claim.expiresAt <= claim.startedAt) context.addIssue({ code: "custom", path: ["expiresAt"], message: "refresh claim expiry must follow start" });

@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.5
+
+### Fixes
+
+- Add marketplaces on macOS instead of refusing staging because Linux `/proc` process-start evidence is unavailable. Staging, refresh claims, revision leases, and recovery journals now use native process-start queries on macOS/BSD and Windows, with a safe current-process fallback that leaves orphaned ownership unknown rather than blocking legitimate hosts.
+- Explain marketplace registration failures with the exact actionable category and next step. The manager no longer reduces every rejected add to “wasn't allowed”; invalid sources, unavailable repositories, invalid catalogs, name conflicts, stale/corrupt state, trust/portability limits, and local storage failures now render distinct guidance.
+
 ## v0.3.4
 
 ### Removed

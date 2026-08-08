@@ -1,9 +1,9 @@
 import type { RefreshClaimOwnerPort } from "../../application/ports/refresh-claim-owner.js";
-import { classifyProcessIdentity, readLinuxProcessStartToken } from "./process-identity.js";
+import { classifyProcessIdentity, readProcessStartToken } from "./process-identity.js";
 
-/** Linux PID + start-token authority; unsupported hosts remain safely unknown. */
+/** Cross-platform PID + start-token authority; unavailable probes remain safely unknown. */
 export function createProcessRefreshClaimOwner(): RefreshClaimOwnerPort {
-  const startToken = readLinuxProcessStartToken(process.pid);
+  const startToken = readProcessStartToken(process.pid);
   const current = startToken === undefined
     ? undefined
     : Object.freeze({ pid: process.pid, startToken });

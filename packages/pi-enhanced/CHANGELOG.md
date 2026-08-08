@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.6
+
+### Changed
+
+- Rebundle `@nklisch/pi-plugins` v0.3.5 so marketplace registration works on macOS and rejected source additions show actionable reasons instead of the generic “wasn't allowed” result.
+
+## v0.1.5
+
+### Fixed
+
+- Declare and bundle the complete runtime dependency set used by the enhanced package so packed installations resolve every extension without relying on the monorepo dependency tree.
+
 ## v0.1.4
 
 ### Changed

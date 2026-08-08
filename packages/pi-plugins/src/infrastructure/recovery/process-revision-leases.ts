@@ -4,7 +4,7 @@ import { ensurePrivateLockRoot, verifyLocalFilesystemCapability } from "../state
 import { openSqliteDatabase } from "../state/sqlite-open.js";
 import { RevisionLeaseCollectionSchema, RevisionLeaseSchema, type RevisionLease, type RevisionLeaseCollection, type RevisionLeaseStore } from "../../application/ports/revision-lease-store.js";
 import { RetainedArtifactRefSchema } from "../../application/ports/revision-artifact-store.js";
-import { classifyProcessIdentity, readLinuxProcessStartToken } from "../process/process-identity.js";
+import { classifyProcessIdentity, readProcessStartToken } from "../process/process-identity.js";
 
 function json(value: unknown): string { return JSON.stringify(value); }
 function abort(signal: AbortSignal): void { if (signal.aborted) throw signal.reason; }
@@ -39,7 +39,7 @@ export async function createProcessRevisionLeaseStore(options: Readonly<{ hostRo
   const store: RevisionLeaseStore = {
     async acquire(request, signal) {
       abort(signal);
-      const token = readLinuxProcessStartToken(process.pid); if (token === undefined) throw new Error("revision lease process identity unavailable");
+      const token = readProcessStartToken(process.pid); if (token === undefined) throw new Error("revision lease process identity unavailable");
       const leaseId = randomUUID();
       const artifacts = request.artifacts.map((ref) => RetainedArtifactRefSchema.parse(ref));
       database.prepare("INSERT INTO revision_leases(lease_id, session_id, artifacts_json, acquired_at, owner_pid, owner_start_token, owner_nonce) VALUES (?, ?, ?, ?, ?, ?, ?)").run(leaseId, request.sessionId, json(artifacts), request.at, process.pid, token, randomUUID());

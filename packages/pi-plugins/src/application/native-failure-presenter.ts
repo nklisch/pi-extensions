@@ -1,5 +1,6 @@
 import type { NativeDiagnostic, NativeProvenanceView, SafeDisplayField } from "./native-inspection-contract.js";
 import { NativeDisplayLimits, toSafeDisplayField } from "./native-inspection-display.js";
+import type { MarketplaceAddRejectionCode } from "./marketplace-management-contract.js";
 
 /**
  * User-facing failure text. Everything here speaks in marketplace/plugin
@@ -135,6 +136,32 @@ export function presentNativeDiagnostics(diagnostics: readonly NativeDiagnostic[
  */
 export function presentRecoveryRequired(): SafeDisplayField {
   return safe("The plugin is installed, but activation didn't finish in this session; the plugin host finishes it on recovery (usually automatic when pi restarts). `/plugins doctor` shows details.");
+}
+
+/** Actionable human text for a rejected marketplace registration. */
+export function presentMarketplaceAddFailure(code: MarketplaceAddRejectionCode): SafeDisplayField {
+  switch (code) {
+    case "INVALID_SOURCE":
+      return safe("That repository address isn't valid. For GitHub, use `owner/repository`; for a Git URL, use the complete `https://…` or `ssh://…` address.");
+    case "PROJECT_UNTRUSTED":
+      return safe("This project isn't trusted, so it can't register a project marketplace. Trust the project or add the marketplace globally.");
+    case "NOT_PORTABLE":
+      return safe("A local checkout can't be registered for a project because other machines couldn't resolve it. Use a GitHub repository or Git URL instead.");
+    case "NAME_CONFLICT":
+      return safe("This catalog uses the same marketplace name as a different configured source. Remove the existing marketplace or give one catalog a distinct name.");
+    case "SOURCE_NAME_CHANGED":
+      return safe("This repository now declares a different marketplace name. Remove its existing registration, then add it again.");
+    case "SOURCE_UNAVAILABLE":
+      return safe("The repository couldn't be fetched or resolved. Check that it exists, that this machine can access it, and that private-repository credentials are available.");
+    case "CATALOG_INVALID":
+      return safe("The repository was fetched, but its marketplace catalog is missing, invalid, or internally conflicting. Check `.claude-plugin/marketplace.json` or `.agents/plugins/marketplace.json`.");
+    case "PROMOTION_FAILED":
+      return safe("The catalog was fetched, but pi couldn't save its verified content locally. Check the plugin-host storage permissions and available disk space, then retry.");
+    case "STATE_CORRUPT":
+      return safe("The plugin host's marketplace state couldn't be read safely. Run `/plugins doctor` before retrying.");
+    case "STATE_STALE":
+      return safe("Marketplace state changed while the source was being added. Refresh and retry.");
+  }
 }
 
 /** Human text for control-level failure codes that carry no detail context. */

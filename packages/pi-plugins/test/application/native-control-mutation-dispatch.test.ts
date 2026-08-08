@@ -51,7 +51,11 @@ describe("native control mutation dispatch", () => {
   it("assembles marketplace mutation requests and calls only the owner once", async () => {
     const { dispatcher, dependencies } = fixture();
     const result = await dispatcher.dispatch(parsed(["marketplace", "add", "owner/repo"]), context, signal);
-    expect(result).toMatchObject({ status: "rejected", data: { kind: "rejected", code: "SOURCE_UNAVAILABLE" } });
+    expect(result).toMatchObject({
+      status: "rejected",
+      data: { kind: "rejected", code: "SOURCE_UNAVAILABLE" },
+      human: [{ text: expect.stringContaining("couldn't be fetched") }],
+    });
     expect(dependencies.marketplace.registration.add).toHaveBeenCalledOnce();
     expect(dependencies.marketplace.registration.add).toHaveBeenCalledWith({ source: { kind: "github", repository: "owner/repo" }, scope: "user", origin: { kind: "native" } }, signal);
   });

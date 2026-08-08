@@ -36,5 +36,6 @@ describe("plugin manager exact status presentation", () => {
     expect(Object.keys(NativeControlStatusClause).sort()).toEqual(Object.keys(NativeControlStatusTone).sort());
     expect(styledNativeControlStatusLine(theme, "ok")).toBe("✓ ok · done");
     expect(styledNativeControlStatusLine(theme, "unavailable")).toBe("! unavailable · couldn't finish — something it needed wasn't available");
+    expect(styledNativeControlStatusLine(theme, "rejected")).toBe("! rejected · couldn't proceed");
   });
 });

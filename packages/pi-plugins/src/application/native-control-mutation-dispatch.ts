@@ -1,7 +1,7 @@
 import { NativeControlCommandRegistry, type NativeControlCommand } from "./native-control-registry.js";
 import type { NativeControlApplicationDependencies, NativeControlDispatchContext } from "./ports/native-control-applications.js";
 import type { NativeControlDispatchResult } from "./native-control-projection.js";
-import { presentRecoveryRequired } from "./native-failure-presenter.js";
+import { presentMarketplaceAddFailure, presentRecoveryRequired } from "./native-failure-presenter.js";
 import { automaticRunHumanLines, automaticRunStatus } from "./native-automatic-run-presenter.js";
 import { humanForSelectionFailure, projectNativeControlFailure, projectNativeControlResponse } from "./native-control-projection.js";
 import { toSafeDisplayField } from "./native-inspection-display.js";
@@ -157,7 +157,10 @@ export function createNativeControlMutationDispatcher(dependencies: NativeContro
         case "marketplace.add": {
           const result = await dependencies.marketplace.registration.add({ source: request.source, scope: "user", origin: { kind: "native" } }, signal);
           const status = result.kind === "added" ? "ok" : result.kind === "unchanged" ? "no-change" : result.kind === "indeterminate" ? "partial" : "rejected";
-          return projectNativeControlResponse(command.command, result, { status });
+          return projectNativeControlResponse(command.command, result, {
+            status,
+            ...(result.kind === "rejected" ? { human: [presentMarketplaceAddFailure(result.code)] } : {}),
+          });
         }
         case "marketplace.remove": {
           if (!request.confirmed) return inputFailure({ code: "CONFIRMATION_REQUIRED" });

@@ -84,7 +84,7 @@ export const NativeControlStatusClause: Readonly<Record<NativeControlStatus, str
   stale: "things changed — refresh and try again",
   conflict: "things changed — refresh and try again",
   unavailable: "couldn't finish — something it needed wasn't available",
-  rejected: "wasn't allowed",
+  rejected: "couldn't proceed",
   partial: "partly done",
   "recovery-required": "needs recovery to finish",
   cancelled: "cancelled",

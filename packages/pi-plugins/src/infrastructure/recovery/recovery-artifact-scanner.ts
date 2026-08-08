@@ -12,7 +12,7 @@ import type { RecoveryArtifactCandidate, RecoveryArtifactScan, RecoveryArtifacts
 function parseSidecar(input: unknown): Sidecar {
   if (input === null || typeof input !== "object" || Array.isArray(input)) throw new Error("owner sidecar is invalid");
   const value = input as Record<string, unknown>;
-  if (Object.keys(value).length !== 6 || value.protocol !== "pi-plugin-host-staging-owner" || value.version !== 1 || typeof value.pid !== "number" || !Number.isSafeInteger(value.pid) || value.pid <= 0 || typeof value.startToken !== "string" || !/^\d+$/.test(value.startToken) || typeof value.nonce !== "string" || !/^[0-9a-f]{32}$/.test(value.nonce) || typeof value.createdAt !== "number" || !Number.isSafeInteger(value.createdAt) || value.createdAt < 0) throw new Error("owner sidecar is invalid");
+  if (Object.keys(value).length !== 6 || value.protocol !== "pi-plugin-host-staging-owner" || value.version !== 1 || typeof value.pid !== "number" || !Number.isSafeInteger(value.pid) || value.pid <= 0 || typeof value.startToken !== "string" || !/^(?:\d+|fallback:\d+)$/.test(value.startToken) || typeof value.nonce !== "string" || !/^[0-9a-f]{32}$/.test(value.nonce) || typeof value.createdAt !== "number" || !Number.isSafeInteger(value.createdAt) || value.createdAt < 0) throw new Error("owner sidecar is invalid");
   return value as Sidecar;
 }
 

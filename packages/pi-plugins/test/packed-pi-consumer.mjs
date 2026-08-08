@@ -6,7 +6,10 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const root = await mkdtemp(join(tmpdir(), "pi-plugin-host-real-pi-"));
+// macOS exposes the temporary root through /var -> /private/var. Use the
+// canonical path so the packed host's parent-identity checks observe the same
+// directory spelling before and after realpath validation.
+const root = await realpath(await mkdtemp(join(tmpdir(), "pi-plugin-host-real-pi-")));
 
 function checked(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: "utf8", ...options });
@@ -138,6 +141,33 @@ async function runControlCommand(rpc, message, predicate, label) {
   return waitForControlReport(rpc, predicate, label, before);
 }
 
+async function runFirstControlCommand(rpc, message, predicate, label, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const before = controlReports(await rpc.request({ type: "get_entries" })).filter(predicate).length;
+    const eventStart = rpc.events.length;
+    await rpc.request({ type: "prompt", message }, 10_000);
+    const stepDeadline = Math.min(deadline, Date.now() + 2_000);
+    do {
+      const reports = controlReports(await rpc.request({ type: "get_entries" })).filter(predicate);
+      if (reports.length > before) return reports.at(-1);
+      const startupPending = rpc.events.slice(eventStart).some((event) =>
+        event.type === "extension_ui_request"
+        && event.method === "notify"
+        && String(event.message).includes("Plugin Host is still starting"));
+      if (startupPending) break;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+    } while (Date.now() < stepDeadline);
+    const startupPending = rpc.events.slice(eventStart).some((event) =>
+      event.type === "extension_ui_request"
+      && event.method === "notify"
+      && String(event.message).includes("Plugin Host is still starting"));
+    if (!startupPending) throw new Error(`real Pi RPC produced no completion or startup-pending signal for ${label}`);
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+  } while (Date.now() < deadline);
+  throw new Error(`real Pi RPC timed out waiting for ${label} after explicit startup-pending responses`);
+}
+
 async function waitForMarketplaceIdle(rpc, commandName, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
   let consecutiveIdle = 0;
@@ -230,15 +260,14 @@ try {
     return typeof path === "string" && resolve(path) === resolve(extension);
   });
   if (owned === undefined || owned.name === "plugins") throw new Error(`packed command did not retain exact collision suffix ownership: ${JSON.stringify(pluginCommands)}`);
-  if (!rpc.events.some((event) => event.type === "extension_ui_request" && event.method === "notify" && String(event.message).includes(`/${owned.name}`))) {
-    throw new Error("real Pi collision notification did not name the exact suffixed command");
-  }
+  // RPC session-start contexts have no UI; exact collision guidance is
+  // asserted through the real TUI below and the control-channel unit test.
   await rpc.request({ type: "prompt", message: "/acceptance-tools" });
   if (!rpc.events.some((event) => event.type === "extension_ui_request" && event.method === "notify" && String(event.message).includes('"mcp"'))) {
     throw new Error("real Pi did not register the isolated production MCP gateway");
   }
 
-  const productionStatus = await runControlCommand(rpc, `/${owned.name} status`, (envelope) => envelope.command?.id === "status", "status completion");
+  const productionStatus = await runFirstControlCommand(rpc, `/${owned.name} status`, (envelope) => envelope.command?.id === "status", "status completion");
   if (productionStatus.data?.capabilities?.mcp?.status !== "available") {
     throw new Error(`published MCP runtime did not pass concrete production qualification: ${JSON.stringify(productionStatus)}`);
   }
@@ -331,8 +360,9 @@ def wait_for_retry(token, command, timeout=90):
     tail = bytes(buffer[-12000:]).decode("utf-8", "replace")
     raise RuntimeError("missing TUI token %r after %d attempts; tail=%r" % (token, attempt, tail))
 wait_for("Plugin Host command collision", 0, 60)
+wait_for("/" + args["command"], 0, 60)
 mark = len(buffer); send(("/" + args["command"] + " status\r").encode()); wait_for("Plugin operation", mark, 60); wait_for("Result", mark, 60); send(b"\x1b"); pump(time.monotonic() + 0.5)
-mark = len(buffer); send(b"/reload\r"); wait_for("Plugin Host command collision", mark, 60)
+mark = len(buffer); send(b"/reload\r"); wait_for("Plugin Host command collision", mark, 60); wait_for("/" + args["command"], mark, 60)
 # The reloaded host admits commands only after session startup completes;
 # retry the presentation command until the manager surface mounts.
 wait_for_retry("Plugins", ("/" + args["command"] + "\r").encode())

@@ -100,6 +100,7 @@ const AddRejectionCodeSchema = z.enum(Object.values(MarketplaceManagementContrac
   (typeof MarketplaceManagementContractRegistry.addRejection)[keyof typeof MarketplaceManagementContractRegistry.addRejection],
   ...(typeof MarketplaceManagementContractRegistry.addRejection)[keyof typeof MarketplaceManagementContractRegistry.addRejection][],
 ]);
+export type MarketplaceAddRejectionCode = z.infer<typeof AddRejectionCodeSchema>;
 export const MarketplaceAddResultSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("added"), registration: MarketplaceRegistrationViewSchema }).strict().readonly(),
   z.object({ kind: z.literal("unchanged"), registration: MarketplaceRegistrationViewSchema }).strict().readonly(),

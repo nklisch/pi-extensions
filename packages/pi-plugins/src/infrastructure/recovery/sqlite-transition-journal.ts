@@ -23,7 +23,7 @@ import {
 } from "../../application/ports/lifecycle-transition-store.js";
 import { EpochMillisecondsSchema, type EpochMilliseconds } from "../../application/ports/lifecycle-clock.js";
 import { createLocalRecoveryFilesystem, digestJournalBytes, type RecoveryFilesystem } from "./local-recovery-filesystem.js";
-import { classifyProcessIdentity, readLinuxProcessStartToken } from "../process/process-identity.js";
+import { classifyProcessIdentity, readProcessStartToken } from "../process/process-identity.js";
 
 const PROTOCOL = "pi-plugin-host-recovery-journal";
 const VERSION = 2;
@@ -36,7 +36,7 @@ type SqliteRow = Record<string, unknown>;
 type Owner = Readonly<{ pid: number; startToken: string; nonce: string }>;
 export type OwnerStatus = "live" | "dead" | "unknown" | "released";
 
-const OwnerSchema = z.object({ pid: z.number().int().positive(), startToken: z.string().regex(/^\d+$/), nonce: z.string().uuid() }).strict();
+const OwnerSchema = z.object({ pid: z.number().int().positive(), startToken: z.string().regex(/^(?:\d+|fallback:\d+)$/), nonce: z.string().uuid() }).strict();
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -61,7 +61,7 @@ async function waitForBusyRetry(signal: AbortSignal, attempt: number): Promise<v
 function dbError(operation: string, cause: unknown): BoundaryError { return new BoundaryError({ code: "ADAPTER_FAILED", operation, message: "recovery journal adapter failed", details: { operation }, cause }); }
 function corruptError(operation: string): DomainContractError { return new DomainContractError({ code: ErrorCodeRegistry.transitionJournalCorrupt, operation, message: "transition journal evidence is corrupt", details: { operation } }); }
 function conflictError(operation: string): DomainContractError { return new DomainContractError({ code: ErrorCodeRegistry.recoveryConflict, operation, message: "transition journal status or evidence conflicts", details: { operation } }); }
-function currentOwner(): Owner { const startToken = readLinuxProcessStartToken(process.pid); if (startToken === undefined) throw new Error("process start identity is unavailable"); return { pid: process.pid, startToken, nonce: randomUUID() }; }
+function currentOwner(): Owner { const startToken = readProcessStartToken(process.pid); if (startToken === undefined) throw new Error("process start identity is unavailable"); return { pid: process.pid, startToken, nonce: randomUUID() }; }
 function parseStatus(kind: unknown, generation: unknown): LifecycleTransitionJournalEntry["status"] {
   if (kind === "prepared") return { kind: "prepared" };
   if (kind === "recovery-required") return { kind, ...(typeof generation === "number" ? { generation: EpochMillisecondsSchema.parse(generation) as never } : {}) } as LifecycleTransitionJournalEntry["status"];

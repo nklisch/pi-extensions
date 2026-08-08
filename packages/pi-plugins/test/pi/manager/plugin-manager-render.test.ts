@@ -155,6 +155,24 @@ describe("plugin manager renderer", () => {
     expect(rendered).not.toContain("incompatible with this host");
   });
 
+  it("renders actionable marketplace-add rejection feedback", () => {
+    let value = state();
+    value = pluginManagerReducer(value, { type: "operation-started", action: "marketplace-add" });
+    value = pluginManagerReducer(value, {
+      type: "operation-finished",
+      envelope: createNativeControlEnvelope({
+        executionId,
+        command: "marketplace.add",
+        status: "rejected",
+        data: { kind: "rejected", code: "SOURCE_UNAVAILABLE" },
+        human: [safe("The repository couldn't be fetched or resolved. Check that it exists and that this machine can access it.")],
+      }),
+    });
+    const rendered = renderPluginManager({ state: value, width: 120, height: 30, theme, keybindings, focused: true }).join("\n");
+    expect(rendered).toContain("repository couldn't be fetched or resolved");
+    expect(rendered).not.toContain("Add a plugin source");
+  });
+
   it("renders envelope failure in plain language without exit jargon", () => {
     let value = state();
     value = pluginManagerReducer(value, { type: "operation-started", action: "update" });
