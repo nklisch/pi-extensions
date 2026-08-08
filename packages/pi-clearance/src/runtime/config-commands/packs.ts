@@ -42,6 +42,7 @@ import {
   completion,
   filterCompletions,
   resolvePolicyReport,
+  refreshOperatorStatus,
   stableUnique,
   usageReport,
 } from "./types.ts";
@@ -319,6 +320,7 @@ export async function handlePackMutationCommand(input: {
   }
 
   const refreshed = await resolvePolicyReport(ctx, deps);
+  if (refreshed.ok) refreshOperatorStatus(ctx, deps, refreshed.policy);
   const effectivePack = refreshed.ok
     ? getAutoReviewerPack(refreshed.policy, packId)?.pack
     : undefined;

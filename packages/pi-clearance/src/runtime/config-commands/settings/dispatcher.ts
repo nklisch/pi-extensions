@@ -37,6 +37,7 @@ import {
   type AutoReviewerCommandDependencies,
   type CommandReport,
   resolvePolicyReport,
+  refreshOperatorStatus,
   stableUnique,
 } from "../types.ts";
 import {
@@ -219,6 +220,12 @@ export async function dispatchSettingsAction(
   }
 
   const refreshed = await resolvePolicyReport(ctx, deps);
+  if (refreshed.ok) {
+    // Config writes and policy-cache invalidation are complete at this point;
+    // publish the same resolved policy immediately instead of waiting for the
+    // next tool call or session restart to refresh the footer projection.
+    refreshOperatorStatus(ctx, deps, refreshed.policy);
+  }
   const warnings = stableUnique([
     ...planned.plan.warnings.map((warning) => warning.message),
     ...apply.warnings,

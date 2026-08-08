@@ -31,6 +31,7 @@ import {
   completion,
   filterCompletions,
   resolvePolicyReport,
+  refreshOperatorStatus,
   stableUnique,
   usageReport,
 } from "./types.ts";
@@ -212,6 +213,7 @@ export async function handleScopeCommand(
   }
 
   const refreshed = await resolvePolicyReport(ctx, deps);
+  if (refreshed.ok) refreshOperatorStatus(ctx, deps, refreshed.policy);
   const status = refreshed.ok
     ? scopeStatusFromConfig(refreshed.policy.config)
     : undefined;

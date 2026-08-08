@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.3
+
+### Fixed
+
+- Refresh the active-session footer immediately after a confirmed settings, scope, pack, or approved proposal change. Config writes now publish the freshly resolved policy to the operator-status controller instead of leaving the old mode visible until the next gated tool call or session restart.
+- Isolate Clearance tests from real user config on macOS, Linux, and Windows with a package-wide throwaway home plus per-fixture platform config roots.
+
 ## v0.2.2
 
 ### Changed

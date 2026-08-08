@@ -131,6 +131,7 @@ const piAutoApprove: ExtensionFactory = (pi: ExtensionAPI) => {
     recentDecisionSource,
     analyzerRegistry,
     toolMetadata: () => toolMetadata(pi),
+    refreshOperatorStatus: (ctx, policy) => operatorStatus.refresh(ctx, policy),
   });
   registerProposalTools(
     pi,
@@ -138,6 +139,7 @@ const piAutoApprove: ExtensionFactory = (pi: ExtensionAPI) => {
       policyResolver,
       packageRegistration: packageRegistration.snapshot,
       audit,
+      refreshOperatorStatus: (ctx, policy) => operatorStatus.refresh(ctx, policy),
     },
     proposalBatchCache,
   );
@@ -147,6 +149,7 @@ const piAutoApprove: ExtensionFactory = (pi: ExtensionAPI) => {
       policyResolver,
       packageRegistration: packageRegistration.snapshot,
       audit,
+      refreshOperatorStatus: (ctx, policy) => operatorStatus.refresh(ctx, policy),
     },
     proposalBatchCache,
   );

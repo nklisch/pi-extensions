@@ -31,6 +31,7 @@ import {
   type RatchetProposalWritePlanResult,
 } from "../../replay/proposal-write-plan.ts";
 import { checkAgainstFloor } from "../../replay/proposals.ts";
+import { refreshOperatorStatus } from "../config-commands/types.ts";
 import {
   composeConfigCommandPostWritePolicy,
   createExtensionContextConfigCommandWriterDependencies,
@@ -558,6 +559,15 @@ export async function applyAcceptedWritableProposal(input: {
       ? {}
       : { transactionReplay: replayRecorder.result }),
   });
+  if (apply.status === "applied" && apply.changed === true) {
+    try {
+      const refreshed = await resolveRatchetPolicy(input.ctx, input.deps);
+      refreshOperatorStatus(input.ctx, input.deps, refreshed);
+    } catch {
+      // The durable writer and post-write validation have already settled.
+      // Footer refresh remains advisory and cannot change the apply result.
+    }
+  }
   return {
     apply: applyWithPostWriteReplay(apply, postWriteReplay),
     postWriteReplay,

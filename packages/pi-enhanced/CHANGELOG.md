@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.7
+
+### Changed
+
+- Rebundle `@nklisch/pi-clearance` v0.2.3 so confirmed mode and settings changes update the active-session footer immediately instead of waiting for another tool call or restart.
+
 ## v0.1.6
 
 ### Changed

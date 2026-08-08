@@ -38,8 +38,15 @@ let configHome: string;
 beforeEach(async () => {
   tempRoot = await mkdtemp(path.join(tmpdir(), "pi-clearance-parity-"));
   cwd = path.join(tempRoot, "repo");
+  const home = path.join(tempRoot, "home");
   configHome = path.join(tempRoot, "xdg-config");
-  process.env = { ...ORIGINAL_ENV, XDG_CONFIG_HOME: configHome };
+  process.env = {
+    ...ORIGINAL_ENV,
+    HOME: home,
+    USERPROFILE: home,
+    XDG_CONFIG_HOME: configHome,
+    LOCALAPPDATA: path.join(tempRoot, "local-app-data"),
+  };
   await mkdir(cwd, { recursive: true });
 });
 
@@ -72,7 +79,9 @@ function emptyPackageRegistrationSnapshot(): PackageRegistrationSnapshot {
   return { requestId: null, packs: [], issues: [] };
 }
 
-function dependencies(): AutoReviewerCommandDependencies {
+function dependencies(
+  refreshOperatorStatus?: AutoReviewerCommandDependencies["refreshOperatorStatus"],
+): AutoReviewerCommandDependencies {
   const policyResolver: PolicyResolver = {
     async resolve(ctx) {
       const config = await loadConfig({
@@ -127,6 +136,7 @@ function dependencies(): AutoReviewerCommandDependencies {
     audit,
     recentDecisionSource: createAuditLogRecentDecisionSource(),
     analyzerRegistry: createDefaultAnalyzerRegistry(),
+    ...(refreshOperatorStatus === undefined ? {} : { refreshOperatorStatus }),
   };
 }
 
@@ -137,6 +147,34 @@ async function readGlobalConfig(): Promise<Record<string, unknown>> {
     unknown
   >;
 }
+
+describe("operator status refresh", () => {
+  it("publishes the newly resolved mode immediately after confirmation", async () => {
+    const observedModes: string[] = [];
+    const ctx = fakeContext();
+    const result = await dispatchSettingsAction(
+      { id: "mode.set", args: { mode: "off" } },
+      ctx,
+      dependencies((_context, policy) => observedModes.push(policy.config.mode)),
+    );
+
+    expect(result.level).not.toBe("error");
+    expect(observedModes).toEqual(["off"]);
+    expect(await readGlobalConfig()).toMatchObject({ mode: "off" });
+  });
+
+  it("does not fail a durable write when footer rendering throws", async () => {
+    const ctx = fakeContext();
+    const result = await dispatchSettingsAction(
+      { id: "mode.set", args: { mode: "off" } },
+      ctx,
+      dependencies(() => { throw new Error("status surface unavailable"); }),
+    );
+
+    expect(result.level).not.toBe("error");
+    expect(await readGlobalConfig()).toMatchObject({ mode: "off" });
+  });
+});
 
 describe("exact gated-tool settings actions", () => {
   it("writes only exact non-Bash gated tools through confirmation and reload", async () => {

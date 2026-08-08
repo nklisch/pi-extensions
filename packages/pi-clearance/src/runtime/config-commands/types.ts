@@ -1,6 +1,7 @@
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
+  ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
 import type { AuditLogger } from "../../audit/logger.ts";
@@ -33,6 +34,11 @@ export interface AutoReviewerCommandDependencies {
   readonly recentDecisionSource: RecentDecisionSource;
   /** Structural analyzer used only to summarize the recent command for the agent. */
   readonly analyzerRegistry: ToolAnalyzerRegistry;
+  /** Refresh the active-session footer after a confirmed config write resolves. */
+  readonly refreshOperatorStatus?: (
+    ctx: ExtensionContext,
+    policy: ResolvedPolicy,
+  ) => void;
 }
 
 export interface CommandReport<TDetails = unknown> {
@@ -77,6 +83,19 @@ export const USAGE_MARKDOWN = [
   "",
   "Reviewer prompt posture and model pinning are available as confirm-backed settings selectors; context mode, token budget, escalation, and other advanced fields are edited in user-owned global config.",
 ].join("\n");
+
+export function refreshOperatorStatus(
+  ctx: ExtensionContext,
+  deps: Pick<AutoReviewerCommandDependencies, "refreshOperatorStatus">,
+  policy: ResolvedPolicy,
+): void {
+  try {
+    deps.refreshOperatorStatus?.(ctx, policy);
+  } catch {
+    // Footer visibility is advisory and must never turn an applied config write
+    // into a reported failure or trigger rollback after durable validation.
+  }
+}
 
 export async function resolvePolicyForCommand(
   ctx: ExtensionCommandContext,
