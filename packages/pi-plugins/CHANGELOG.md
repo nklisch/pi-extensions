@@ -1,4 +1,21 @@
-# Changelog
+## v0.3.6
+
+### Fixed
+
+- Staged updates no longer fence journal settlement to the staging process's
+  lifetime. An automatic or sync-now update commits with deferred activation
+  and returns `staged`, but the journal row kept `owner_pid` pointing at the
+  staging session — and startup recovery in every *other* session defers on a
+  live owner — so with concurrent Pi sessions the update sat in
+  "needs recovery; restart pi to finish it" until the session that staged it
+  exited (days, for a long-lived session). The lifecycle service now releases
+  journal ownership at both staged return points (deferred activation and
+  activation-unavailable), `ownerStatus` treats an ownerless prepared row as
+  adoptable, and the release only ever clears the releasing process's own rows
+  (immediate operations stay fenced while genuinely mid-flight). The next
+  start of any session finalizes the staged revision, matching the documented
+  "activates on the next Pi start or reload" contract. Rows staged by older
+  versions still unlock only when their staging process exits.
 
 ## v0.3.5
 

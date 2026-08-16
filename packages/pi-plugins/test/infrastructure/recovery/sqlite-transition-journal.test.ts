@@ -107,4 +107,30 @@ describe("SQLite transition journal", () => {
       expect(await fixture.journal.ownerStatus({ kind: "user" }, value.reference, signal)).toBe("released");
     } finally { await rm(fixture.root, { recursive: true, force: true }); }
   });
+
+  it("hands a deliberately staged row to the next start without waiting for owner death", async () => {
+    const fixture = await journalRoot();
+    try {
+      const staged = record("00000000-0000-4000-8000-000000000007");
+      await fixture.journal.prepare({ record: staged, preparedAt: 10 }, signal);
+      // The staging process (this one) is still alive.
+      expect(await fixture.journal.ownerStatus({ kind: "user" }, staged.reference, signal)).toBe("live");
+      // A deliberate stage hands the row off; any future start may settle it.
+      expect(await fixture.journal.releaseOwnership({ scope: { kind: "user" }, reference: staged.reference }, signal)).toBe("released");
+      expect(await fixture.journal.ownerStatus({ kind: "user" }, staged.reference, signal)).toBe("released");
+      expect(await fixture.journal.releaseOwnership({ scope: { kind: "user" }, reference: staged.reference }, signal)).toBe("released");
+      // A foreign owner is mid-flight on the immediate path and stays fenced.
+      const foreign = record("00000000-0000-4000-8000-000000000008");
+      await fixture.journal.prepare({ record: foreign, preparedAt: 10 }, signal);
+      const database = new DatabaseSync(fixture.filesystem.journalDatabasePath({ kind: "user" }));
+      database.prepare("UPDATE lifecycle_transitions SET owner_pid = 999999999, owner_start_token = '1' WHERE reference = ?").run(foreign.reference as string);
+      database.close();
+      expect(await fixture.journal.releaseOwnership({ scope: { kind: "user" }, reference: foreign.reference }, signal)).toBe("retained");
+      expect(await fixture.journal.ownerStatus({ kind: "user" }, foreign.reference, signal)).toBe("dead");
+      // Settling a released row stays idempotent.
+      await fixture.journal.settle({ scope: { kind: "user" }, reference: staged.reference, outcome: "completed", generation: 1, at: 12 }, signal);
+      expect(await fixture.journal.ownerStatus({ kind: "user" }, staged.reference, signal)).toBe("released");
+      expect(await fixture.journal.releaseOwnership({ scope: { kind: "user" }, reference: `pending-transition-v1:sha256:${"f".repeat(64)}` }, signal)).toBe("missing");
+    } finally { await rm(fixture.root, { recursive: true, force: true }); }
+  });
 });

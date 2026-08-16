@@ -157,6 +157,15 @@ export interface LifecycleTransitionStore {
   markCleanup?(request: Readonly<{ scope: ScopeReference; reference: PendingTransitionRef; status: "completed" | "recovery-required"; at: EpochMilliseconds }>, signal: AbortSignal): Promise<"stored" | "already-present" | "terminal">;
   pruneTerminal?(request: Readonly<{ before: EpochMilliseconds }>, signal: AbortSignal): Promise<number>;
   ownerStatus?(scope: ScopeReference, reference: PendingTransitionRef, signal: AbortSignal): Promise<"live" | "dead" | "unknown" | "released">;
+  /**
+   * Hand a still-prepared transition row to whoever starts next. Called when
+   * the preparer deliberately finished its part (staged update): keeping
+   * self ownership would fence recovery to the preparer's whole process
+   * lifetime. Only the recorded owner may hand a row off; "retained" means a
+   * different owner holds it and "missing" that no row exists. Ownership is
+   * cleared (or already absent) exactly when the result is "released".
+   */
+  releaseOwnership?(request: Readonly<{ scope: ScopeReference; reference: PendingTransitionRef }>, signal: AbortSignal): Promise<"released" | "retained" | "missing">;
 }
 
 function legacyProjection(input: Readonly<{ projection?: ProjectionExpectation; previousProjection?: ProjectionExpectation; candidateProjection?: ProjectionExpectation }>): Readonly<{ previousProjection: ProjectionExpectation; candidateProjection: ProjectionExpectation }> {

@@ -522,6 +522,17 @@ function createPluginLifecycleImplementation(
     return result.ok ? result.snapshot : undefined;
   }
 
+  async function releaseStagedOwnership(scope: ScopeContext, reference: import("../domain/state/references.js").PendingTransitionRef): Promise<void> {
+    if (dependencies.transitions.releaseOwnership === undefined) return;
+    // The stage commit is already durable; this handoff write must complete
+    // even when the caller aborts, exactly like ledger settlement. Failure
+    // only degrades to the pre-existing fence: the row stays owned by this
+    // process and recovery adopts it after this process exits.
+    try {
+      await dependencies.transitions.releaseOwnership({ scope: toScopeReference(scope), reference }, cleanupSignal());
+    } catch { /* next start still recovers through owner death */ }
+  }
+
   async function trustFor(scope: ScopeContext, requestRecords: readonly TrustStateRecord[] | undefined, signal: AbortSignal): Promise<readonly TrustStateRecord[]> {
     if (requestRecords !== undefined) return requestRecords;
     const snapshot = await load({ kind: "user" }, signal);
@@ -897,7 +908,10 @@ function createPluginLifecycleImplementation(
     if (operation === "update" && (request as UpdatePluginRequest).activation === "deferred") {
       // Staged update: the candidate is committed and the durable transition
       // stays pending on purpose. The next start/reload activates the new
-      // revision and settles the journal through the normal recovery path.
+      // revision and settles the journal through the normal recovery path —
+      // in ANY session, so journal ownership must not stay bound to this
+      // process's lifetime.
+      await releaseStagedOwnership(scope, reference);
       return { kind: "staged", operation, transition: reference, snapshot: committed };
     }
     const beforeReloadConfiguration = await exactConfigurationState(prepared, expectedConfigurationRevision);
@@ -920,7 +934,9 @@ function createPluginLifecycleImplementation(
     if (operation === "update" && !activation.ok && activation.failure.kind === "activation-unavailable") {
       // No reload-capable context (for example an RPC caller): settle the
       // committed update as staged rather than rolling it back. Genuine
-      // activation failures keep the rollback path.
+      // activation failures keep the rollback path. Like the deferred stage
+      // above, the next start of any session finishes it.
+      await releaseStagedOwnership(scope, reference);
       return { kind: "staged", operation, transition: reference, snapshot: committed };
     }
     const reconciled = await reconciler.completeCommittedTransition({

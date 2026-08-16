@@ -62,6 +62,16 @@ const binding = createMaterializationBinding(plugin.source.hash, content.rootDig
 const materialized = { root: "/virtual/plugin", source: plugin.source, content, binding };
 const marketplace = createMarketplaceSnapshotRecord({ marketplace: "community", source: marketplaceSource, content }, sha256);
 const revision = createInstalledRevisionRecord({ plugin, compatibility, content, scope: { kind: "user" } }, sha256);
+// A second immutable revision of the same plugin: same content, different
+// source (a marketplace content change without a version bump).
+const pluginB = NormalizedPluginSchema.parse({
+  ...plugin,
+  source: createResolvedPluginSource({ kind: "marketplace-path", marketplaceRevision: "c".repeat(40), path: pluginSourcePath }, sha256),
+});
+const marketplaceSourceB = createResolvedMarketplaceSource({ declared: { kind: "github", repository: "example/community" }, revision: "c".repeat(40) }, sha256);
+const bindingB = createMaterializationBinding(pluginB.source.hash, content.rootDigest, sha256);
+const materializedB = { root: "/virtual/plugin-b", source: pluginB.source, content, binding: bindingB };
+const trustB = grantTrust(createTrustCandidate({ scope: { kind: "user" }, marketplaceSource: marketplaceSourceB, plugin: pluginB, compatibility, content, materializationBinding: bindingB }, sha256), sha256);
 const trustCandidate = createTrustCandidate({ scope: { kind: "user" }, marketplaceSource, plugin, compatibility, content, materializationBinding: binding }, sha256);
 const trust = grantTrust(trustCandidate, sha256);
 
@@ -131,9 +141,14 @@ function fakeCoordinator(state: MemoryState, ambiguousFirstCommit = false): Gene
 
 type LifecycleTestOptions = Readonly<{
   rejectReload?: boolean;
+  reloadUnavailable?: boolean;
   ambiguousFirstCommit?: boolean;
   onReload?: (count: number, state: MemoryState) => void;
   onPromote?: () => void;
+  /** Candidate materialization for update tests; defaults to the revision-A fixture. */
+  candidateMaterialized?: typeof materialized;
+  candidatePlugin?: typeof plugin;
+  onReleaseOwnership?: (reference: string) => void;
 }>;
 
 function dependencies(state: MemoryState, options: LifecycleTestOptions = {}): PluginLifecycleServiceDependencies {
@@ -146,13 +161,17 @@ function dependencies(state: MemoryState, options: LifecycleTestOptions = {}): P
     async reload() {
       reloadCount += 1;
       options.onReload?.(reloadCount, state);
+      if (options.reloadUnavailable) return { kind: "failed", code: "PI_RELOAD_CONTEXT_UNAVAILABLE" };
       if (options.rejectReload && reloadCount === 1) return { kind: "failed", code: "adapter-error" };
       return { kind: "accepted" };
     },
     async observe() {
       const current = state.current.installed.plugins.find((record) => record.plugin === plugin.identity.key);
+      // Observe what the authoritative state selects: an update prepares the
+      // candidate projection before the previous one, so "last prepared"
+      // would report the wrong revision for updates.
       const expectation = current?.activation === "enabled"
-        ? [...expectations].reverse().find((value) => value.kind === "active")
+        ? [...expectations].reverse().find((value) => value.kind === "active" && value.projection.revision === current.selectedRevision)
         : [...expectations].reverse().find((value) => value.kind === "inactive");
       if (expectation?.kind === "active") return { kind: "active", scope: expectation.projection.scope, plugin: expectation.projection.plugin, revision: expectation.projection.revision, projectionDigest: expectation.projection.digest, currentProject };
       return { kind: "inactive", scope: expectation?.kind === "inactive" ? expectation.scope : { kind: "user" }, plugin: plugin.identity.key, projectionDigest: expectation?.kind === "inactive" ? expectation.digest : `sha256:${"0".repeat(64)}`, currentProject };
@@ -161,6 +180,7 @@ function dependencies(state: MemoryState, options: LifecycleTestOptions = {}): P
   const transitions: LifecycleTransitionStore = {
     async prepare() { return "stored"; },
     async settle() { return undefined; },
+    async releaseOwnership(request) { options.onReleaseOwnership?.(request.reference); return "released"; },
   };
   const contentPort = {
     async allocateStaging() { return { slot: { root: "/virtual/stage" }, allocationId: "stage" }; },
@@ -174,8 +194,8 @@ function dependencies(state: MemoryState, options: LifecycleTestOptions = {}): P
     state,
     mutations: fakeCoordinator(state, options.ambiguousFirstCommit),
     content: contentPort,
-    materializer: { async materialize() { return materialized; } },
-    inspector: { async inspect() { return { ok: true as const, value: plugin, diagnostics: [] }; } },
+    materializer: { async materialize() { return options.candidateMaterialized ?? materialized; } },
+    inspector: { async inspect() { return { ok: true as const, value: options.candidatePlugin ?? plugin, diagnostics: [] }; } },
     compatibility: { async assess() { return compatibility; } },
     installed: { async load() { return { plugin, compatibility, marketplaceSource, content, binding }; } },
     projections,
@@ -432,6 +452,80 @@ describe("plugin lifecycle service", () => {
     expect(removed.kind).toBe("changed");
     expect(removed).toMatchObject({ cleanup: { kind: "deferred", retainedData: "delete-confirmed" } });
     expect(state.current.installed.plugins).toHaveLength(0);
+  });
+
+  it("hands a staged update to the next start instead of fencing it to this process", async () => {
+    const installed = createInstalledPluginRecord({ plugin: plugin.identity.key, activation: "enabled", revisions: [revision], scope: { kind: "user" } }, sha256);
+    const state = new MemoryState(snapshot(0, [installed]));
+    const released: string[] = [];
+    const service = createPluginLifecycleService(dependencies(state, {
+      candidateMaterialized: materializedB,
+      candidatePlugin: pluginB,
+      onReleaseOwnership: (reference) => released.push(reference),
+    }));
+
+    const updateRequestB = {
+      ...installRequest,
+      marketplaceSource: marketplaceSourceB,
+      sourceContext: { ...installRequest.sourceContext, source: marketplaceSourceB },
+      trustRecords: [trust, trustB],
+    };
+    const result = await service.update({ ...updateRequestB, activation: "deferred" }, signal);
+    expect(result).toMatchObject({ kind: "staged", operation: "update" });
+    // The candidate is committed with the pending marker, and the journal row
+    // is handed off so any future start can settle it while this process lives.
+    const target = state.current.installed.plugins.find((record) => record.plugin === plugin.identity.key)!;
+    expect(target.selectedRevision).toBe(bindingB);
+    expect(target.pendingTransition).toBe(result.kind === "staged" ? result.transition : undefined);
+    expect(released).toEqual([target.pendingTransition]);
+  });
+
+  it("keeps immediate operations fenced to their owner", async () => {
+    const installed = createInstalledPluginRecord({ plugin: plugin.identity.key, activation: "enabled", revisions: [revision], scope: { kind: "user" } }, sha256);
+    const state = new MemoryState(snapshot(0, [installed]));
+    const released: string[] = [];
+    const service = createPluginLifecycleService(dependencies(state, {
+      candidateMaterialized: materializedB,
+      candidatePlugin: pluginB,
+      onReleaseOwnership: (reference) => released.push(reference),
+    }));
+
+    const result = await service.update({
+      ...installRequest,
+      marketplaceSource: marketplaceSourceB,
+      sourceContext: { ...installRequest.sourceContext, source: marketplaceSourceB },
+      trustRecords: [trust, trustB],
+    }, signal);
+    expect(result).toMatchObject({ kind: "changed", operation: "update" });
+    expect(state.current.installed.plugins[0]).not.toHaveProperty("pendingTransition");
+    expect(released).toEqual([]);
+  });
+
+  it("also hands off when activation cannot be driven in this context", async () => {
+    const installed = createInstalledPluginRecord({ plugin: plugin.identity.key, activation: "enabled", revisions: [revision], scope: { kind: "user" } }, sha256);
+    const state = new MemoryState(snapshot(0, [installed]));
+    const released: string[] = [];
+    const service = createPluginLifecycleService(dependencies(state, {
+      candidateMaterialized: materializedB,
+      candidatePlugin: pluginB,
+      reloadUnavailable: true,
+      onReleaseOwnership: (reference) => released.push(reference),
+    }));
+
+    // No deferred activation requested — the commit is immediate, but the
+    // running context cannot drive a reload (an RPC caller), so the update
+    // settles staged and must still hand the journal row to the next start.
+    const result = await service.update({
+      ...installRequest,
+      marketplaceSource: marketplaceSourceB,
+      sourceContext: { ...installRequest.sourceContext, source: marketplaceSourceB },
+      trustRecords: [trust, trustB],
+    }, signal);
+
+    expect(result).toMatchObject({ kind: "staged", operation: "update" });
+    const target = state.current.installed.plugins.find((record) => record.plugin === plugin.identity.key)!;
+    expect(target.pendingTransition).toBe(result.kind === "staged" ? result.transition : undefined);
+    expect(released).toEqual([target.pendingTransition]);
   });
 
   it("binds optional target expectations and rebases unrelated generations only for exact target bytes", async () => {

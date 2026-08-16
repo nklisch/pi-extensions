@@ -207,6 +207,7 @@ export type SqliteTransitionJournalOptions = Readonly<{
 
 export type SqliteTransitionJournal = LifecycleTransitionStore & Readonly<{
   ownerStatus(scope: ScopeReference, reference: PendingTransitionRef, signal: AbortSignal): Promise<OwnerStatus>;
+  releaseOwnership(request: Readonly<{ scope: ScopeReference; reference: PendingTransitionRef }>, signal: AbortSignal): Promise<"released" | "retained" | "missing">;
 }>;
 
 export function createSqliteTransitionJournal(options: SqliteTransitionJournalOptions): SqliteTransitionJournal {
@@ -352,13 +353,35 @@ export function createSqliteTransitionJournal(options: SqliteTransitionJournalOp
         const row = database.prepare("SELECT owner_pid, owner_start_token, owner_nonce, status FROM lifecycle_transitions WHERE reference = ?").get(String(reference)) as SqliteRow | undefined;
         if (row === undefined) return "released";
         if (row.status !== "prepared") return "released";
+        // A prepared row with no owner was deliberately handed off (staged
+        // update): any future start may adopt and settle it.
+        if (row.owner_pid === null || row.owner_start_token === null || row.owner_nonce === null) return "released";
         if (typeof row.owner_pid !== "number" || typeof row.owner_start_token !== "string" || typeof row.owner_nonce !== "string") return "unknown";
         return classifyProcessIdentity({ pid: row.owner_pid, startToken: row.owner_start_token });
       });
     } catch (error) { throw dbError("ownerStatus", error); }
   }
 
-  return Object.freeze({ prepare, read, list, settle, markRecoveryRequired, markCleanup, markCollectionComplete, pruneTerminal, ownerStatus });
+  async function releaseOwnership(request: Readonly<{ scope: ScopeReference; reference: PendingTransitionRef }>, signal: AbortSignal): Promise<"released" | "retained" | "missing"> {
+    const scope = ScopeReferenceSchema.parse(request.scope);
+    const reference = PendingTransitionRefSchema.parse(request.reference);
+    const owner = currentOwner();
+    try {
+      return await transaction(filesystem, scope, signal, (database) => {
+        const row = database.prepare("SELECT status, owner_pid, owner_start_token FROM lifecycle_transitions WHERE reference = ?").get(String(reference)) as SqliteRow | undefined;
+        if (row === undefined) return "missing";
+        // Only the owner that prepared the row may hand it off. A foreign
+        // owner is mid-flight on the immediate path and stays fenced.
+        if (row.status === "prepared" && row.owner_pid !== null && (row.owner_pid !== owner.pid || row.owner_start_token !== owner.startToken)) return "retained";
+        if (row.status === "prepared" && row.owner_pid !== null) {
+          database.prepare("UPDATE lifecycle_transitions SET owner_pid = NULL, owner_start_token = NULL, owner_nonce = NULL WHERE reference = ?").run(String(reference));
+        }
+        return "released";
+      });
+    } catch (error) { throw dbError("releaseOwnership", error); }
+  }
+
+  return Object.freeze({ prepare, read, list, settle, markRecoveryRequired, markCleanup, markCollectionComplete, pruneTerminal, ownerStatus, releaseOwnership });
 }
 
 export async function createNodeTransitionJournal(options: Readonly<{ hostRoot: string; verifyLocalFilesystem?: (root: string) => Promise<void> }>): Promise<SqliteTransitionJournal> {

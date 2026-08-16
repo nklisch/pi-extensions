@@ -556,7 +556,12 @@ restores the previous revision.
 An update may also commit with activation deliberately deferred (lifecycle
 result `staged`): the candidate is committed and the durable transition stays
 pending on purpose, and the next start or reload activates the new revision
-and settles the journal through the normal recovery path. This is how
+and settles the journal through the normal recovery path. At stage time the
+preparing process also releases its journal ownership of the transition row:
+a staged row is not mid-flight, so keeping the preparer's owner fence would
+tie settlement to that process's lifetime and block every other session's
+startup recovery for as long as it lives (immediate operations keep their
+owner fence — their preparer really is mid-flight until settle). This is how
 background automatic updates and sync-now ("update all") apply: they never
 need a reload-capable command context, and one run can stage any number of
 plugins. A committed update that cannot drive activation at all (no reload
