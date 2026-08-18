@@ -36,9 +36,6 @@ jobs:
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: win32-x64-msvc
-          - runner: windows-11-arm
-            target: aarch64-pc-windows-msvc
-            artifact: win32-arm64-msvc
           # Intel Mac: macos-13 is retired Dec 2025, so cross-compile from
           # Apple Silicon (clang targets x86_64-apple-darwin natively).
           - runner: macos-14

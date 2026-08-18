@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.4
+
+### Changed
+
+- Stop building and shipping the Windows ARM64 native engine. Release CI and package validation now cover Linux x64/ARM64, macOS x64/ARM64, and Windows x64 without allocating the slow Windows ARM runner.
+
 ## v0.2.3
 
 ### Fixed

@@ -5,6 +5,7 @@
 ### Fixed
 
 - Rebundle `@nklisch/pi-plugins` v0.3.8 so externally installed Pi hosts retain the complete subagent tool family after process restart instead of loading only the separate model-list helper.
+- Rebundle `@nklisch/pi-clearance` v0.2.4 with five supported native targets; Windows ARM64 is no longer built or shipped.
 
 ## v0.1.9
 
