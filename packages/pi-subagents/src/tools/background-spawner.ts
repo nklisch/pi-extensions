@@ -1,6 +1,7 @@
 import type { ParentSnapshot } from "#src/lifecycle/parent-snapshot";
 import type { AgentSpawnConfig } from "#src/lifecycle/subagent-manager";
 import { textResult } from "#src/tools/helpers";
+import { formatModelThinking } from "#src/ui/display";
 import type { ResolvedSpawnConfig } from "#src/tools/spawn-config";
 import type { ParentSessionInfo, Subagent } from "#src/types";
 
@@ -36,7 +37,7 @@ export function spawnBackground(
       model: execution.model,
       maxTurns: execution.effectiveMaxTurns,
       inheritContext: execution.inheritContext,
-      thinkingLevel: execution.thinking,
+      thinkingLevel: execution.effectiveThinkingLevel,
       isBackground: true,
       origin: "tool",
       invocation: execution.agentInvocation,
@@ -52,7 +53,10 @@ export function spawnBackground(
     `Agent ${isQueued ? "queued" : "started"} in background.\n` +
       `Agent ID: ${id}\n` +
       `Type: ${identity.displayName}\n` +
-      `Model: ${presentation.modelName}\n` +
+      `Model: ${formatModelThinking(
+        record?.modelLabel ?? presentation.modelName,
+        record?.effectiveThinkingLevel ?? execution.effectiveThinkingLevel,
+      )}\n` +
       `Runtime: 0.0s\n` +
       `Description: ${execution.description}\n` +
       (identity.fellBack ? `Fallback: requested ${identity.rawType}; using ${identity.subagentType}\n` : "") +
@@ -66,6 +70,7 @@ export function spawnBackground(
       `Do not duplicate this agent's work.`,
     {
       ...presentation.detailBase,
+      thinkingLevel: record?.effectiveThinkingLevel ?? execution.effectiveThinkingLevel,
       toolUses: 0,
       tokens: "",
       durationMs: 0,

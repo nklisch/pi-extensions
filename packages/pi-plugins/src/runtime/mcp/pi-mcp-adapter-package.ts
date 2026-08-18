@@ -10,7 +10,7 @@ import {
 
 export const PI_MCP_ADAPTER_RECEIPT: PublishedPackageReceipt = Object.freeze({
   packageName: "@nklisch/pi-mcp-adapter",
-  version: "2.20.1-nklisch.0",
+  version: "2.20.1-nklisch.1",
   license: "MIT",
   nodeEngine: ">=22.19.0",
   piPeerRange: ">=0.82.0 <1",

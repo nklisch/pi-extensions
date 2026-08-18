@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [18.1.0-nklisch.1] - 2026-08-17
+
+### Added
+
+- Show every subagent's exact effective thinking level alongside its exact model across foreground and background output, widgets, notifications, result and steering reports, and session navigation.
+
+### Fixed
+
+- Keep long parent sessions responsive by replacing the widget's 80 ms full-history scan with a lifecycle-fed active/linger read model refreshed at 500 ms.
+- Stop status animation timers once only static completion state remains.
+
 ## [18.0.3](https://github.com/gotgenes/pi-packages/compare/pi-subagents-v18.0.2...pi-subagents-v18.0.3) (2026-07-15)
 
 

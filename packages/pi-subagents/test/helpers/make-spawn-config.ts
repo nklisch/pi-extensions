@@ -27,7 +27,8 @@ export function createResolvedSpawnConfig(
   const displayName = options.displayName ?? "Agent";
   const description = options.description ?? "task";
   const runInBackground = options.runInBackground ?? false;
-  const modelName = options.model;
+  const modelName = options.model ?? "unknown model";
+  const effectiveThinkingLevel = "off" as const;
 
   return {
     identity: {
@@ -42,6 +43,7 @@ export function createResolvedSpawnConfig(
       model: undefined,
       effectiveMaxTurns: undefined,
       thinking: undefined,
+      effectiveThinkingLevel,
       inheritContext: false,
       runInBackground,
       agentInvocation: {
@@ -55,7 +57,7 @@ export function createResolvedSpawnConfig(
     presentation: {
       modelName,
       agentTags: [],
-      detailBase: { displayName, description, subagentType, modelName, tags: undefined },
+      detailBase: { displayName, description, subagentType, modelName, thinkingLevel: effectiveThinkingLevel, tags: undefined },
     },
   };
 }

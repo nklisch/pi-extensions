@@ -93,8 +93,8 @@ flowchart TB
     SessionConfig --> Prompts & Env
     AgentTypeRegistry --> DefaultAgents & CustomAgents
     RecordObserver -.->|subscribes| SubagentSession
-    Widget -.->|polls| SubagentManager
-    SubagentManager -.->|notifies| Widget
+    Widget -.->|subscribes as observer| SubagentManager
+    SubagentManager -.->|lifecycle callbacks| Widget
 ```
 
 ### Key domain types
@@ -125,6 +125,7 @@ classDiagram
         +getContextPercent(): number | null
         +subscribeToUpdates(fn): unsub | undefined
         +messages: readonly unknown[]
+        +effectiveThinkingLevel: ThinkingLevel
         +completeRun(result)
         +failRun(err)
         +disposeSession()
@@ -363,8 +364,7 @@ src/
 Record statistics (tool uses, token usage, compaction counts) and live activity (active tools, response text, turn counts) are updated by `record-observer.ts`, which subscribes directly to session events.
 This is the single per-child session subscription — all run state lives on the `Subagent` record.
 
-The widget reads agent state by polling the records exposed via `SubagentManager.listAgents()` every 80 ms; that poll loop is now started by the manager's lifecycle notifications (the widget subscribes as a `SubagentManagerObserver` fanned out through `CompositeSubagentObserver`), not by inbound calls from the spawn tools.
-The `/subagents:sessions` navigator reads messages via `Subagent.agentMessages` and subscribes to updates via `Subagent.subscribeToUpdates()` — no direct `AgentSession` reference (#277).
+The widget maintains a bounded reactive read model of active background records and the small terminal linger set, populated by `SubagentManagerObserver` lifecycle callbacks. While active it refreshes that model at 500 ms; each refresh reads only those retained records and requests the normal Pi widget render, rather than cloning or sorting the manager's full terminal history. When only terminal linger records remain, it renders the completion state once and leaves the static widget registered without an interval until turn aging or clear removes it. The `/subagents:sessions` navigator reads messages via `Subagent.agentMessages` and subscribes to updates via `Subagent.subscribeToUpdates()` — no direct `AgentSession` reference (#277).
 
 ## Cross-extension architecture
 

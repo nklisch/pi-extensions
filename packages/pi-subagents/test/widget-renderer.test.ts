@@ -21,6 +21,7 @@ function makeAgent(overrides: Partial<WidgetAgent> = {}): WidgetAgent {
 		status: "completed",
 		description: "test task",
 		modelLabel: "anthropic/claude-sonnet",
+		thinkingLevel: "high",
 		toolUses: 5,
 		startedAt: 1000,
 		completedAt: 6000,

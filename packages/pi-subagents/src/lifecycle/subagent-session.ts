@@ -15,6 +15,7 @@ import {
   type AgentSessionEvent,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import type { Model } from "@earendil-works/pi-ai";
 import type { ChildLifecyclePublisher } from "#src/lifecycle/child-lifecycle";
 import {
   type SubagentLifecycleOutcome,
@@ -24,7 +25,7 @@ import { normalizeMaxTurns } from "#src/lifecycle/turn-limits";
 import { getSessionContextPercent, type SessionStatsLike } from "#src/lifecycle/usage";
 import { extractText } from "#src/session/context";
 import { getAgentConversation } from "#src/session/conversation";
-import type { SessionMessage } from "#src/types";
+import type { SessionMessage, ThinkingLevel } from "#src/types";
 
 /** Outcome of one turn loop. */
 export interface TurnLoopResult {
@@ -92,6 +93,16 @@ export class SubagentSession {
   /** Stable child session identity for lifecycle provider metadata. */
   get sessionId(): string {
     return this.meta.sessionId;
+  }
+
+  /** Current model selected by the child session. */
+  get model(): Model<any> | undefined {
+    return this._session.model;
+  }
+
+  /** Effective level after the child session applied defaults and clamping. */
+  get thinkingLevel(): ThinkingLevel {
+    return this._session.thinkingLevel;
   }
 
   /** Drive the initial run's turn loop; emits `completed` on accepted success. */

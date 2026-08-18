@@ -563,6 +563,116 @@
       "relationships": []
     },
     {
+      "path": ".research/attestations/agy-1-1-13-builtin-customizations.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "agy-1-1-13-builtin-customizations",
+      "title": "agy-1-1-13-builtin-customizations",
+      "summary": null,
+      "updated": "2026-08-15",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/agy-1-1-13-runtime-probe.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "agy-1-1-13-runtime-probe",
+      "title": "agy-1-1-13-runtime-probe",
+      "summary": null,
+      "updated": "2026-08-15",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/agy-local-oauth-probe.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "agy-local-oauth-probe",
+      "title": "agy-local-oauth-probe",
+      "summary": null,
+      "updated": "2026-08-16",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/antigravity-cli-official-plugins.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "antigravity-cli-official-plugins",
+      "title": "antigravity-cli-official-plugins",
+      "summary": null,
+      "updated": "2026-08-15",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/antigravity-tos.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "antigravity-tos",
+      "title": "antigravity-tos",
+      "summary": null,
+      "updated": "2026-08-16",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/gemini-cli-discussion-20632.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "gemini-cli-discussion-20632",
+      "title": "gemini-cli-discussion-20632",
+      "summary": null,
+      "updated": "2026-08-16",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/google-apis-tos.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "google-apis-tos",
+      "title": "google-apis-tos",
+      "summary": null,
+      "updated": "2026-08-16",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/pi-antigravity-package-page.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "pi-antigravity-package-page",
+      "title": "pi-antigravity-package-page",
+      "summary": null,
+      "updated": "2026-08-16",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/pi-antigravity-repo.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "pi-antigravity-repo",
+      "title": "pi-antigravity-repo",
+      "summary": null,
+      "updated": "2026-08-16",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/pi-custom-provider-docs.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "pi-custom-provider-docs",
+      "title": "pi-custom-provider-docs",
+      "summary": null,
+      "updated": "2026-08-16",
+      "status": null,
+      "relationships": []
+    },
+    {
       "path": ".research/attestations/pi-mcp-adapter-2-20-1.md",
       "namespace": "research",
       "kind": "attestation",
@@ -594,6 +704,38 @@
       "updated": null,
       "status": null,
       "relationships": []
+    },
+    {
+      "path": ".research/briefs/antigravity-plugin-support.md",
+      "namespace": "research",
+      "kind": "research-brief",
+      "id": "antigravity-plugin-support",
+      "title": "Antigravity plugin support",
+      "summary": "Antigravity now overlaps Plugin Host's core surface enough to justify first-class support, but it requires a distinct adapter and a verified source contract rather than being treated as Codex.",
+      "updated": "2026-08-15",
+      "status": null,
+      "relationships": [
+        {
+          "type": "informs",
+          "target": ".work/releases/prepared-packages-2026-08-17.md"
+        }
+      ]
+    },
+    {
+      "path": ".research/briefs/google-subscription-oauth-in-pi.md",
+      "namespace": "research",
+      "kind": "research-brief",
+      "id": "google-subscription-oauth-in-pi",
+      "title": "Google subscription OAuth in Pi (agy-fingerprinted)",
+      "summary": "What it takes to use a Google AI subscription (Antigravity/agy OAuth) as a Pi model provider, how closely an extension can match agy's request fingerprint, and the documented account risk of doing so.",
+      "updated": "2026-08-16",
+      "status": null,
+      "relationships": [
+        {
+          "type": "informs",
+          "target": ".research/briefs/antigravity-plugin-support.md"
+        }
+      ]
     },
     {
       "path": ".research/briefs/independent-mcp-modernization.md",
@@ -690,17 +832,6 @@
       "summary": null,
       "updated": "2026-08-06",
       "status": "blocked",
-      "relationships": []
-    },
-    {
-      "path": ".work/completed/mcp-gateway-discovery-redesign.md",
-      "namespace": "work",
-      "kind": "feature",
-      "id": "mcp-gateway-discovery-redesign",
-      "title": "mcp-gateway-discovery-redesign",
-      "summary": null,
-      "updated": "2026-06-14",
-      "status": "completed",
       "relationships": []
     },
     {
@@ -825,14 +956,36 @@
       "relationships": []
     },
     {
-      "path": ".work/completed/fix-background-wake-custom-message.md",
+      "path": ".work/releases/prepared-packages-2026-08-17.md",
+      "namespace": "work",
+      "kind": "release",
+      "id": "releases/prepared-packages-2026-08-17",
+      "title": "Prepared package release — 2026-08-17",
+      "summary": null,
+      "updated": null,
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".work/backlog/backlog-npm-sha1-integrity-fallback.md",
       "namespace": "work",
       "kind": "story",
-      "id": "fix-background-wake-custom-message",
-      "title": "fix-background-wake-custom-message",
+      "id": "backlog-npm-sha1-integrity-fallback",
+      "title": "Allow npm SHA-1 integrity fallback when SHA-512 is absent",
       "summary": null,
-      "updated": "2026-06-22",
-      "status": "completed",
+      "updated": "2026-09-14",
+      "status": "active",
+      "relationships": []
+    },
+    {
+      "path": ".work/backlog/backlog-recovery-owner-observability.md",
+      "namespace": "work",
+      "kind": "story",
+      "id": "backlog-recovery-owner-observability",
+      "title": "Surface why a pending transition is fenced (live owner identity) in Updates/Health",
+      "summary": null,
+      "updated": "2026-08-16",
+      "status": "active",
       "relationships": []
     }
   ]

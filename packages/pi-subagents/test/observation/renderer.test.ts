@@ -15,6 +15,7 @@ function makeDetails(overrides: Partial<NotificationDetails> = {}): Notification
     id: "agent-1",
     description: "Test agent",
     modelLabel: "anthropic/claude-sonnet",
+    thinkingLevel: "high",
     status: "completed",
     toolUses: 3,
     turnCount: 5,

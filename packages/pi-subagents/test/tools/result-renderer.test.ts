@@ -23,6 +23,7 @@ function makeDetails(overrides: Partial<AgentDetails> = {}): AgentDetails {
 		description: "test task",
 		subagentType: "general-purpose",
 		modelName: "anthropic/claude-sonnet",
+		thinkingLevel: "high",
 		toolUses: 0,
 		tokens: "",
 		durationMs: 2000,
@@ -36,18 +37,18 @@ describe("renderStats", () => {
 
 	it("always includes the effective model when other stats are absent", () => {
 		const details = makeDetails({ toolUses: 0, tokens: "" });
-		expect(renderStats(details, theme)).toBe("[dim:anthropic/claude-sonnet]");
+		expect(renderStats(details, theme)).toBe("[dim:anthropic/claude-sonnet · thinking: high]");
 	});
 
 	it("includes model name", () => {
 		const details = makeDetails({ modelName: "haiku" });
-		expect(renderStats(details, theme)).toContain("[dim:haiku]");
+		expect(renderStats(details, theme)).toContain("[dim:haiku · thinking: high]");
 	});
 
 	it("includes tags", () => {
 		const details = makeDetails({ tags: ["thinking: high", "inherit context"] });
 		const result = renderStats(details, theme);
-		expect(result).toContain("[dim:thinking: high]");
+		expect(result).toContain("[dim:anthropic/claude-sonnet · thinking: high]");
 		expect(result).toContain("[dim:inherit context]");
 	});
 
@@ -93,7 +94,7 @@ describe("renderStats", () => {
 
 	it("joins multiple parts with dim separator", () => {
 		const details = makeDetails({ modelName: "haiku", toolUses: 2 });
-		expect(renderStats(details, theme)).toBe("[dim:haiku] [dim:·] [dim:2 tool uses]");
+		expect(renderStats(details, theme)).toBe("[dim:haiku · thinking: high] [dim:·] [dim:2 tool uses]");
 	});
 });
 
@@ -112,7 +113,7 @@ describe("renderRunning", () => {
 
 	it("includes stats in output", () => {
 		const details = makeDetails({ status: "running", modelName: "haiku" });
-		expect(renderRunning(details, theme)).toContain("[dim:haiku]");
+		expect(renderRunning(details, theme)).toContain("[dim:haiku · thinking: high]");
 	});
 
 	it("uses activity text when provided", () => {
@@ -143,7 +144,7 @@ describe("renderBackground", () => {
 	it("wraps entire message in dim styling with agent ID", () => {
 		const details = makeDetails({ status: "background", agentId: "agent-42" });
 		expect(renderBackground(details, theme)).toBe(
-			"[dim:  \u23BF  Running in background (ID: agent-42) · anthropic/claude-sonnet · 2.0s]",
+			"[dim:  \u23BF  Running in background (ID: agent-42) · anthropic/claude-sonnet · thinking: high · 2.0s]",
 		);
 	});
 });
@@ -213,7 +214,7 @@ describe("renderStopped", () => {
 
 	it("includes stats in output", () => {
 		const details = makeDetails({ status: "stopped", modelName: "haiku" });
-		expect(renderStopped(details, theme)).toContain("[dim:haiku]");
+		expect(renderStopped(details, theme)).toContain("[dim:haiku · thinking: high]");
 	});
 
 	it("shows Stopped message on second line", () => {

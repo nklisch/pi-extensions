@@ -27,6 +27,7 @@ describe("runForeground", () => {
 		const { manager } = createToolDeps();
 		const result = await runForeground(manager, makeParams(), undefined, undefined);
 		expect(result.content[0].text).toContain("Agent completed");
+		expect(result.content[0].text).toContain("Model: unknown model · thinking: medium");
 		expect(result.content[0].text).toContain("3 tool uses");
 		expect(result.content[0].text).toContain("All done.");
 	});
@@ -81,8 +82,8 @@ describe("runForeground", () => {
 		const onUpdate = vi.fn();
 		const runPromise = runForeground(deps.manager, makeParams(), undefined, onUpdate);
 
-		// Advance timer to trigger a spinner tick
-		await vi.advanceTimersByTimeAsync(100);
+		// Advance timer to trigger the 500ms progress refresh
+		await vi.advanceTimersByTimeAsync(500);
 		expect(onUpdate).toHaveBeenCalled();
 
 		resolve(createTestSubagent({ result: "done" }));
@@ -100,7 +101,7 @@ describe("runForeground", () => {
 		await runForeground(deps.manager, makeParams(), undefined, onUpdate);
 
 		onUpdate.mockClear();
-		await vi.advanceTimersByTimeAsync(200);
+		await vi.advanceTimersByTimeAsync(1_000);
 		// Interval must have been cleared — no further onUpdate calls
 		expect(onUpdate).not.toHaveBeenCalled();
 	});

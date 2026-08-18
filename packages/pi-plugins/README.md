@@ -59,12 +59,12 @@ Marketplace-derived network access is origin-authorized and DNS-pinned. Credenti
 
 ## Compatibility
 
-The current production package pins and verifies:
+The current production package pins:
 
-- `@nklisch/pi-mcp-adapter@2.11.0-nklisch.0`
-- `@nklisch/pi-subagents@18.0.4-nklisch.0`
+- `@nklisch/pi-mcp-adapter@2.20.1-nklisch.1`
+- `@nklisch/pi-subagents@18.1.0-nklisch.1`
 
-Executable dependencies are receipt-checked before import. The MCP and subagent packages are transitive dependencies: one top-level `pi install npm:@nklisch/pi-plugins` installs and activates both through verified wrappers, so they do not need separate `pi install` entries. The bundled subagent loader reuses Pi's already-loaded coding-agent, AI, and TUI module identities rather than installing a second Pi runtime tree. Package, API, runtime-range, installed-tree, or behavioral drift makes the affected capability unavailable rather than partially activating it.
+Executable dependencies are checked against their declared package shape before import: exact name and version, license, engine and peer ranges, required exports, and declared Pi resources. The MCP and subagent packages are transitive dependencies: one top-level `pi install npm:@nklisch/pi-plugins` installs and activates both through verified wrappers, so they do not need separate `pi install` entries. The bundled subagent loader reuses Pi's already-loaded coding-agent, AI, and TUI module identities rather than installing a second Pi runtime tree. Package, API, runtime-range, or behavioral drift makes the affected capability unavailable rather than partially activating it. Subagent lifecycle conformance remains a separate qualification contract.
 
 See [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) for the complete compatibility contract.
 

@@ -8,9 +8,9 @@
 
 import { AgentTypeRegistry } from "#src/config/agent-types";
 import type { Subagent } from "#src/lifecycle/subagent";
-import type { SubagentManager, SubagentManagerObserver } from "#src/lifecycle/subagent-manager";
+import type { SubagentManagerObserver } from "#src/lifecycle/subagent-manager";
 import type { CompactionInfo } from "#src/types";
-import { ERROR_STATUSES, formatMs, type Theme } from "#src/ui/display";
+import { ERROR_STATUSES, formatModelThinking, formatMs, type Theme } from "#src/ui/display";
 import { renderWidgetLines, type WidgetAgent } from "#src/ui/widget-renderer";
 
 // ---- Types ----
@@ -54,7 +54,7 @@ export function assembleWidgetState(
 /** Render the aggregate status bar without hiding per-agent model/runtime details. */
 export function formatStatusBar(
   state: WidgetState,
-  agents: readonly Pick<Subagent, "status" | "modelLabel" | "startedAt">[],
+  agents: readonly Pick<Subagent, "status" | "modelLabel" | "effectiveThinkingLevel" | "startedAt">[],
   now = Date.now(),
 ): string | undefined {
   if (!state.hasActive) return undefined;
@@ -65,8 +65,8 @@ export function formatStatusBar(
   const activeDetails = agents
     .filter((agent) => agent.status === "running" || agent.status === "queued")
     .map((agent) => agent.status === "running"
-      ? `${agent.modelLabel} ${formatMs(now - agent.startedAt)}`
-      : `${agent.modelLabel} queued`);
+      ? `${formatModelThinking(agent.modelLabel, agent.effectiveThinkingLevel)} ${formatMs(now - agent.startedAt)}`
+      : `${formatModelThinking(agent.modelLabel, agent.effectiveThinkingLevel)} queued`);
   return `${statusParts.join(", ")} agent${total === 1 ? "" : "s"} · ${activeDetails.join(", ")}`;
 }
 
@@ -85,10 +85,18 @@ export class AgentWidget implements SubagentManagerObserver {
   private uiCtx: UICtx | undefined;
   private widgetFrame = 0;
   private widgetInterval: ReturnType<typeof setInterval> | undefined;
-  /** Tracks how many turns each finished agent has survived. Key: agent ID, Value: turns since finished. */
+  /**
+   * Bounded reactive read model: lifecycle callbacks add active background
+   * records and the small terminal linger set; render ticks never ask the
+   * manager to clone or sort its retained history.
+   */
+  private readonly backgroundAgents = new Map<string, Subagent>();
+  /** Tracks how many turns each finished agent has survived. */
   private finishedTurnAge = new Map<string, number>();
   /** How many extra turns errors/aborted agents linger (completed agents clear after 1 turn). */
   private static readonly ERROR_LINGER_TURNS = 2;
+  /** Pi renders the whole component tree for each requestRender call. */
+  private static readonly STATUS_REFRESH_INTERVAL_MS = 500;
 
   /** Whether the widget callback is currently registered with the TUI. */
   private widgetRegistered = false;
@@ -97,14 +105,12 @@ export class AgentWidget implements SubagentManagerObserver {
   /** Last status bar text, used to avoid redundant setStatus calls. */
   private lastStatusText: string | undefined;
 
-  constructor(
-    private manager: SubagentManager,
-    private registry: AgentTypeRegistry,
-  ) {}
+  constructor(private registry: AgentTypeRegistry) {}
 
   /** Set the UI context (grabbed from first tool execution). */
   setUICtx(ctx: UICtx) {
-    if (ctx !== this.uiCtx) {
+    const contextChanged = ctx !== this.uiCtx;
+    if (contextChanged) {
       // UICtx changed — the widget registered on the old context is gone.
       // Force re-registration on next update().
       this.uiCtx = ctx;
@@ -112,6 +118,10 @@ export class AgentWidget implements SubagentManagerObserver {
       this.tui = undefined;
       this.lastStatusText = undefined;
     }
+    // Lifecycle events can arrive before the first tool gives us a UI context.
+    // Refresh when that context becomes available, but let update() decide
+    // whether any active record actually needs an animation timer.
+    if (contextChanged && this.uiCtx && this.backgroundAgents.size > 0) this.update();
   }
 
   /**
@@ -119,62 +129,118 @@ export class AgentWidget implements SubagentManagerObserver {
    * Ages finished agents and clears those that have lingered long enough.
    */
   onTurnStart() {
-    // Age all finished agents
+    // Age terminal records and remove them before the next render. Completed
+    // records linger for one turn; errors and aborted records linger for two.
     for (const [id, age] of this.finishedTurnAge) {
-      this.finishedTurnAge.set(id, age + 1);
+      const record = this.backgroundAgents.get(id);
+      const nextAge = age + 1;
+      if (!record || nextAge >= this.maxFinishedAge(record.status)) {
+        this.finishedTurnAge.delete(id);
+        this.backgroundAgents.delete(id);
+      } else {
+        this.finishedTurnAge.set(id, nextAge);
+      }
     }
-    // Trigger a widget refresh (will filter out expired agents)
     this.update();
   }
 
   // ---- SubagentManagerObserver: react to lifecycle, self-drive the timer ----
 
   /** A subagent started running — ensure the update loop is live and render. */
-  onSubagentStarted(_record: Subagent) {
+  onSubagentStarted(record: Subagent) {
+    if (!this.trackBackground(record)) return;
+    this.finishedTurnAge.delete(record.id);
     this.startLoop();
   }
 
   /** A background subagent was created (queued) — ensure the loop is live and render. */
-  onSubagentCreated(_record: Subagent) {
+  onSubagentCreated(record: Subagent) {
+    if (!this.trackBackground(record)) return;
+    this.finishedTurnAge.delete(record.id);
     this.startLoop();
   }
 
-  /** A subagent completed — render so the finished state is seeded and shown. */
-  onSubagentCompleted(_record: Subagent) {
+  /** A subagent completed — seed its bounded linger entry and render. */
+  onSubagentCompleted(record: Subagent) {
+    if (!this.trackBackground(record)) return;
+    this.finishedTurnAge.set(record.id, 0);
+    this.update();
+  }
+
+  /** A resumed subagent started — ensure the update loop is live and render. */
+  onSubagentResumedStarted(record: Subagent) {
+    if (!this.trackBackground(record)) return;
+    this.finishedTurnAge.delete(record.id);
+    this.startLoop();
+  }
+
+  /** A resumed subagent settled — seed its terminal linger entry. */
+  onSubagentResumed(record: Subagent) {
+    if (!this.trackBackground(record)) return;
+    this.finishedTurnAge.set(record.id, 0);
     this.update();
   }
 
   /** A subagent's session compacted — render to refresh the compaction count. */
-  onSubagentCompacted(_record: Subagent, _info: CompactionInfo) {
+  onSubagentCompacted(record: Subagent, _info: CompactionInfo) {
+    if (this.trackBackground(record)) this.update();
+  }
+
+  /** Remove terminal state when the manager clears a parent session. */
+  onSubagentCleared(record: Subagent) {
+    if (!this.backgroundAgents.delete(record.id)) return;
+    this.finishedTurnAge.delete(record.id);
     this.update();
   }
 
-  /** Start the update timer (if not already running) and render immediately. */
+  /** Refresh immediately; update() owns the timer lifecycle. */
   private startLoop() {
-    this.ensureTimer();
+    if (!this.uiCtx) return;
     this.update();
   }
 
-  /** Ensure the widget update timer is running. */
+  /** Ensure the widget update timer is running while active records animate. */
   private ensureTimer() {
-    this.widgetInterval ??= setInterval(() => this.update(), 80);
+    this.widgetInterval ??= setInterval(
+      () => this.update(),
+      AgentWidget.STATUS_REFRESH_INTERVAL_MS,
+    );
+  }
+
+  /** Stop animated refreshes while leaving any static finished widget intact. */
+  private stopTimer() {
+    if (this.widgetInterval) {
+      clearInterval(this.widgetInterval);
+      this.widgetInterval = undefined;
+    }
   }
 
   /** Check if a finished agent should still be shown in the widget. */
   private shouldShowFinished(agentId: string, status: string): boolean {
     const age = this.finishedTurnAge.get(agentId) ?? 0;
-    const maxAge = ERROR_STATUSES.has(status) ? AgentWidget.ERROR_LINGER_TURNS : 1;
-    return age < maxAge;
+    return age < this.maxFinishedAge(status);
   }
 
-  /**
-   * Background agents only — the widget's sole audience (ADR-0004 Decision A).
-   * Foreground runs are rendered by the `subagent` tool's inline `onUpdate` stream,
-   * so funneling both `listAgents()` call sites through this accessor applies the
-   * background predicate exactly once at the source.
-   */
-  private listBackgroundAgents(): Subagent[] {
-    return this.manager.listAgents().filter(record => record.invocation?.runInBackground === true);
+  private maxFinishedAge(status: string): number {
+    return ERROR_STATUSES.has(status) ? AgentWidget.ERROR_LINGER_TURNS : 1;
+  }
+
+  /** Add a record only when its immutable invocation snapshot marks it background. */
+  private trackBackground(record: Subagent): boolean {
+    if (record.invocation?.runInBackground !== true) return false;
+    this.backgroundAgents.set(record.id, record);
+    return true;
+  }
+
+  /** Drop terminal entries whose turn-based linger window has already elapsed. */
+  private pruneExpiredFinished(): void {
+    for (const [id, record] of this.backgroundAgents) {
+      if (record.isActive()) continue;
+      if (record.completedAt == null || !this.shouldShowFinished(id, record.status)) {
+        this.backgroundAgents.delete(id);
+        this.finishedTurnAge.delete(id);
+      }
+    }
   }
 
   /** Project a live Subagent record onto a pure-data WidgetAgent snapshot. */
@@ -185,6 +251,7 @@ export class AgentWidget implements SubagentManagerObserver {
       status: record.status,
       description: record.description,
       modelLabel: record.modelLabel,
+      thinkingLevel: record.effectiveThinkingLevel,
       toolUses: record.toolUses,
       startedAt: record.startedAt,
       completedAt: record.completedAt,
@@ -202,7 +269,7 @@ export class AgentWidget implements SubagentManagerObserver {
   /** Delegate rendering to the pure widget-renderer module. */
   private renderWidget(tui: any, theme: Theme): string[] {
     return renderWidgetLines({
-      agents: this.listBackgroundAgents().map(r => this.toWidgetAgent(r)),
+      agents: [...this.backgroundAgents.values()].map(r => this.toWidgetAgent(r)),
       registry: this.registry,
       spinnerFrame: this.widgetFrame,
       terminalWidth: tui.terminal.columns,
@@ -213,10 +280,10 @@ export class AgentWidget implements SubagentManagerObserver {
 
   /**
    * Unregister the widget, clear the status bar, stop the interval timer, and
-   * purge stale `finishedTurnAge` entries for agents no longer in `backgroundAgents`.
+   * release the bounded read model once no visible agents remain.
    * Called only from `update`'s idle path — not from `dispose`.
    */
-  private clearWidget(backgroundAgents: readonly AgentSummary[]): void {
+  private clearWidget(): void {
     if (this.widgetRegistered) {
       this.uiCtx!.setWidget("agents", undefined);
       this.widgetRegistered = false;
@@ -226,10 +293,9 @@ export class AgentWidget implements SubagentManagerObserver {
       this.uiCtx!.setStatus("subagents", undefined);
       this.lastStatusText = undefined;
     }
-    if (this.widgetInterval) { clearInterval(this.widgetInterval); this.widgetInterval = undefined; }
-    for (const [id] of this.finishedTurnAge) {
-      if (!backgroundAgents.some(a => a.id === id)) this.finishedTurnAge.delete(id);
-    }
+    this.stopTimer();
+    this.backgroundAgents.clear();
+    this.finishedTurnAge.clear();
   }
 
   /**
@@ -244,34 +310,24 @@ export class AgentWidget implements SubagentManagerObserver {
     }
   }
 
-  /**
-   * Seed linger tracking for any newly-observed finished agent.
-   * The widget owns detection of completions it observes via `listAgents()`,
-   * so no external bookkeeping call is needed.
-   * Idempotent — only seeds when an entry is absent, so repeated updates within
-   * a turn neither reset nor advance the age.
-   */
-  private seedFinishedAgents(agents: readonly AgentSummary[]): void {
-    for (const a of agents) {
-      if (a.completedAt && !this.finishedTurnAge.has(a.id)) {
-        this.finishedTurnAge.set(a.id, 0);
-      }
-    }
-  }
-
   /** Force an immediate widget update. */
   update() {
     if (!this.uiCtx) return;
 
-    const backgroundAgents = this.listBackgroundAgents();
-    this.seedFinishedAgents(backgroundAgents);
+    this.pruneExpiredFinished();
+    const backgroundAgents = [...this.backgroundAgents.values()];
     const state = assembleWidgetState(backgroundAgents, (id, status) => this.shouldShowFinished(id, status));
 
     if (!state.hasActive && !state.hasFinished) {
-      this.clearWidget(backgroundAgents);
+      this.clearWidget();
       return;
     }
 
+    // Finished records remain renderable for their turn-based linger window,
+    // but they have no changing state to animate. Stop the interval while the
+    // static completion widget remains registered.
+    if (state.hasActive) this.ensureTimer();
+    else this.stopTimer();
     this.updateStatusBar(state, backgroundAgents);
     this.widgetFrame++;
 
@@ -298,10 +354,7 @@ export class AgentWidget implements SubagentManagerObserver {
 
   // fallow-ignore-next-line unused-class-member
   dispose() {
-    if (this.widgetInterval) {
-      clearInterval(this.widgetInterval);
-      this.widgetInterval = undefined;
-    }
+    this.stopTimer();
     if (this.uiCtx) {
       this.uiCtx.setWidget("agents", undefined);
       this.uiCtx.setStatus("subagents", undefined);
@@ -309,5 +362,7 @@ export class AgentWidget implements SubagentManagerObserver {
     this.widgetRegistered = false;
     this.tui = undefined;
     this.lastStatusText = undefined;
+    this.backgroundAgents.clear();
+    this.finishedTurnAge.clear();
   }
 }

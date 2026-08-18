@@ -335,6 +335,25 @@ describe("SubagentsServiceAdapter — spawn", () => {
     );
   });
 
+  it("resolves an inherited thinking level before a service background launch", () => {
+    const model = makeModel({ reasoning: true });
+    const mgr = createManagerStub();
+    const runtime = makeRuntimeStub({
+      currentCtx: { ...makeStubCtx(), model },
+      buildSnapshot: vi.fn(() => ({ ...STUB_SNAPSHOT, model, thinkingLevel: "high" as const })),
+    });
+    const svc = new SubagentsServiceAdapter(mgr, vi.fn(), runtime);
+
+    svc.spawn("Explore", "inspect");
+
+    expect(mgr.spawn).toHaveBeenCalledWith(
+      expect.anything(),
+      "Explore",
+      "inspect",
+      expect.objectContaining({ thinkingLevel: "high" }),
+    );
+  });
+
   it("uses truncated prompt as default description", () => {
     const mgr = createManagerStub();
     const svc = new SubagentsServiceAdapter(mgr, vi.fn(), makeRuntimeStub());

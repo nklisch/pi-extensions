@@ -9,9 +9,10 @@ import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "#src/config/agent-types";
 import type { LifetimeUsage } from "#src/lifecycle/usage";
 import { getLifetimeTotal } from "#src/lifecycle/usage";
-import type { SubagentType } from "#src/types";
+import type { SubagentType, ThinkingLevel } from "#src/types";
 import {
 	describeActivity,
+	formatModelThinking,
 	formatMs,
 	formatSessionTokens,
 	formatTurns,
@@ -30,6 +31,7 @@ export interface WidgetAgent {
 	readonly status: string;
 	readonly description: string;
 	readonly modelLabel: string;
+	readonly thinkingLevel: ThinkingLevel;
 	readonly toolUses: number;
 	readonly startedAt: number;
 	readonly completedAt?: number;
@@ -78,7 +80,7 @@ export function renderFinishedLine(
 		statusText = theme.fg("warning", " aborted");
 	}
 
-	const parts: string[] = [agent.modelLabel];
+	const parts: string[] = [formatModelThinking(agent.modelLabel, agent.thinkingLevel)];
 	parts.push(formatTurns(agent.turnCount, agent.maxTurns));
 	if (agent.toolUses > 0) parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
 	parts.push(duration);
@@ -102,7 +104,7 @@ export function renderRunningLines(
 	const tokens = getLifetimeTotal(agent.lifetimeUsage);
 	const tokenText = tokens > 0 ? formatSessionTokens(tokens, agent.contextPercent, theme, agent.compactionCount) : "";
 
-	const parts: string[] = [agent.modelLabel];
+	const parts: string[] = [formatModelThinking(agent.modelLabel, agent.thinkingLevel)];
 	parts.push(formatTurns(agent.turnCount, agent.maxTurns));
 	if (agent.toolUses > 0) parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
 	if (tokenText) parts.push(tokenText);
@@ -176,7 +178,7 @@ function buildSections(
 		truncate(
 			theme.fg("dim", "\u251C\u2500")
 			+ ` ${theme.fg("muted", "\u25E6")} ${theme.fg("dim", getDisplayName(agent.type, registry))}`
-			+ ` ${theme.fg("dim", "·")} ${theme.fg("dim", agent.modelLabel)}`
+			+ ` ${theme.fg("dim", "·")} ${theme.fg("dim", formatModelThinking(agent.modelLabel, agent.thinkingLevel))}`
 			+ ` ${theme.fg("dim", "·")} ${theme.fg("dim", agent.description)}`
 			+ ` ${theme.fg("dim", "· queued")}`,
 		),

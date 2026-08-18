@@ -1,6 +1,43 @@
 # Generated from .research/attestations. Do not edit by hand.
 schema: 1
 sources:
+  - source_handle: agy-1-1-13-builtin-customizations
+    title: "Antigravity CLI 1.1.13 built-in agy-customizations guide"
+    fetched: "2026-08-15"
+  - source_handle: agy-1-1-13-runtime-probe
+    title: "Read-only and temporary-home probes of Antigravity CLI 1.1.13"
+    fetched: "2026-08-15"
+  - source_handle: agy-local-oauth-probe
+    title: "Direct probes of locally installed Antigravity CLI 1.1.13 auth state and Cloud Code endpoints"
+    fetched: "2026-08-16"
+  - source_handle: antigravity-cli-official-plugins
+    title: "Plugins & Skills — Google Antigravity CLI"
+    source_url: "https://antigravity.google/docs/cli/plugins"
+    fetched: "2026-08-15"
+  - source_handle: antigravity-tos
+    title: "Google Antigravity Additional Terms of Service"
+    source_url: "https://antigravity.google/terms"
+    fetched: "2026-08-16"
+  - source_handle: gemini-cli-discussion-20632
+    title: "Addressing Antigravity Bans & Reinstating Access — google-gemini/gemini-cli Discussion #20632"
+    source_url: "https://github.com/google-gemini/gemini-cli/discussions/20632"
+    fetched: "2026-08-16"
+  - source_handle: google-apis-tos
+    title: "Google APIs Terms of Service"
+    source_url: "https://developers.google.com/terms"
+    fetched: "2026-08-16"
+  - source_handle: pi-antigravity-package-page
+    title: "pi-antigravity package page on pi.dev"
+    source_url: "https://pi.dev/packages/pi-antigravity"
+    fetched: "2026-08-16"
+  - source_handle: pi-antigravity-repo
+    title: "Rahularya01/pi-antigravity source at commit f7802251"
+    source_url: "https://github.com/Rahularya01/pi-antigravity/tree/f7802251e91416a3cf016e64bde94043a8a389d4"
+    fetched: "2026-08-16"
+  - source_handle: pi-custom-provider-docs
+    title: "Pi custom provider documentation (installed @earendil-works/pi-coding-agent docs/custom-provider.md)"
+    source_url: "https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/custom-provider.md"
+    fetched: "2026-08-16"
   - source_handle: pi-mcp-adapter-2-20-1
     title: "nicobailon/pi-mcp-adapter v2.20.1 source and changelog"
     source_url: "https://github.com/nicobailon/pi-mcp-adapter/tree/1dbdef96f674410ac37067de70f10a3de3d48d98"

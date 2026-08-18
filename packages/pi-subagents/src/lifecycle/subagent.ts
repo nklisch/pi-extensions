@@ -26,6 +26,7 @@ import { WorkspaceBracket } from "#src/lifecycle/workspace-bracket";
 import { subscribeSubagentObserver } from "#src/observation/record-observer";
 import type { RunConfig } from "#src/runtime";
 import { formatModelLabel } from "#src/session/model-label";
+import { resolveEffectiveThinkingLevel } from "#src/session/thinking-level";
 import type { AgentInvocation, CompactionInfo, ParentSessionInfo, SessionMessage, SubagentType, ThinkingLevel } from "#src/types";
 
 /** Per-subagent lifecycle observer — created by SubagentManager for each spawn. */
@@ -126,13 +127,17 @@ export class Subagent {
 	get responseText(): string { return this.state.responseText; }
 	get maxTurns(): number | undefined { return this.execution.maxTurns; }
 	/** Exact effective model label used by every operator-facing status surface. */
-	get modelLabel(): string { return formatModelLabel(this.execution.model ?? this.execution.snapshot.model); }
+	get modelLabel(): string { return this._modelLabel; }
+	/** Exact effective thinking level used by every operator-facing status surface. */
+	get effectiveThinkingLevel(): ThinkingLevel { return this._effectiveThinkingLevel; }
 
 	abortController: AbortController;
 	private _promise?: Promise<void>;
 	get promise(): Promise<void> | undefined { return this._promise; }
 
 	private readonly execution: SubagentExecution;
+	private _modelLabel: string;
+	private _effectiveThinkingLevel: ThinkingLevel;
 	private readonly listeners = new RunListeners();
 	private readonly workspaceBracket: WorkspaceBracket;
 
@@ -235,6 +240,12 @@ export class Subagent {
 
 		// Execution machinery — a single mandatory collaborator
 		this.execution = init.execution;
+		this._modelLabel = formatModelLabel(this.execution.model ?? this.execution.snapshot.model);
+		this._effectiveThinkingLevel = resolveEffectiveThinkingLevel(
+			this.execution.model ?? this.execution.snapshot.model,
+			this.execution.thinkingLevel,
+			this.execution.snapshot.thinkingLevel,
+		);
 
 		// Per-run lifecycle collaborators
 		this.workspaceBracket = new WorkspaceBracket(
@@ -290,6 +301,12 @@ export class Subagent {
 			this.failRun(err);
 			return;
 		}
+
+		// The SDK session is authoritative after creation: it has applied its
+		// defaults and model-capability clamp. Keep the record as the one source
+		// consumed by every operator-facing status surface.
+		this._modelLabel = formatModelLabel(this.subagentSession.model ?? this.execution.model ?? this.execution.snapshot.model);
+		this._effectiveThinkingLevel = this.subagentSession.thinkingLevel ?? this._effectiveThinkingLevel;
 
 		this.flushPendingSteers();
 		this.listeners.attachObserver(subscribeSubagentObserver(this.subagentSession, this.state, {

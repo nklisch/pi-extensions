@@ -16,9 +16,10 @@ import type { ParentSnapshot } from "#src/lifecycle/parent-snapshot";
 import type { WorkspaceProvider } from "#src/lifecycle/workspace";
 import type { SpawnOptions, SubagentRecord, SubagentsService } from "#src/service/service";
 import { formatModelLabel } from "#src/session/model-label";
+import { resolveEffectiveThinkingLevel } from "#src/session/thinking-level";
 import type { ModelRegistry } from "#src/session/model-resolver";
 import { resolveDefaultModel } from "#src/session/session-config";
-import type { AgentInvocation, SessionContext, Subagent } from "#src/types";
+import type { AgentInvocation, SessionContext, Subagent, ThinkingLevel } from "#src/types";
 
 /** Narrow interface for the SubagentManager — avoids coupling to the concrete class. */
 export interface SubagentManagerLike {
@@ -71,6 +72,14 @@ export class SubagentsServiceAdapter implements SubagentsService {
       : this.resolveTypeDefaultModel(resolvedType);
     const description = options?.description ?? prompt.slice(0, 80);
     const isBackground = !(options?.foreground ?? false);
+    const snapshot = this.runtime.buildSnapshot(options?.inheritContext ?? false);
+    const requestedThinking = (options?.thinkingLevel
+      ?? this.agentRegistry?.resolveAgentConfig(resolvedType).thinking) as ThinkingLevel | undefined;
+    const effectiveThinkingLevel = resolveEffectiveThinkingLevel(
+      model,
+      requestedThinking,
+      snapshot.thinkingLevel,
+    );
     const invocation: AgentInvocation = {
       modelName: formatModelLabel(model),
       maxTurns: options?.maxTurns,
@@ -78,13 +87,12 @@ export class SubagentsServiceAdapter implements SubagentsService {
       runInBackground: isBackground,
     };
 
-    const snapshot = this.runtime.buildSnapshot(options?.inheritContext ?? false);
     const parent = this.runtime.getSessionInfo();
     return this.manager.spawn(snapshot, resolvedType, prompt, {
       description,
       model,
       maxTurns: options?.maxTurns,
-      thinkingLevel: options?.thinkingLevel,
+      thinkingLevel: effectiveThinkingLevel,
       inheritContext: options?.inheritContext,
       bypassQueue: options?.bypassQueue,
       isBackground,

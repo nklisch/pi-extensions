@@ -11,6 +11,7 @@ export function makeNavigable(overrides: Partial<NavigableSubagent> = {}): Navig
     type: "general-purpose",
     description: "Test task",
     modelLabel: "anthropic/claude-sonnet",
+    effectiveThinkingLevel: "high",
     status: "completed",
     startedAt: 1000,
     completedAt: 4000,

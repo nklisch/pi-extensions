@@ -18,7 +18,7 @@ export function getStatusNote(status: string): string {
 
 /** Build AgentDetails from a base + record-specific fields. */
 export function buildDetails(
-  base: Pick<AgentDetails, "displayName" | "description" | "subagentType" | "modelName" | "tags">,
+  base: Pick<AgentDetails, "displayName" | "description" | "subagentType" | "modelName" | "thinkingLevel" | "tags">,
   record: {
     toolUses: number;
     startedAt: number;

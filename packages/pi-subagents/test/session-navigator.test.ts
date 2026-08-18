@@ -37,6 +37,7 @@ describe("TranscriptOverlay runtime metadata", () => {
       source: staticSource(),
       run: {
         modelLabel: "openai-codex/gpt-5.6-sol",
+        thinkingLevel: "high",
         startedAt: 1_000,
         completedAt: () => undefined,
       },
@@ -46,7 +47,7 @@ describe("TranscriptOverlay runtime metadata", () => {
     });
 
     expect(overlay.render(100)[1]).toContain(
-      "Subagent session · openai-codex/gpt-5.6-sol · 5.0s (running)",
+      "Subagent session · openai-codex/gpt-5.6-sol · thinking: high · 5.0s (running)",
     );
 
     vi.advanceTimersByTime(200);

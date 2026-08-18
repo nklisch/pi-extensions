@@ -15,8 +15,8 @@
 import { buildSessionContext, parseSessionEntries, type SessionEntry, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { AgentConfigLookup } from "#src/config/agent-types";
 import type { SubagentStatus } from "#src/lifecycle/subagent-state";
-import type { AgentSessionEvent, SessionMessage, SubagentType } from "#src/types";
-import { formatDuration, getDisplayName } from "#src/ui/display";
+import type { AgentSessionEvent, SessionMessage, SubagentType, ThinkingLevel } from "#src/types";
+import { formatDuration, formatModelThinking, getDisplayName } from "#src/ui/display";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -26,6 +26,7 @@ export interface NavigableSubagent {
   readonly type: SubagentType;
   readonly description: string;
   readonly modelLabel: string;
+  readonly effectiveThinkingLevel: ThinkingLevel;
   readonly status: SubagentStatus;
   readonly startedAt: number;
   readonly completedAt: number | undefined;
@@ -47,6 +48,7 @@ export interface NavigableSubagent {
  */
 export interface RunDisplayMetadata {
   readonly modelLabel: string;
+  readonly thinkingLevel: ThinkingLevel;
   readonly startedAt: number;
   readonly completedAt: () => number | undefined;
 }
@@ -60,6 +62,7 @@ interface LabelFields {
   readonly type: SubagentType;
   readonly description: string;
   readonly modelLabel: string;
+  readonly effectiveThinkingLevel: ThinkingLevel;
   readonly status: SubagentStatus;
   readonly startedAt: number;
   readonly completedAt: number | undefined;
@@ -95,6 +98,7 @@ export function listNavigableAgents(
   const live = agents.flatMap((record): NavigationEntry[] => {
     const run = {
       modelLabel: record.modelLabel,
+      thinkingLevel: record.effectiveThinkingLevel,
       startedAt: record.startedAt,
       completedAt: () => record.completedAt,
     };
@@ -150,5 +154,5 @@ function buildLabel(fields: LabelFields, registry: AgentConfigLookup, evicted = 
   const name = getDisplayName(fields.type, registry);
   const duration = formatDuration(fields.startedAt, fields.completedAt);
   const marker = evicted ? " · released (snapshot)" : "";
-  return `${name} (${fields.description}) · ${fields.modelLabel} · ${fields.toolUses} tools · ${fields.status} · ${duration}${marker}`;
+  return `${name} (${fields.description}) · ${formatModelThinking(fields.modelLabel, fields.effectiveThinkingLevel)} · ${fields.toolUses} tools · ${fields.status} · ${duration}${marker}`;
 }

@@ -6,6 +6,7 @@ import { SubagentState, type SubagentStateInit } from "#src/lifecycle/subagent-s
 import type { Workspace, WorkspaceProvider } from "#src/lifecycle/workspace";
 import type { AgentInvocation, CompactionInfo, SubagentType } from "#src/types";
 import { makeStubExecution } from "#test/helpers/make-subagent";
+import { makeModel } from "#test/helpers/make-model";
 import { createMockSession, createSubagentSessionStub, emitResumeUsageAndCompaction, toSubagentSession } from "#test/helpers/mock-session";
 import { STUB_SNAPSHOT } from "#test/helpers/stub-ctx";
 
@@ -86,6 +87,24 @@ describe("Subagent — constructor", () => {
 		const record = makeSubagent();
 		expect(record.abortController).toBeInstanceOf(AbortController);
 		expect(record.abortController.signal.aborted).toBe(false);
+	});
+
+	it("keeps one canonical effective thinking level and refreshes it from the child session", async () => {
+		const model = makeModel({ reasoning: true });
+		const session = createMockSession({ model, thinkingLevel: "low" });
+		const stub = createSubagentSessionStub(session);
+		const record = makeSubagent({
+			execution: makeStubExecution({
+				model,
+				thinkingLevel: "high",
+				createSubagentSession: async () => toSubagentSession(stub),
+			}),
+		});
+
+		expect(record.effectiveThinkingLevel).toBe("high");
+		await record.run();
+		expect(record.effectiveThinkingLevel).toBe("low");
+		expect(record.modelLabel).toBe("anthropic/test-model");
 	});
 
 	it("toolCallId reflects execution.parentSession.toolCallId", () => {

@@ -34,7 +34,9 @@ function createManager(overrides?: {
     ? {
         onSubagentStarted: overrides.observer.onSubagentStarted ?? (() => {}),
         onSubagentCompleted: overrides.observer.onSubagentCompleted ?? (() => {}),
+        onSubagentResumedStarted: overrides.observer.onSubagentResumedStarted,
         onSubagentResumed: overrides.observer.onSubagentResumed,
+        onSubagentCleared: overrides.observer.onSubagentCleared,
         onSubagentCompacted: overrides.observer.onSubagentCompacted ?? (() => {}),
         onSubagentCreated: overrides.observer.onSubagentCreated ?? (() => {}),
       }
@@ -247,6 +249,20 @@ describe("SubagentManager — Bug 3 clearCompleted", () => {
 
     manager.clearCompleted();
     expect(manager.getRecord(id)).toBeUndefined();
+  });
+
+  it("notifies observers when clearCompleted removes terminal records", async () => {
+    const onCleared = vi.fn();
+    ({ manager } = createManager({ observer: { onSubagentCleared: onCleared } }));
+
+    const id = spawnBg(manager);
+    await manager.getRecord(id)!.promise;
+    const record = manager.getRecord(id)!;
+
+    manager.clearCompleted();
+
+    expect(onCleared).toHaveBeenCalledOnce();
+    expect(onCleared).toHaveBeenCalledWith(record);
   });
 });
 
@@ -491,6 +507,25 @@ describe("SubagentManager — dependency injection via options bag", () => {
 
     expect(stub.resumeTurnLoop).toHaveBeenCalledOnce();
     expect(manager.getRecord(id)!.result).toBe("second");
+  });
+
+  it("notifies observers when a retained session begins a resumed turn", async () => {
+    const { factory, stub } = createSessionFactory();
+    stub.resumeTurnLoop.mockResolvedValue("second");
+    const onResumedStarted = vi.fn();
+    ({ manager } = createManager({
+      createSubagentSession: factory,
+      observer: { onSubagentResumedStarted: onResumedStarted },
+    }));
+
+    const id = spawnBg(manager);
+    await manager.getRecord(id)!.promise;
+    const record = manager.getRecord(id)!;
+
+    await manager.resume(id, "continue");
+
+    expect(onResumedStarted).toHaveBeenCalledOnce();
+    expect(onResumedStarted).toHaveBeenCalledWith(record);
   });
 
 });

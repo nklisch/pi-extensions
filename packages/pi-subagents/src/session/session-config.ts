@@ -50,6 +50,8 @@ export interface AssemblerContext {
   parentSystemPrompt: string;
   /** Parent's current model instance (fallback when agent config has no model). */
   parentModel?: unknown;
+  /** Parent's current effective level for inherited child thinking. */
+  parentThinkingLevel?: ThinkingLevel;
   /** Model registry for resolving config.model strings. */
   modelRegistry: {
     find(provider: string, modelId: string): unknown;
@@ -88,7 +90,7 @@ export interface SessionConfig {
    * Caller casts to the SDK’s Model<any> at the session-creation boundary.
    */
   model: unknown;
-  /** Resolved thinking level (undefined → inherit from session). */
+  /** Resolved thinking level; undefined only when no parent level is available. */
   thinkingLevel: ThinkingLevel | undefined;
   /** Per-agent configured max turns (from agentConfig.maxTurns). */
   agentMaxTurns: number | undefined;
@@ -175,8 +177,10 @@ export function assembleSessionConfig(
     options.model ??
     resolveDefaultModel(ctx.parentModel, ctx.modelRegistry, agentConfig.model);
 
-  // Thinking level: explicit option > agent config > undefined (inherit)
-  const thinkingLevel = options.thinkingLevel ?? agentConfig.thinking;
+  // Thinking level: explicit option > agent config > parent level (inherit).
+  // Passing the inherited value explicitly lets queued status use the same
+  // value that the child session will receive once it is admitted.
+  const thinkingLevel = options.thinkingLevel ?? agentConfig.thinking ?? ctx.parentThinkingLevel;
 
   // Per-agent max turns (combined with per-call maxTurns and defaultMaxTurns by SubagentSession.runTurnLoop)
   const agentMaxTurns = agentConfig.maxTurns;

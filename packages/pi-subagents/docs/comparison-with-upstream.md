@@ -21,7 +21,7 @@ The direct `gotgenes` lineage and this fork also share a focused-core architectu
 This fork retains several contracts that must survive selective upstream ports:
 
 - ordered lifecycle interception for prompt, result, and continuation decisions;
-- exact `provider/id` and elapsed or final runtime on every operator status surface;
+- exact `provider/id`, exact effective thinking level, and elapsed or final runtime on every operator status surface;
 - a typed service and deterministic child-session lifecycle;
 - only `general-purpose` and `Explore` as built-in agents;
 - model runtime inheritance for runtime-registered providers and authentication;

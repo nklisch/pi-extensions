@@ -247,4 +247,17 @@ describe("assembleSessionConfig — thinking level", () => {
 
     expect(result.thinkingLevel).toBe("medium");
   });
+
+  it("inherits the parent's effective thinking level when no option or config sets it", () => {
+    const result = assembleSessionConfig(
+      "Explore",
+      { ...ctx, parentThinkingLevel: "high" },
+      {},
+      mockEnv,
+      mockAgentLookup,
+      mockIO,
+    );
+
+    expect(result.thinkingLevel).toBe("high");
+  });
 });

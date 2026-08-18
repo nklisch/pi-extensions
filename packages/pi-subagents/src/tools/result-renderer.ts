@@ -7,7 +7,7 @@
  */
 
 import type { AgentDetails, Theme } from "#src/ui/display";
-import { formatMs, formatTurns, SPINNER } from "#src/ui/display";
+import { formatModelThinking, formatMs, formatTurns, SPINNER } from "#src/ui/display";
 
 // ---- Dispatcher ----
 
@@ -42,7 +42,10 @@ export function renderRunning(details: AgentDetails, theme: Theme): string {
 
 /** Render background launch status. */
 export function renderBackground(details: AgentDetails, theme: Theme): string {
-	const identity = [details.modelName, formatMs(details.durationMs)].filter(Boolean).join(" · ");
+	const identity = [
+		formatModelThinking(details.modelName ?? "unknown model", details.thinkingLevel),
+		formatMs(details.durationMs),
+	].join(" · ");
 	return theme.fg("dim", `  \u23BF  Running in background (ID: ${details.agentId}) · ${identity}`);
 }
 
@@ -113,8 +116,8 @@ export function renderFailed(details: AgentDetails, theme: Theme): string {
  */
 export function renderStats(details: AgentDetails, theme: Theme): string {
 	const parts: string[] = [];
-	if (details.modelName) parts.push(details.modelName);
-	if (details.tags) parts.push(...details.tags);
+	parts.push(formatModelThinking(details.modelName ?? "unknown model", details.thinkingLevel));
+	if (details.tags) parts.push(...details.tags.filter((tag) => !tag.startsWith("thinking: ")));
 	if (details.turnCount != null && details.turnCount > 0) {
 		parts.push(formatTurns(details.turnCount, details.maxTurns));
 	}

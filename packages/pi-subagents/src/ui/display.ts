@@ -7,7 +7,7 @@
 
 import type { AgentConfigLookup } from "#src/config/agent-types";
 import { GLYPHS } from "#src/ui/glyphs";
-import type { AgentInvocation, SubagentType } from "#src/types";
+import type { AgentInvocation, SubagentType, ThinkingLevel } from "#src/types";
 
 // ---- Types ----
 
@@ -31,6 +31,8 @@ export interface AgentDetails {
   spinnerFrame?: number;
   /** Exact effective model label in `provider/id` form. */
   modelName?: string;
+  /** Exact effective thinking level used by the child session. */
+  thinkingLevel: ThinkingLevel;
   /** Notable config tags (e.g. ["thinking: high", "inherit context"]). */
   tags?: string[];
   /** Current turn count. */
@@ -104,6 +106,11 @@ export function formatTurns(turnCount: number, maxTurns?: number | null): string
   return maxTurns != null
     ? `${GLYPHS.turns}${turnCount}≤${maxTurns}`
     : `${GLYPHS.turns}${turnCount}`;
+}
+
+/** Format an exact model identity and its effective thinking level together. */
+export function formatModelThinking(modelLabel: string, thinkingLevel: ThinkingLevel): string {
+  return `${modelLabel} · thinking: ${thinkingLevel}`;
 }
 
 /** Format milliseconds as human-readable duration. */

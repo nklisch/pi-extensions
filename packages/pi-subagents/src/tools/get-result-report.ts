@@ -8,12 +8,15 @@
  */
 
 import type { SubagentStatus } from "#src/lifecycle/subagent";
+import type { ThinkingLevel } from "#src/types";
+import { formatModelThinking } from "#src/ui/display";
 
 /** The data a get_subagent_result report renders from — only what the formatter reads. */
 export interface AgentReport {
 	id: string;
 	displayName: string;
 	modelLabel: string;
+	thinkingLevel: ThinkingLevel;
 	status: SubagentStatus;
 	toolUses: number;
 	/** Pre-formatted lifetime token total; "" when zero. */
@@ -63,7 +66,7 @@ export function renderReportBody(report: AgentReport): string {
 export function formatAgentReport(report: AgentReport): string {
 	let output =
 		`Agent: ${report.id}\n` +
-		`Type: ${report.displayName} | Model: ${report.modelLabel} | Status: ${report.status} | ${renderStatsParts(report).join(" | ")}\n` +
+		`Type: ${report.displayName} | Model: ${formatModelThinking(report.modelLabel, report.thinkingLevel)} | Status: ${report.status} | ${renderStatsParts(report).join(" | ")}\n` +
 		`Description: ${report.description}\n\n`;
 	output += renderReportBody(report);
 	if (report.conversation) {

@@ -1,6 +1,6 @@
 import { Text } from "@earendil-works/pi-tui";
 import type { NotificationDetails } from "#src/observation/notification";
-import { formatMs, formatTokens, formatTurns } from "#src/ui/display";
+import { formatModelThinking, formatMs, formatTokens, formatTurns } from "#src/ui/display";
 
 /** Narrow theme interface — only the methods the renderer actually calls. */
 interface RendererTheme {
@@ -39,7 +39,7 @@ export function createNotificationRenderer() {
     let line = `${icon} ${theme.bold(d.description)} ${theme.fg("dim", statusText)}`;
 
     // Line 2: stats
-    const parts: string[] = [d.modelLabel];
+    const parts: string[] = [formatModelThinking(d.modelLabel, d.thinkingLevel)];
     if (d.turnCount > 0) parts.push(formatTurns(d.turnCount, d.maxTurns));
     if (d.toolUses > 0) parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
     if (d.totalTokens > 0) parts.push(formatTokens(d.totalTokens));

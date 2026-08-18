@@ -7,6 +7,7 @@ export interface NotificationDetails {
   id: string;
   description: string;
   modelLabel: string;
+  thinkingLevel: Subagent["effectiveThinkingLevel"];
   status: string;
   toolUses: number;
   turnCount: number;
@@ -72,6 +73,7 @@ export function formatTaskNotification(record: Subagent, resultMaxLen: number): 
     outputFile ? `<output-file>${escapeXml(outputFile)}</output-file>` : null,
     `<status>${escapeXml(status)}</status>`,
     `<model>${escapeXml(record.modelLabel)}</model>`,
+    `<thinking_level>${escapeXml(record.effectiveThinkingLevel)}</thinking_level>`,
     `<summary>Subagent "${escapeXml(record.description)}" ${record.status}</summary>`,
     `<result>${escapeXml(resultPreview)}</result>`,
     `<usage><total_tokens>${totalTokens}</total_tokens><tool_uses>${record.toolUses}</tool_uses>${ctxXml}${compactXml}<duration_ms>${durationMs}</duration_ms></usage>`,
@@ -92,6 +94,7 @@ export function buildNotificationDetails(
     id: record.id,
     description: record.description,
     modelLabel: record.modelLabel,
+    thinkingLevel: record.effectiveThinkingLevel,
     status: record.status,
     toolUses: record.toolUses,
     turnCount: record.turnCount,

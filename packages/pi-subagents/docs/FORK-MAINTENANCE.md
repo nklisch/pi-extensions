@@ -36,7 +36,7 @@ only, not lifecycle semantics or consumer contracts.
 
 The published package keeps the narrow built-in background widget, session
 navigator, and settings command accepted by ADR 0004. These status surfaces
-show each subagent's exact effective model and elapsed or final runtime. The
+show each subagent's exact effective model, exact effective thinking level, and elapsed or final runtime. The
 package excludes the retired agent editors, wizards, and bespoke conversation
 viewer from the import branch. Reviving those surfaces is a new decision, not
 a restoration. Children inherit extension tools through a registration-open

@@ -39,7 +39,7 @@ import {
 } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "#src/config/agent-types";
 import type { SessionMessage } from "#src/types";
-import { describeActivity, formatDuration, type Theme } from "#src/ui/display";
+import { describeActivity, formatDuration, formatModelThinking, type Theme } from "#src/ui/display";
 import { fileSnapshotSource, listNavigableAgents, liveSource, type NavigableSubagent, type RunDisplayMetadata, type TranscriptSource } from "#src/ui/session-navigation";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -225,7 +225,7 @@ export class TranscriptOverlay implements Component {
 
     lines.push(hrTop);
     const runtime = formatDuration(this.run.startedAt, this.run.completedAt());
-    lines.push(row(th.bold(`Subagent session · ${this.run.modelLabel} · ${runtime}`)));
+    lines.push(row(th.bold(`Subagent session · ${formatModelThinking(this.run.modelLabel, this.run.thinkingLevel)} · ${runtime}`)));
     lines.push(hrMid);
 
     const contentLines = this.buildContentLines(innerW);

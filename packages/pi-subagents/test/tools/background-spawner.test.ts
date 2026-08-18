@@ -44,6 +44,8 @@ describe("spawnBackground", () => {
     );
     expect(result.content[0].text).toContain("agent-1");
     expect(result.content[0].text).toContain("my task");
+    expect(result.content[0].text).toContain("Model: unknown model · thinking: medium");
+    expect((result as { details: { thinkingLevel: string } }).details.thinkingLevel).toBe("medium");
   });
 
   it("tells the parent to rely on automatic completion wake-up instead of polling", () => {

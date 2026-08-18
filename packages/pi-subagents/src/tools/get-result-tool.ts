@@ -47,6 +47,7 @@ export class GetResultTool {
 			id: record.id,
 			displayName: getDisplayName(record.type, this.registry),
 			modelLabel: record.modelLabel,
+			thinkingLevel: record.effectiveThinkingLevel,
 			status: record.status,
 			toolUses: record.toolUses,
 			tokens: formatLifetimeTokens(record),

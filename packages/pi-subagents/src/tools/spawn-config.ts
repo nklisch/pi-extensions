@@ -14,6 +14,7 @@ import { normalizeMaxTurns } from "#src/lifecycle/turn-limits";
 import type { ModelRegistry } from "#src/session/model-resolver";
 import { formatModelLabel } from "#src/session/model-label";
 import { resolveInvocationModel } from "#src/session/model-resolver";
+import { resolveEffectiveThinkingLevel } from "#src/session/thinking-level";
 import type { AgentInvocation, SubagentType, ThinkingLevel } from "#src/types";
 import {
   type AgentDetails,
@@ -25,6 +26,8 @@ import {
 /** Model info extracted from the parent session context. */
 export interface ModelInfo {
   parentModel: Model<any> | undefined;
+  /** Parent's current level for children that inherit thinking settings. */
+  parentThinkingLevel?: ThinkingLevel;
   modelRegistry: ModelRegistry | undefined;
 }
 
@@ -42,7 +45,10 @@ export interface SpawnExecution {
   description: string;
   model: Model<any> | undefined;
   effectiveMaxTurns: number | undefined;
+  /** Requested/configured level before model-capability clamping. */
   thinking: ThinkingLevel | undefined;
+  /** Exact level passed to the child session after model-capability clamping. */
+  effectiveThinkingLevel: ThinkingLevel;
   inheritContext: boolean;
   runInBackground: boolean;
   agentInvocation: AgentInvocation;
@@ -50,9 +56,9 @@ export interface SpawnExecution {
 
 /** Presentation: display/UI values derived from identity and execution. */
 export interface SpawnPresentation {
-  modelName: string | undefined;
+  modelName: string;
   agentTags: string[];
-  detailBase: Pick<AgentDetails, "displayName" | "description" | "subagentType" | "modelName" | "tags">;
+  detailBase: Pick<AgentDetails, "displayName" | "description" | "subagentType" | "modelName" | "thinkingLevel" | "tags">;
 }
 
 /** Fully resolved config for spawning an agent — composed of domain-aligned sub-interfaces. */
@@ -110,6 +116,11 @@ export function resolveSpawnConfig(
   const model = resolution.model;
 
   const thinking = resolvedConfig.thinking;
+  const effectiveThinkingLevel = resolveEffectiveThinkingLevel(
+    model,
+    thinking,
+    modelInfo.parentThinkingLevel,
+  );
   const inheritContext = resolvedConfig.inheritContext;
   const runInBackground = resolvedConfig.runInBackground;
 
@@ -137,6 +148,7 @@ export function resolveSpawnConfig(
     description: params.description as string,
     subagentType,
     modelName,
+    thinkingLevel: effectiveThinkingLevel,
     tags: agentTags.length > 0 ? agentTags : undefined,
   };
 
@@ -148,6 +160,7 @@ export function resolveSpawnConfig(
       model,
       effectiveMaxTurns,
       thinking,
+      effectiveThinkingLevel,
       inheritContext,
       runInBackground,
       agentInvocation,

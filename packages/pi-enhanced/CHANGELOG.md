@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.9
+
+### Changed
+
+- Rebundle `@nklisch/pi-plugins` v0.3.7 and align the direct MCP adapter dependency with `@nklisch/pi-mcp-adapter` v2.20.1-nklisch.1. The bundle now carries exact subagent thinking-level status and bounded long-session widget updates.
+
 ## v0.1.8
 
 ### Changed

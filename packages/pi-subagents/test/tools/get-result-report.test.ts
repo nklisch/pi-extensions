@@ -11,6 +11,7 @@ function makeReport(overrides: Partial<AgentReport> = {}): AgentReport {
 		id: "agent-1",
 		displayName: "General",
 		modelLabel: "anthropic/claude-sonnet",
+		thinkingLevel: "high",
 		status: "completed",
 		toolUses: 3,
 		tokens: "",
@@ -105,7 +106,7 @@ describe("formatAgentReport", () => {
 		);
 		expect(text).toBe(
 			"Agent: agent-1\n" +
-				"Type: General | Model: anthropic/claude-sonnet | Status: completed | Tool uses: 3 | 33.8k token | Context: 43% | Compactions: 1 | Duration: 12.3s\n" +
+				"Type: General | Model: anthropic/claude-sonnet · thinking: high | Status: completed | Tool uses: 3 | 33.8k token | Context: 43% | Compactions: 1 | Duration: 12.3s\n" +
 				"Description: Investigate the bug\n\n" +
 				"All done.",
 		);

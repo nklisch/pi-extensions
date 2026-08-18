@@ -21,7 +21,7 @@ A subagent **is** a child `AgentSession`. pi-subagents already creates one via `
 Today that child session is an in-process object visible only through machinery pi-subagents had to invent because Pi has no session-sync client:
 
 - `record-observer` re-derives live activity from raw session events.
-- the 80 ms `SubagentManager.listAgents()` widget poll.
+- the lifecycle-fed widget read model and 500 ms refresh cadence.
 - the [#277] Law-of-Demeter accessors (`Subagent.getConversation()`, `.messages`, `.subscribeToUpdates()`, `.getContextPercent()`) that re-expose session internals.
 - the bespoke `ConversationViewer`, and [ADR-0004]'s replacement, native session navigation.
 - [ADR-0004]'s dual-source-by-liveness split (tracked agent → in-memory record; evicted → file snapshot).
@@ -40,9 +40,9 @@ What changes versus today:
    The snapshot carries in-flight state, so an operator attaching to an already-running subagent immediately sees its current streaming message and pending tools — not just future events.
    Today the conversation viewer only catches future deltas plus whatever happens to be in the in-memory record.
 2. **The widget and viewer become thin renderers** of synchronized session state.
-   The 80 ms poll, `record-observer`, and the [#277] accessors disappear — they were all substitutes for `subscribeSession`.
+   The lifecycle-fed widget read model, `record-observer`, and the [#277] accessors disappear — they were all substitutes for `subscribeSession`.
 3. **A unified, reconnect-safe live session list.**
-   The global event scope (`session_created`, `session_status_changed` idle/busy) means the operator sees every subagent the instant it spawns, with a live status badge per agent — replacing both `listAgents()` polling and the hand-rolled `subagents:*` broadcast tier.
+   The global event scope (`session_created`, `session_status_changed` idle/busy) means the operator sees every subagent the instant it spawns, with a live status badge per agent — replacing the widget's lifecycle-fed read model and the hand-rolled `subagents:*` broadcast tier.
 4. **Multi-session client state** lets one operator client hold synchronized caches for N subagents at once.
    This is the clean foundation for the parallel-agent navigation gesture that [ADR-0004]'s spike (entry-criterion #3) struggled to design — tabbed or split views of multiple live subagents fall out of the model with no redesign.
 
@@ -96,7 +96,7 @@ This validates and sharpens the direction the architecture doc is already headin
 | Today (pi-subagents reinvents it)                                        | Under the server architecture                              |
 | ------------------------------------------------------------------------ | ---------------------------------------------------------- |
 | `record-observer` re-deriving live activity                              | `subscribeSession` delta stream                            |
-| 80 ms `listAgents()` widget poll                                         | `session_created` / `session_status_changed` global events |
+| Lifecycle-fed widget read model + 500 ms refresh                         | `session_created` / `session_status_changed` global events |
 | [#277] accessors (`messages`, `subscribeToUpdates`, `getContextPercent`) | `SessionSnapshot` + deltas                                 |
 | `ConversationViewer` / native session navigation                         | client renders the snapshot through Pi's own components    |
 | dual-source-by-liveness split                                            | server rehydrates; client sees one session shape           |

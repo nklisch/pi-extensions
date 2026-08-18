@@ -2,7 +2,7 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { formatLifetimeTokens, textResult } from "#src/tools/helpers";
 import type { SteerOutcome, Subagent } from "#src/types";
-import { formatDuration } from "#src/ui/display";
+import { formatDuration, formatModelThinking } from "#src/ui/display";
 
 // ---- Deps interfaces ----
 
@@ -68,7 +68,7 @@ export class SteerTool {
 	private renderDelivered(record: Subagent) {
 		const tokens = formatLifetimeTokens(record);
 		const contextPercent = record.getContextPercent();
-		const stateParts: string[] = [record.modelLabel, formatDuration(record.startedAt, record.completedAt)];
+		const stateParts: string[] = [formatModelThinking(record.modelLabel, record.effectiveThinkingLevel), formatDuration(record.startedAt, record.completedAt)];
 		if (tokens) stateParts.push(tokens);
 		stateParts.push(`${record.toolUses} tool ${record.toolUses === 1 ? "use" : "uses"}`);
 		if (contextPercent !== null)
@@ -84,7 +84,7 @@ export class SteerTool {
 	}
 
 	private renderRunIdentity(record: Subagent): string {
-		return `Model: ${record.modelLabel}\nRuntime: ${formatDuration(record.startedAt, record.completedAt)}`;
+		return `Model: ${formatModelThinking(record.modelLabel, record.effectiveThinkingLevel)}\nRuntime: ${formatDuration(record.startedAt, record.completedAt)}`;
 	}
 
 	toToolDefinition() {

@@ -180,6 +180,34 @@ describe("resolveSpawnConfig — model resolution", () => {
     );
     expect("error" in result && result.error).toBeTruthy();
   });
+
+  it("clamps the effective level without changing the requested invocation value", () => {
+    const result = resolveSpawnConfig(
+      { subagent_type: "general-purpose", prompt: "test", description: "d", thinking: "high" },
+      testRegistry,
+      makeModelInfo(),
+      defaultSettings,
+    );
+    if ("error" in result) return;
+    expect(result.execution.thinking).toBe("high");
+    expect(result.execution.effectiveThinkingLevel).toBe("off");
+    expect(result.presentation.detailBase.thinkingLevel).toBe("off");
+  });
+
+  it("resolves an inherited parent level before launch status is rendered", () => {
+    const result = resolveSpawnConfig(
+      { subagent_type: "general-purpose", prompt: "test", description: "d" },
+      testRegistry,
+      makeModelInfo({
+        parentModel: makeModel({ reasoning: true }),
+        parentThinkingLevel: "low",
+      }),
+      defaultSettings,
+    );
+    if ("error" in result) return;
+    expect(result.execution.effectiveThinkingLevel).toBe("low");
+    expect(result.presentation.detailBase.thinkingLevel).toBe("low");
+  });
 });
 
 describe("resolveSpawnConfig — max turns normalization", () => {

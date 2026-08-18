@@ -16,6 +16,8 @@ export interface ParentSnapshot {
   systemPrompt: string;
   /** Parent's current model instance (fallback when agent config has no model). */
   model: unknown;
+  /** Parent's current effective thinking level, used when the child inherits it. */
+  thinkingLevel?: SessionContext["thinkingLevel"];
   /** Model registry compatibility facade used for synchronous model lookup. */
   modelRegistry: {
     find(provider: string, modelId: string): unknown;
@@ -48,6 +50,7 @@ export function buildParentSnapshot(
     cwd: ctx.cwd,
     systemPrompt: ctx.getSystemPrompt(),
     model: ctx.model,
+    thinkingLevel: ctx.thinkingLevel,
     modelRegistry,
     modelRuntime,
     // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- || intentional: converts empty string to undefined as well as null/undefined

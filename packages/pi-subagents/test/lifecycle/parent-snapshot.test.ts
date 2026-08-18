@@ -39,6 +39,11 @@ describe("buildParentSnapshot", () => {
     expect(snapshot.model).toBe(model);
   });
 
+  it("captures the parent's effective thinking level for inherited children", () => {
+    const snapshot = buildParentSnapshot(makeCtx({ thinkingLevel: "high" }));
+    expect(snapshot.thinkingLevel).toBe("high");
+  });
+
   it("captures modelRegistry from ctx", () => {
     const registry = { find: vi.fn(), getAvailable: vi.fn(() => []) };
     const snapshot = buildParentSnapshot(makeCtx({ modelRegistry: registry }));

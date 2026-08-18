@@ -6,6 +6,8 @@ import type { SubagentSession } from "#src/lifecycle/subagent-session";
 /** The core shape returned by `createMockSession`. */
 export interface MockSession {
 	messages: unknown[];
+	model?: unknown;
+	thinkingLevel?: unknown;
 	subscribe: Mock<(fn: (event: unknown) => void) => () => void>;
 	emit(event: unknown): void;
 	dispose: Mock<() => void>;
@@ -49,6 +51,8 @@ export function createSubagentSessionStub(
 ) {
 	return {
 		session,
+		get model(): unknown { return session.model; },
+		get thinkingLevel(): unknown { return session.thinkingLevel; },
 		outputFile,
 		runTurnLoop: vi.fn().mockResolvedValue({ responseText: "done", aborted: false, steered: false }),
 		resumeTurnLoop: vi.fn().mockResolvedValue("resumed"),
@@ -102,6 +106,8 @@ export function createMockSession(overrides: Record<string, unknown> = {}): Mock
 
 	const base: MockSession = {
 		messages: [],
+		model: undefined,
+		thinkingLevel: undefined,
 		subscribe,
 		emit(event: unknown) {
 			for (const fn of subscribers) fn(event);

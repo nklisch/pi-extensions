@@ -13,7 +13,7 @@ import { buildAgentGuidelines, buildDetails, buildTypeListText, textResult } fro
 import { renderAgentResult } from "#src/tools/result-renderer";
 import { type ModelInfo, resolveSpawnConfig } from "#src/tools/spawn-config";
 import type { ParentSessionInfo, Subagent } from "#src/types";
-import { type AgentDetails, formatDuration, getDisplayName } from "#src/ui/display";
+import { type AgentDetails, formatDuration, formatModelThinking, getDisplayName } from "#src/ui/display";
 
 // ---- Deps interfaces ----
 
@@ -113,9 +113,9 @@ export class AgentTool {
 					: `Error: ${record.error}`
 				: partial ?? "No output.";
 			return textResult(
-				`Model: ${record.modelLabel}\nRuntime: ${formatDuration(record.startedAt, record.completedAt)}\n\n${resultText}`,
+				`Model: ${formatModelThinking(record.modelLabel, record.effectiveThinkingLevel)}\nRuntime: ${formatDuration(record.startedAt, record.completedAt)}\n\n${resultText}`,
 				buildDetails(
-					{ ...config.presentation.detailBase, modelName: record.modelLabel },
+					{ ...config.presentation.detailBase, modelName: record.modelLabel, thinkingLevel: record.effectiveThinkingLevel },
 					record,
 				),
 			);

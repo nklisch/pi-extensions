@@ -686,7 +686,7 @@ tool-discovery, and launch failures remain redacted per-server health rather
 than activation identity.
 
 Production composition uses the exact sibling
-`@nklisch/pi-mcp-adapter@2.20.1-nklisch.0` package through its documented
+`@nklisch/pi-mcp-adapter@2.20.1-nklisch.1` package through its documented
 `@nklisch/pi-mcp-adapter/programmatic` export, with initial plugin sources
 registered before MCP tools and foreign file discovery disabled. Before package
 code executes, the wrapper verifies the package name and version, MIT license,
@@ -911,7 +911,7 @@ reload behavior, project trust, and non-interactive degradation.
 Final acceptance starts with an empty consumer `node_modules` tree, installs the
 packed `@nklisch/pi-plugins` candidate from the replayed lock/SRI registry
 snapshot, and verifies exact receipts for
-`@nklisch/pi-mcp-adapter@2.20.1-nklisch.0` and
+`@nklisch/pi-mcp-adapter@2.20.1-nklisch.1` and
 `@nklisch/pi-subagents@18.0.4-nklisch.1`. In a clean Pi environment with no
 Claude or Codex state, one revision-bound production fixture carries a skill,
 ordinary hooks, subagent interception, and canonical MCP through install,

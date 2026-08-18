@@ -56,9 +56,9 @@ export default function (pi: ExtensionAPI) {
   const runtime = createSubagentRuntime();
 
   // ---- Notification system ----
-  // Owns completion nudges and live-activity cleanup. The widget detects finished
-  // agents itself (AgentWidget.update self-seeds), so NotificationManager has no
-  // widget dependency — keeping the construction graph a cycle-free DAG.
+  // Owns completion nudges and live-activity cleanup. The widget owns its
+  // bounded lifecycle read model, so NotificationManager has no widget
+  // dependency — keeping the construction graph a cycle-free DAG.
   const notifications = new NotificationManager(
     (msg, opts) => pi.sendMessage(msg, opts),
   );
@@ -84,8 +84,7 @@ export default function (pi: ExtensionAPI) {
 
   // Fan-out observer: lets the widget subscribe as a second lifecycle consumer
   // while the manager keeps its single-observer contract. The widget is added
-  // after construction (it needs the manager); the manager consults the observer
-  // only at spawn time, so registering late is safe.
+  // before any spawn, so lifecycle callbacks populate its bounded read model.
   const observer = new CompositeSubagentObserver([eventsObserver]);
 
   const subagentSessionDeps: SubagentSessionDeps = {
@@ -134,10 +133,11 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_before_switch", () => lifecycle.handleSessionBeforeSwitch());
   pi.on("session_shutdown", () => lifecycle.handleSessionShutdown());
 
-  // Live widget: constructed after the manager (it polls listAgents()) and
-  // registered as a lifecycle observer so it self-drives its update timer.
-  const widget = new AgentWidget(manager, registry);
+  // Live widget: a lifecycle observer with a bounded reactive read model; it
+  // never rescans the manager's retained terminal-record history.
+  const widget = new AgentWidget(registry);
   observer.add(widget);
+  pi.on("session_shutdown", () => widget.dispose());
 
   // Grab UI context from first tool execution + clear lingering widget on new turn
   const toolStart = new ToolStartHandler(widget);

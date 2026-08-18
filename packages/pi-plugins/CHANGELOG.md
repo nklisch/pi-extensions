@@ -1,3 +1,10 @@
+## v0.3.7
+
+### Changed
+
+- Bump the bundled `@nklisch/pi-subagents` sibling to `18.1.0-nklisch.1`, adding exact thinking-level status and bounded 500 ms widget updates for long sessions.
+- Bump the synchronized `@nklisch/pi-mcp-adapter` sibling to `2.20.1-nklisch.1`; adapter runtime behavior is unchanged.
+
 ## v0.3.6
 
 ### Fixed

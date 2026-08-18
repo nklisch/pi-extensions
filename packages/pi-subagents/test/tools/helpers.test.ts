@@ -247,6 +247,7 @@ describe("buildDetails", () => {
     description: "does stuff",
     subagentType: "general-purpose",
     modelName: undefined,
+    thinkingLevel: "high" as const,
     tags: undefined,
   };
   const record = {

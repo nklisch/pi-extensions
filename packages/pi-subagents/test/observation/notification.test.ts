@@ -60,6 +60,7 @@ describe("formatTaskNotification", () => {
     expect(xml).toContain("<task-id>agent-1</task-id>");
     expect(xml).toContain("<status>Done</status>");
     expect(xml).toContain("<model>anthropic/test-model</model>");
+    expect(xml).toContain("<thinking_level>off</thinking_level>");
   });
 
   it("truncates long results", () => {

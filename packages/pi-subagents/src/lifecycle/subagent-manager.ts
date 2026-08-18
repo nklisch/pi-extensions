@@ -31,7 +31,11 @@ import type { AgentInvocation, CompactionInfo, ParentSessionInfo, SubagentType, 
 export interface SubagentManagerObserver {
   onSubagentStarted(record: Subagent): void;
   onSubagentCompleted(record: Subagent): void;
+  /** Fires when a retained session begins a resumed turn. */
+  onSubagentResumedStarted?(record: Subagent): void;
   onSubagentResumed?(record: Subagent): void;
+  /** Fires when clearCompleted removes a terminal record from the parent session. */
+  onSubagentCleared?(record: Subagent): void;
   onSubagentCompacted(record: Subagent, info: CompactionInfo): void;
   /** Fires synchronously after a background agent record is created (before run). */
   onSubagentCreated(record: Subagent): void;
@@ -240,7 +244,13 @@ export class SubagentManager {
   ): Promise<Subagent | undefined> {
     const agent = this.agents.get(id);
     if (!agent?.isSessionReady()) return undefined;
-    await agent.resume(prompt, signal);
+    const resumed = agent.resume(prompt, signal);
+    try {
+      this.observer?.onSubagentResumedStarted?.(agent);
+    } catch (err) {
+      debugLog("onSubagentResumedStarted observer", err);
+    }
+    await resumed;
     return agent;
   }
 
@@ -301,6 +311,11 @@ export class SubagentManager {
   clearCompleted(): void {
     for (const [id, record] of this.agents) {
       if (record.status === "running" || record.status === "queued") continue;
+      try {
+        this.observer?.onSubagentCleared?.(record);
+      } catch (err) {
+        debugLog("onSubagentCleared observer", err);
+      }
       this.removeRecord(id, record);
     }
 

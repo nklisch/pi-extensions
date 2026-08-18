@@ -22,7 +22,8 @@ order — capability the observational lifecycle events cannot provide.
 The root export is loaded by pi-plugins through a verified packaged loader;
 its shape is a hard compatibility surface. The published package includes a narrow built-in operator UI: the background
 status widget, session navigator, and settings command. Every subagent status
-surface identifies the exact effective model and elapsed or final runtime. The
+surface identifies the exact effective model, exact effective thinking level, and
+elapsed or final runtime. The
 package excludes the retired experimental editors, wizards, and bespoke
 conversation viewer from the import branch (see ADR 0004 for the UI direction
 history). Child sessions inherit parent extension tools through a denylist

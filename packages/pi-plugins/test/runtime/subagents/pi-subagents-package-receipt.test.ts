@@ -21,7 +21,7 @@ describe("published pi-subagents package receipt", () => {
 
     expect(manifest).toMatchObject({
       name: "@nklisch/pi-subagents",
-      version: "18.1.0-nklisch.0",
+      version: "18.1.0-nklisch.1",
       license: "MIT",
       engines: { node: ">=22" },
       peerDependencies: {
@@ -38,6 +38,6 @@ describe("published pi-subagents package receipt", () => {
       link: true,
       resolved: "packages/pi-subagents",
     });
-    expect(lock.packages?.["packages/pi-subagents"]?.version).toBe("18.1.0-nklisch.0");
+    expect(lock.packages?.["packages/pi-subagents"]?.version).toBe("18.1.0-nklisch.1");
   });
 });

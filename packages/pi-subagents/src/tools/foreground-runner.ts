@@ -12,6 +12,7 @@ import type { ParentSessionInfo, Subagent } from "#src/types";
 import {
   type AgentDetails,
   describeActivity,
+  formatModelThinking,
   formatMs,
   SPINNER,
 } from "#src/ui/display";
@@ -73,11 +74,12 @@ export async function runForeground(
     });
   };
 
-  // Animate spinner at ~80ms (smooth rotation through 10 braille frames)
+  // Each update traverses the parent TUI tree; avoid doing that at animation
+  // speed while the foreground tool already owns the progress surface.
   const spinnerInterval = setInterval(() => {
     spinnerFrame++;
     streamUpdate();
-  }, 80);
+  }, 500);
 
   streamUpdate();
 
@@ -92,7 +94,7 @@ export async function runForeground(
         model: execution.model,
         maxTurns: execution.effectiveMaxTurns,
         inheritContext: execution.inheritContext,
-        thinkingLevel: execution.thinking,
+        thinkingLevel: execution.effectiveThinkingLevel,
         origin: "tool",
         invocation: execution.agentInvocation,
         signal,
@@ -125,7 +127,7 @@ export async function runForeground(
   if (record.status === "error") {
     const partial = record.result?.trim();
     return textResult(
-      `${fallbackNote}Model: ${record.modelLabel}\nRuntime: ${formatMs(details.durationMs)}\nAgent failed: ${record.error}` +
+      `${fallbackNote}Model: ${formatModelThinking(record.modelLabel, record.effectiveThinkingLevel)}\nRuntime: ${formatMs(details.durationMs)}\nAgent failed: ${record.error}` +
         (partial ? `\n\nPartial output before the failure:\n${partial}` : ""),
       details,
     );
@@ -135,7 +137,7 @@ export async function runForeground(
   const statsParts = [`${record.toolUses} tool uses`];
   if (tokenText) statsParts.push(tokenText);
   return textResult(
-    `${fallbackNote}Model: ${record.modelLabel}\nRuntime: ${formatMs(durationMs)}\nAgent completed (${statsParts.join(", ")})${getStatusNote(record.status)}.\n\n` +
+    `${fallbackNote}Model: ${formatModelThinking(record.modelLabel, record.effectiveThinkingLevel)}\nRuntime: ${formatMs(durationMs)}\nAgent completed (${statsParts.join(", ")})${getStatusNote(record.status)}.\n\n` +
       (record.result?.trim() ?? "No output."),
     details,
   );

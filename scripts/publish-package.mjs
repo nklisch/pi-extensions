@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadPackages } from "./package-catalog.mjs";
+import { loadPackages, orderPackagesForPublish } from "./package-catalog.mjs";
 import {
   nativeArtifactDescriptors,
   requireNativeArtifacts,
@@ -27,7 +27,7 @@ if (selected.length === 0) {
   process.exit(2);
 }
 
-for (const pkg of selected) {
+for (const pkg of orderPackagesForPublish(selected)) {
   // CI stages every cross-built artifact into the existing package before this
   // point. Refuse partial releases even if the publisher host can load one.
   if (nativeArtifactDescriptors(pkg).length > 0) requireNativeArtifacts(pkg);

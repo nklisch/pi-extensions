@@ -16,10 +16,11 @@ describe("createResolvedSpawnConfig", () => {
         model: undefined,
         effectiveMaxTurns: undefined,
         thinking: undefined,
+        effectiveThinkingLevel: "off",
         inheritContext: false,
         runInBackground: false,
         agentInvocation: {
-          modelName: undefined,
+          modelName: "unknown model",
           thinking: undefined,
           maxTurns: undefined,
           inheritContext: false,
@@ -27,13 +28,14 @@ describe("createResolvedSpawnConfig", () => {
         },
       },
       presentation: {
-        modelName: undefined,
+        modelName: "unknown model",
         agentTags: [],
         detailBase: {
           displayName: "Agent",
           description: "task",
           subagentType: "general-purpose",
-          modelName: undefined,
+          modelName: "unknown model",
+          thinkingLevel: "off",
           tags: undefined,
         },
       },
@@ -78,6 +80,7 @@ describe("createResolvedSpawnConfig", () => {
       description: "scan repo",
       subagentType: "Explore",
       modelName: "haiku",
+      thinkingLevel: "off",
       tags: undefined,
     });
   });

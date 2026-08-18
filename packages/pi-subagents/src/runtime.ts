@@ -58,6 +58,7 @@ export class SubagentRuntime {
   getModelInfo(): ModelInfo {
     return {
       parentModel: this.currentCtx?.model as Model<any> | undefined,
+      parentThinkingLevel: this.currentCtx?.thinkingLevel,
       modelRegistry: this.currentCtx?.modelRegistry,
     };
   }
