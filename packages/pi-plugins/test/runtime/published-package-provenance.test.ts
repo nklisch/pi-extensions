@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PI_MCP_ADAPTER_RECEIPT } from "../../src/runtime/mcp/pi-mcp-adapter-package.js";
 import { probePublishedPackage } from "../../src/runtime/published-package-receipt.js";
-import { PI_SUBAGENTS_RECEIPT } from "../../src/runtime/subagents/pi-subagents-package.js";
+import {
+  loadVerifiedPiSubagentsExtension,
+  PI_SUBAGENTS_RECEIPT,
+} from "../../src/runtime/subagents/pi-subagents-package.js";
 
 const checkout = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const repoRoot = resolve(checkout, "../..");
@@ -47,5 +50,12 @@ describe("runtime sibling contract", () => {
       signal: new AbortController().signal,
     });
     expect(result.kind).toBe("verified");
+  });
+
+  it("loads the complete pi-subagents extension through the packaged peer-module bridge", async () => {
+    // This crosses the real Jiti boundary rather than stopping at manifest
+    // verification. A root-only virtual-module map can pass the receipt probe
+    // while silently dropping the extension when it imports a Pi peer subpath.
+    await expect(loadVerifiedPiSubagentsExtension()).resolves.toBeTypeOf("function");
   });
 });

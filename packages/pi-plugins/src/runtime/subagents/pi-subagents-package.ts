@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import * as piAi from "@earendil-works/pi-ai";
+import * as piAiCompat from "@earendil-works/pi-ai/compat";
 import * as piCodingAgent from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as piTui from "@earendil-works/pi-tui";
@@ -38,6 +39,11 @@ function loader(): Jiti {
   packageLoader ??= createJiti(import.meta.url, {
     virtualModules: {
       "@earendil-works/pi-ai": piAi,
+      // The nested package may use public peer-package subpaths. Jiti's
+      // virtual-module bridge is exact-keyed, so mapping only the package root
+      // works in a colocated test install but fails when Pi owns the peers in a
+      // separate global tree—the normal pi-enhanced deployment shape.
+      "@earendil-works/pi-ai/compat": piAiCompat,
       "@earendil-works/pi-coding-agent": piCodingAgent,
       "@earendil-works/pi-tui": piTui,
     },

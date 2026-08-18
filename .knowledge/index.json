@@ -835,6 +835,17 @@
       "relationships": []
     },
     {
+      "path": ".work/completed/fix-restarted-session-subagent-tools.md",
+      "namespace": "work",
+      "kind": "feature",
+      "id": "fix-restarted-session-subagent-tools",
+      "title": "fix-restarted-session-subagent-tools",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": "completed",
+      "relationships": []
+    },
+    {
       "path": ".work/releases/pi-enhanced-0.1.2.md",
       "namespace": "work",
       "kind": "release",

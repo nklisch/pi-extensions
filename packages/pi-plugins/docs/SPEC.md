@@ -29,11 +29,12 @@ Individual components are not independently managed.
 - Tests: Vitest with isolated filesystem, Git, process, and Pi-host adapters
 
 The package does not require Claude Code or OpenAI Codex to be installed. Its
-published MCP and subagent adapters are admitted only when the exact registry
-SRI receipt, canonical installed package-owned tree digest, manifest exports and
-Pi resources, license, Node/Pi ranges, documented API, and behavioral
-qualification remain exact. Drift leaves only the affected capability
-unavailable before dependent plugin activation.
+published MCP and subagent adapters are admitted only when the sibling manifest
+shape remains exact: identity and version, license, Node/Pi ranges, required
+exports, and declared Pi resources. npm installation integrity and the bundled
+delivery boundary own byte integrity; documented API and behavioral
+qualification remain separate conformance gates. Drift leaves only the affected
+capability unavailable before dependent plugin activation.
 
 ## Marketplace sources
 
@@ -719,7 +720,7 @@ The system is accepted when automated tests demonstrate:
 13. From an empty consumer dependency tree, the packed product installs from a
     replayed lock/SRI registry snapshot with exact receipts for
     `@nklisch/pi-mcp-adapter@2.20.1-nklisch.1` and
-    `@nklisch/pi-subagents@18.0.4-nklisch.1`.
+    `@nklisch/pi-subagents@18.1.0-nklisch.1`.
 14. One complete revision-bound production bundle proves skill discovery,
     ordinary hooks, subagent prompt injection and same-session continuation,
     canonical MCP list/call, and honest `RUNTIME_ALIAS_UNAVAILABLE` reporting

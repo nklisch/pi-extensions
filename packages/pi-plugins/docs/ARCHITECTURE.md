@@ -641,7 +641,7 @@ does not reinterpret raw manifest JSON.
 ### Subagent adapter
 
 The subagent adapter integrates with the pinned published
-`@nklisch/pi-subagents@18.0.4-nklisch.0` lifecycle contract; Plugin Host does
+`@nklisch/pi-subagents@18.1.0-nklisch.1` lifecycle contract; Plugin Host does
 not implement its own subagent runtime. Faithful `SubagentStart` and
 `SubagentStop` hooks run before the exact child prompt and before final
 completion, so hooks can inject context, deny a turn, replace a result, or
@@ -649,15 +649,19 @@ request bounded same-session continuation. Observational completion events
 alone are insufficient.
 
 The concrete wrapper is the only package boundary. Before evaluating package
-code, it verifies the exact registry provenance receipt and a canonical digest
-of the bundled package-owned tree, then resolves the documented root service
-export, validates every lifecycle handoff, and maps unexpected package failures
-to redacted boundary errors. Its receipt also pins the release tag and commit,
-upstream base, MIT license, manifest exports and Pi resource, Node/Pi ranges,
-and unchanged conformance vectors. A missing, malformed, drifted, or
-runtime-incompatible service leaves only `pi.subagents.lifecycle-interception`
-unavailable; a plugin declaring subagent hooks is then incompatible while
-ordinary plugins continue.
+code, it verifies the sibling manifest shape—exact identity and version,
+license, engine and peer ranges, required exports, and declared Pi resources—then
+resolves the documented root service export, validates every lifecycle handoff,
+and maps unexpected package failures to redacted boundary errors. npm's install
+integrity and the pi-plugins bundle own byte integrity rather than duplicating it
+in the load-time probe. The child loader bridges Pi's already-loaded peer module
+identities for both package roots and every public peer subpath the nested
+extension imports; this keeps a global Pi installation distinct from the package
+tree without making colocated dependencies an accidental requirement. Lifecycle
+qualification separately checks the documented interception contract and
+behavioral vectors. A missing, malformed, drifted, or runtime-incompatible
+service leaves only `pi.subagents.lifecycle-interception` unavailable; a plugin
+declaring subagent hooks is then incompatible while ordinary plugins continue.
 
 ### MCP adapter
 
@@ -912,7 +916,7 @@ Final acceptance starts with an empty consumer `node_modules` tree, installs the
 packed `@nklisch/pi-plugins` candidate from the replayed lock/SRI registry
 snapshot, and verifies exact receipts for
 `@nklisch/pi-mcp-adapter@2.20.1-nklisch.1` and
-`@nklisch/pi-subagents@18.0.4-nklisch.1`. In a clean Pi environment with no
+`@nklisch/pi-subagents@18.1.0-nklisch.1`. In a clean Pi environment with no
 Claude or Codex state, one revision-bound production fixture carries a skill,
 ordinary hooks, subagent interception, and canonical MCP through install,
 disable, enable, V1-to-V2 update, restart, and uninstall. Real Pi processes

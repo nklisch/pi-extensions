@@ -101,6 +101,6 @@
     "pi-web-access"
   ],
   "scripts": {
-    "test": "node test/verify-bundle.mjs"
+    "test": "node test/verify-bundle.mjs && node test/verify-subagent-restart.mjs"
   }
 }
