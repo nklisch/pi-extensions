@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.10
+
+### Fixed
+
+- Rebundle `@nklisch/pi-plugins` v0.3.8 so externally installed Pi hosts retain the complete subagent tool family after process restart instead of loading only the separate model-list helper.
+
 ## v0.1.9
 
 ### Changed

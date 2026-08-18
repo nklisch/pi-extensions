@@ -1,3 +1,9 @@
+## v0.3.8
+
+### Fixed
+
+- Load the bundled subagent extension when Pi owns peer modules outside the package tree. The verified Jiti bridge now includes the public `@earendil-works/pi-ai/compat` subpath, so `subagent`, `get_subagent_result`, and `steer_subagent` remain registered after process restart.
+
 ## v0.3.7
 
 ### Changed
