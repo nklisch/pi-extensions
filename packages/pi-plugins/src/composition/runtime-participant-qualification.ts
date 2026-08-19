@@ -11,7 +11,10 @@ import {
   type SubagentLifecyclePort,
 } from "../application/ports/subagent-lifecycle.js";
 
-export const PACKAGED_HOST_NODE_RANGE = ">=24";
+// Pi itself requires Node 22.19+, and every production primitive used here
+// (including node:sqlite) is available at that floor. Requiring Node 24 caused
+// compatible Node 22 hosts to lose hooks solely because of a version allowlist.
+export const PACKAGED_HOST_NODE_RANGE = ">=22.19.0";
 /**
  * Admission policy: any pre-1.0 Pi at or above the verified API floor. A
  * minor-version cap hard-broke every installed host on each Pi minor release

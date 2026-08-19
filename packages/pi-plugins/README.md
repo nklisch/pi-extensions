@@ -13,7 +13,7 @@ Native plugin management for [Pi](https://github.com/badlogic/pi-mono), with com
 
 ## Requirements
 
-- Node.js 24 or newer
+- Node.js 22.19 or newer
 - Pi 0.80.8-compatible public extension APIs
 
 ## Install

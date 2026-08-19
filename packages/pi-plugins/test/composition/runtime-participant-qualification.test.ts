@@ -34,10 +34,10 @@ function mcp(provider: unknown) {
   } as never;
 }
 
-async function decide(runtime: unknown, piVersion = "0.82.0") {
+async function decide(runtime: unknown, piVersion = "0.82.0", nodeVersion = "24.0.0") {
   return await qualifyRuntimeParticipants({
     pi: pi as never,
-    nodeVersion: "24.0.0",
+    nodeVersion,
     piVersion,
     mcp: runtime as never,
     signal: new AbortController().signal,
@@ -65,6 +65,12 @@ describe("runtime participant qualification", () => {
     expect((await decide(mcp({ ...provider, piPeerRange: ">=0.81.0" }))).mcp.status).toBe("available");
     expect((await decide(mcp({ ...provider, piPeerRange: ">=0.83.0" }))).mcp.status).toBe("unavailable");
     expect((await decide(mcp({ ...provider, nodeEngine: ">=25" }))).mcp.status).toBe("unavailable");
+  });
+
+  it("admits Pi's Node runtime floor and rejects older runtimes", async () => {
+    expect((await decide(mcp(publishedProvider), "0.82.0", "22.18.0")).hostApi.status).toBe("unavailable");
+    expect((await decide(mcp(publishedProvider), "0.82.0", "22.19.0")).hostApi.status).toBe("available");
+    expect((await decide(mcp(publishedProvider), "0.82.0", "23.0.0")).hostApi.status).toBe("available");
   });
 
   it("admits any pre-1.0 Pi at or above the API floor and rejects outside it", async () => {

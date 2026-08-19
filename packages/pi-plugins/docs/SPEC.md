@@ -19,12 +19,12 @@ Individual components are not independently managed.
 
 - Language: TypeScript 7.0
 - Module system: ESM
-- Runtime: Node.js 24 or newer
+- Runtime: Node.js 22.19 or newer, matching Pi's supported runtime floor
 - Host: Pi coding agent
-- Distribution: private `@nklisch/pi-plugins` Pi package (candidate version
-  `0.0.0`) containing the plugin-host extension and its runtime dependencies;
-  one top-level Pi installation loads the receipt-gated bundled subagent
-  extension before the host extension
+- Distribution: published `@nklisch/pi-plugins` Pi package containing the
+  plugin-host extension and its runtime dependencies; one top-level Pi
+  installation loads the receipt-gated bundled subagent extension before the
+  host extension
 - Validation: runtime schemas at every external configuration boundary
 - Tests: Vitest with isolated filesystem, Git, process, and Pi-host adapters
 

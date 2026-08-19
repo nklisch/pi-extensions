@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-enhanced",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Pi, enhanced — one install for nklisch's full harness: policy-gated command review, plugin marketplace, subagents, background tasks, research tools, search, model modes, and a curated UX set.",
   "author": {
     "name": "nklisch"
@@ -54,6 +54,9 @@
     ]
   },
   "private": false,
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "dependencies": {
     "@ff-labs/fff-bun": "*",
     "@ff-labs/fff-node": "*",

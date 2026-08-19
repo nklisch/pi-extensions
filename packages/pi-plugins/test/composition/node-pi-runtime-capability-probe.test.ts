@@ -14,7 +14,7 @@ const pi = { on() {}, sendMessage() {}, setSessionName() {} };
 async function qualification(runtime: { mcp?: never } = {}) {
   return await qualifyRuntimeParticipants({
     pi: pi as never,
-    nodeVersion: "24.0.0",
+    nodeVersion: "22.19.0",
     piVersion: "0.80.8",
     ...runtime,
     signal: new AbortController().signal,

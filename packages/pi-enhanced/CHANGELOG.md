@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.11
+
+### Fixed
+
+- Declare the bundle's Node 22.19+ runtime floor and rebundle `@nklisch/pi-plugins` v0.3.9 so Pi installations running Node 22 retain command-hook compatibility.
+
 ## v0.1.10
 
 ### Fixed

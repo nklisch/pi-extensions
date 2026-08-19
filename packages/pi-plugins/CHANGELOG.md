@@ -1,3 +1,9 @@
+## v0.3.9
+
+### Fixed
+
+- Keep the command-hook adapter available on Node 22.19+ hosts, matching Pi's own supported runtime floor instead of unnecessarily requiring Node 24.
+
 ## v0.3.8
 
 ### Fixed

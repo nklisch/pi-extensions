@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-plugins",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "private": false,
   "description": "Native marketplace and plugin lifecycle management for Pi, with Claude Code and Codex compatibility.",
   "license": "MIT",
@@ -34,7 +34,7 @@
     ]
   },
   "engines": {
-    "node": ">=24"
+    "node": ">=22.19.0"
   },
   "exports": {
     ".": {
