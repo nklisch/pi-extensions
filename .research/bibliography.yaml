@@ -10,6 +10,10 @@ sources:
   - source_handle: agy-local-oauth-probe
     title: "Direct probes of locally installed Antigravity CLI 1.1.13 auth state and Cloud Code endpoints"
     fetched: "2026-08-16"
+  - source_handle: antigravity-2-computer-use
+    title: "Google Antigravity 2.0 feature and Artifact documentation"
+    source_url: "https://www.antigravity.google/docs/features/"
+    fetched: "2026-08-18"
   - source_handle: antigravity-cli-official-plugins
     title: "Plugins & Skills — Google Antigravity CLI"
     source_url: "https://antigravity.google/docs/cli/plugins"
@@ -18,6 +22,42 @@ sources:
     title: "Google Antigravity Additional Terms of Service"
     source_url: "https://antigravity.google/terms"
     fetched: "2026-08-16"
+  - source_handle: claude-code-desktop-computer-use
+    title: "Anthropic Claude Code Desktop and scheduled-task documentation"
+    source_url: "https://code.claude.com/docs/en/desktop"
+    fetched: "2026-08-18"
+  - source_handle: codex-desktop-computer-use
+    title: "OpenAI ChatGPT desktop app, Codex, Browser, Computer Use, worktree, review, automation, and skills documentation"
+    source_url: "https://developers.openai.com/codex/app"
+    fetched: "2026-08-18"
+  - source_handle: computer-use-scout-agent-s
+    title: "simular-ai/Agent-S (gui-agents) repository at commit bffdb59"
+    source_url: "https://github.com/simular-ai/Agent-S/tree/bffdb59c60cbbb38c3a190b2e91da12039e4063c"
+    fetched: "2026-08-18"
+  - source_handle: computer-use-scout-browser-use
+    title: "browser-use/browser-use repository at commit 898f23f"
+    source_url: "https://github.com/browser-use/browser-use/tree/898f23f0b672ef44b4a01835ff4b3368e91812fd"
+    fetched: "2026-08-18"
+  - source_handle: computer-use-scout-cua-driver
+    title: "trycua/cua repository (cua-driver, Cua sandboxes, Lume) at commit 9045b0c"
+    source_url: "https://github.com/trycua/cua/tree/9045b0c74f7c7de72fde3d9dc622f2cacf1cf848"
+    fetched: "2026-08-18"
+  - source_handle: computer-use-scout-playwright-mcp
+    title: "microsoft/playwright-mcp repository at commit 7e0457a"
+    source_url: "https://github.com/microsoft/playwright-mcp/tree/7e0457a7cbf88823bf0146d12c46ae12c6818247"
+    fetched: "2026-08-18"
+  - source_handle: computer-use-scout-self-operating-computer
+    title: "OthersideAI/self-operating-computer repository at commit fac568e"
+    source_url: "https://github.com/OthersideAI/self-operating-computer/tree/fac568eea7da5e24f8bc91bfc1211b65679177eb"
+    fetched: "2026-08-18"
+  - source_handle: computer-use-scout-skyvern
+    title: "Skyvern-AI/skyvern README and Skyvern MCP Server documentation"
+    source_url: "https://github.com/Skyvern-AI/skyvern/blob/main/README.md"
+    fetched: "2026-08-18"
+  - source_handle: edward40-pi-computer-use
+    title: "SASUKE40/@edward40 pi-computer-use source and npm metadata at commit 1c56ea3"
+    source_url: "https://github.com/SASUKE40/pi-computer-use/tree/1c56ea3f8fa7a274ad847bb3816e4f6d5454ae50"
+    fetched: "2026-08-18"
   - source_handle: gemini-cli-discussion-20632
     title: "Addressing Antigravity Bans & Reinstating Access — google-gemini/gemini-cli Discussion #20632"
     source_url: "https://github.com/google-gemini/gemini-cli/discussions/20632"
@@ -26,6 +66,14 @@ sources:
     title: "Google APIs Terms of Service"
     source_url: "https://developers.google.com/terms"
     fetched: "2026-08-16"
+  - source_handle: injaneity-pi-computer-use
+    title: "injaneity/pi-computer-use source and npm metadata at commit de72583"
+    source_url: "https://github.com/injaneity/pi-computer-use/tree/de725835d3b0e3bd13aa8885d6c3f3a9dc23bcdc"
+    fetched: "2026-08-18"
+  - source_handle: krometrail-current-capabilities
+    title: "nklisch/krometrail source and foundation at commit eb5b465"
+    source_url: "https://github.com/nklisch/krometrail/tree/eb5b465618fcaeb232c2038d8c6cf960ff499b99"
+    fetched: "2026-08-18"
   - source_handle: pi-antigravity-package-page
     title: "pi-antigravity package page on pi.dev"
     source_url: "https://pi.dev/packages/pi-antigravity"
@@ -34,6 +82,22 @@ sources:
     title: "Rahularya01/pi-antigravity source at commit f7802251"
     source_url: "https://github.com/Rahularya01/pi-antigravity/tree/f7802251e91416a3cf016e64bde94043a8a389d4"
     fetched: "2026-08-16"
+  - source_handle: pi-browser-playwright-extension
+    title: "larsderidder/pi-browser source repository"
+    source_url: "https://github.com/larsderidder/pi-browser"
+    fetched: "2026-08-18"
+  - source_handle: pi-chrome-operator
+    title: "patriceckhart/pi-chrome-operator source repository"
+    source_url: "https://github.com/patriceckhart/pi-chrome-operator"
+    fetched: "2026-08-18"
+  - source_handle: pi-chrome-use-extension
+    title: "citrolabs/pi-chrome-use source repository"
+    source_url: "https://github.com/citrolabs/pi-chrome-use"
+    fetched: "2026-08-18"
+  - source_handle: pi-core-computer-use-capabilities
+    title: "Pi coding agent README, extension, SDK, and TUI documentation"
+    source_url: "https://github.com/earendil-works/pi-mono/tree/main/packages/coding-agent"
+    fetched: "2026-08-18"
   - source_handle: pi-custom-provider-docs
     title: "Pi custom provider documentation (installed @earendil-works/pi-coding-agent docs/custom-provider.md)"
     source_url: "https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/custom-provider.md"
@@ -46,3 +110,11 @@ sources:
     title: "nicobailon/pi-mcp-adapter fixes after v2.20.1 through 08fe82b"
     source_url: "https://github.com/nicobailon/pi-mcp-adapter/compare/v2.20.1...08fe82be1d55036d3960c4bb3fa77ed8707f2bca"
     fetched: "2026-08-06"
+  - source_handle: pi-playwright-skill
+    title: "guwidoe/pi-playwright source repository"
+    source_url: "https://github.com/guwidoe/pi-playwright"
+    fetched: "2026-08-18"
+  - source_handle: pi-screenshots-picker
+    title: "Graffioh/pi-screenshots-picker source at commit 254aee1"
+    source_url: "https://github.com/Graffioh/pi-screenshots-picker/tree/254aee1ce011a683ba5a5b33dfac591e43bbd5b1"
+    fetched: "2026-08-18"

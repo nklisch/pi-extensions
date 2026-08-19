@@ -596,6 +596,17 @@
       "relationships": []
     },
     {
+      "path": ".research/attestations/antigravity-2-computer-use.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "antigravity-2-computer-use",
+      "title": "antigravity-2-computer-use",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
       "path": ".research/attestations/antigravity-cli-official-plugins.md",
       "namespace": "research",
       "kind": "attestation",
@@ -614,6 +625,105 @@
       "title": "antigravity-tos",
       "summary": null,
       "updated": "2026-08-16",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/claude-code-desktop-computer-use.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "claude-code-desktop-computer-use",
+      "title": "claude-code-desktop-computer-use",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/codex-desktop-computer-use.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "codex-desktop-computer-use",
+      "title": "codex-desktop-computer-use",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/computer-use-scout-agent-s.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "computer-use-scout-agent-s",
+      "title": "computer-use-scout-agent-s",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/computer-use-scout-browser-use.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "computer-use-scout-browser-use",
+      "title": "computer-use-scout-browser-use",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/computer-use-scout-cua-driver.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "computer-use-scout-cua-driver",
+      "title": "computer-use-scout-cua-driver",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/computer-use-scout-playwright-mcp.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "computer-use-scout-playwright-mcp",
+      "title": "computer-use-scout-playwright-mcp",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/computer-use-scout-self-operating-computer.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "computer-use-scout-self-operating-computer",
+      "title": "computer-use-scout-self-operating-computer",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/computer-use-scout-skyvern.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "computer-use-scout-skyvern",
+      "title": "computer-use-scout-skyvern",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/edward40-pi-computer-use.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "edward40-pi-computer-use",
+      "title": "edward40-pi-computer-use",
+      "summary": null,
+      "updated": "2026-08-18",
       "status": null,
       "relationships": []
     },
@@ -640,6 +750,28 @@
       "relationships": []
     },
     {
+      "path": ".research/attestations/injaneity-pi-computer-use.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "injaneity-pi-computer-use",
+      "title": "injaneity-pi-computer-use",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/krometrail-current-capabilities.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "krometrail-current-capabilities",
+      "title": "krometrail-current-capabilities",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
       "path": ".research/attestations/pi-antigravity-package-page.md",
       "namespace": "research",
       "kind": "attestation",
@@ -658,6 +790,50 @@
       "title": "pi-antigravity-repo",
       "summary": null,
       "updated": "2026-08-16",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/pi-browser-playwright-extension.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "pi-browser-playwright-extension",
+      "title": "pi-browser-playwright-extension",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/pi-chrome-operator.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "pi-chrome-operator",
+      "title": "pi-chrome-operator",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/pi-chrome-use-extension.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "pi-chrome-use-extension",
+      "title": "pi-chrome-use-extension",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/pi-core-computer-use-capabilities.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "pi-core-computer-use-capabilities",
+      "title": "pi-core-computer-use-capabilities",
+      "summary": null,
+      "updated": "2026-08-18",
       "status": null,
       "relationships": []
     },
@@ -691,6 +867,28 @@
       "title": "pi-mcp-adapter-post-2-20-1",
       "summary": null,
       "updated": "2026-08-06",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/pi-playwright-skill.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "pi-playwright-skill",
+      "title": "pi-playwright-skill",
+      "summary": null,
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".research/attestations/pi-screenshots-picker.md",
+      "namespace": "research",
+      "kind": "attestation",
+      "id": "pi-screenshots-picker",
+      "title": "pi-screenshots-picker",
+      "summary": null,
+      "updated": "2026-08-18",
       "status": null,
       "relationships": []
     },
@@ -756,6 +954,17 @@
           "target": "packages/pi-mcp-adapter/docs/VISION.md"
         }
       ]
+    },
+    {
+      "path": ".research/briefs/pi-computer-use-systems.md",
+      "namespace": "research",
+      "kind": "research-brief",
+      "id": "pi-computer-use-systems",
+      "title": "Pi computer-use systems",
+      "summary": "Krometrail already covers browser screenshots; for native desktop screenshots, existing Pi extensions include a minimal ~40–50 MB Cua-backed one-tool wrapper and a richer semantic multi-app extension, so a new browser or capture package is unnecessary.",
+      "updated": "2026-08-18",
+      "status": null,
+      "relationships": []
     },
     {
       "path": ".work/backlog/test-typecheck-brand-cleanup.md",
@@ -939,6 +1148,17 @@
       "kind": "release",
       "id": "releases/pi-plugins-0.2.5",
       "title": "pi-plugins 0.2.5",
+      "summary": null,
+      "updated": null,
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".work/releases/pi-plugins-0.3.9-pi-enhanced-0.1.11.md",
+      "namespace": "work",
+      "kind": "release",
+      "id": "releases/pi-plugins-0.3.9-pi-enhanced-0.1.11",
+      "title": "Node runtime compatibility release",
       "summary": null,
       "updated": null,
       "status": null,
