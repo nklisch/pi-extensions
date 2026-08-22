@@ -40,6 +40,15 @@ doctor/host-status signal.
 Repo tests pass because pi-ai resolves from workspace node_modules there;
 only the production install hits this.
 
+## Status (2026-08-22)
+
+FIXED in `pi-mcp-adapter` (commit 1669e1f, lazy dynamic import of pi-ai/compat
+inside `handleSamplingRequest` + host-peer-cleanliness contract test; reviewed
+glm-5.3, pass). Sessions need the fixed adapter published and installed.
+Remaining: pi-plugins should surface candidate-attach failure as degraded host
+status instead of silent `undefined` (option 3) — folded into
+`epic-plugin-lifecycle-simplification` U4.
+
 ## Candidate fixes (choose at design time)
 
 1. Make the programmatic entry host-peer-clean: defer `sampling-handler`
