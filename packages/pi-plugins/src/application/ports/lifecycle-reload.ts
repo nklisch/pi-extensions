@@ -5,10 +5,6 @@ import {
 } from "../../domain/content-manifest.js";
 import { ComponentIdSchema } from "../../domain/components.js";
 import {
-  PendingTransitionRefSchema,
-  type PendingTransitionRef,
-} from "../../domain/state/references.js";
-import {
   PluginKeySchema,
   type PluginKey,
 } from "../../domain/identity.js";
@@ -164,7 +160,6 @@ export type LifecycleReloadResult = z.infer<typeof LifecycleReloadResultSchema>;
 
 export const LifecycleReloadRequestSchema = z.object({
   scope: ScopeReferenceSchema,
-  transition: PendingTransitionRefSchema,
 }).strict().readonly();
 export type LifecycleReloadRequest = z.infer<typeof LifecycleReloadRequestSchema>;
 
@@ -261,14 +256,6 @@ export function composeActivationObservation(input: Readonly<{
 /** Runtime reload remains an adapter seam; accepted is never activation proof. */
 export interface LifecycleReloadPort {
   reload(request: LifecycleReloadRequest, signal: AbortSignal): Promise<LifecycleReloadResult>;
-  observe(request: LifecycleObservationRequest, signal: AbortSignal): Promise<ActivationObservation>;
-  /** Startup-only local participant reconciliation; it never invokes Pi reload. */
-  reconcileLocal?(request: Readonly<{
-    scope: ScopeContext;
-    plugin: PluginKey;
-    target: InstalledPluginRecord | null;
-    expectation: ProjectionExpectation;
-  }>, signal: AbortSignal): Promise<ActivationObservation>;
 }
 
 export function verifyActivationObservation(input: unknown): ActivationObservation {
@@ -278,7 +265,6 @@ export function verifyActivationObservation(input: unknown): ActivationObservati
 export type {
   ContentDigest,
   CurrentProjectRuntimeContext,
-  PendingTransitionRef,
   PluginKey,
   ScopeReference,
 };

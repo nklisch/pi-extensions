@@ -11,12 +11,6 @@ import {
 } from "../domain/state/installed-state.js";
 export { LifecycleTargetExpectationSchema } from "./native-lifecycle-operation-contract.js";
 export type { LifecycleTargetExpectation } from "./native-lifecycle-operation-contract.js";
-import {
-  PendingTransitionRefSchema,
-  derivePendingTransitionRef,
-  type PendingTransitionRef,
-} from "../domain/state/references.js";
-
 /** The lifecycle operation registry is the source for operation variants. */
 export const LifecycleOperationRegistry = {
   install: { changesActivation: true },
@@ -63,7 +57,6 @@ export const LifecycleRejectionCodeRegistry = {
   notInstalled: { tag: "NOT_INSTALLED" },
   alreadyInstalled: { tag: "ALREADY_INSTALLED" },
   wrongActivation: { tag: "WRONG_ACTIVATION" },
-  pendingTransition: { tag: "PENDING_TRANSITION" },
   incompatible: { tag: "INCOMPATIBLE" },
   untrusted: { tag: "UNTRUSTED" },
   unconfigured: { tag: "UNCONFIGURED" },
@@ -82,12 +75,11 @@ const lifecycleRejectionCodes = Object.values(LifecycleRejectionCodeRegistry).ma
 export const LifecycleRejectionCodeSchema = z.enum(lifecycleRejectionCodes);
 
 export const LifecycleOutcomeRegistry = {
-  changed: { tag: "changed" },
-  unchanged: { tag: "unchanged" },
   rejected: { tag: "rejected" },
-  stale: { tag: "stale" },
-  rolledBack: { tag: "rolled-back" },
-  recoveryRequired: { tag: "recovery-required" },
+  applied: { tag: "applied" },
+  liveNextStart: { tag: "live-next-start" },
+  degraded: { tag: "degraded" },
+  current: { tag: "current" },
 } as const;
 export type LifecycleOutcome = (typeof LifecycleOutcomeRegistry)[keyof typeof LifecycleOutcomeRegistry]["tag"];
 const lifecycleOutcomeValues = Object.values(LifecycleOutcomeRegistry).map((entry) => entry.tag) as [
@@ -96,10 +88,8 @@ const lifecycleOutcomeValues = Object.values(LifecycleOutcomeRegistry).map((entr
 ];
 export const LifecycleOutcomeSchema = z.enum(lifecycleOutcomeValues);
 
-/** Installed state with the opaque in-flight marker removed. */
-export const LifecyclePluginStateSchema = InstalledPluginRecordSchema.unwrap().omit({
-  pendingTransition: true,
-}).readonly();
+/** Installed state is the complete lifecycle authority; no in-flight marker exists. */
+export const LifecyclePluginStateSchema = InstalledPluginRecordSchema.readonly();
 export type LifecyclePluginState = z.infer<typeof LifecyclePluginStateSchema>;
 
 export const LifecyclePluginReferenceSchema = z.object({
@@ -107,27 +97,6 @@ export const LifecyclePluginReferenceSchema = z.object({
   plugin: PluginKeySchema,
 }).strict().readonly();
 export type LifecyclePluginReference = z.infer<typeof LifecyclePluginReferenceSchema>;
-
-export const PendingTransitionIdentitySchema = z.object({
-  operationId: z.string().uuid(),
-  scope: ScopeReferenceSchema,
-  plugin: PluginKeySchema,
-  startingGeneration: GenerationSchema,
-}).strict().readonly();
-export type PendingTransitionIdentity = z.infer<typeof PendingTransitionIdentitySchema>;
-
-/**
- * Derive the opaque marker from evidence that exists before the transition
- * record is written. Keeping this identity separate avoids a self-referential
- * transition-record hash.
- */
-export function deriveLifecyclePendingTransitionRef(
-  input: PendingTransitionIdentity,
-  sha256: (bytes: Uint8Array) => Uint8Array,
-): PendingTransitionRef {
-  const value = PendingTransitionIdentitySchema.parse(input);
-  return derivePendingTransitionRef(value, sha256);
-}
 
 /** A request shared by the facade's operation-specific request schemas. */
 export const LifecyclePluginRequestSchema = z.object({
@@ -137,18 +106,9 @@ export const LifecyclePluginRequestSchema = z.object({
 }).strict().readonly();
 export type LifecyclePluginRequest = z.infer<typeof LifecyclePluginRequestSchema>;
 
-/** Safe evidence used by callers that need to report an unresolved transition. */
-export const LifecycleRecoveryEvidenceSchema = z.object({
-  operation: LifecycleOperationSchema,
-  transition: PendingTransitionRefSchema,
-  committed: GenerationSchema.optional(),
-}).strict().readonly();
-export type LifecycleRecoveryEvidence = z.infer<typeof LifecycleRecoveryEvidenceSchema>;
-
 export type {
   Generation,
   InstalledPluginRecord,
-  PendingTransitionRef,
   PluginKey,
   ScopeReference,
 };

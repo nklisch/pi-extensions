@@ -11,8 +11,7 @@ import type {
 export type TrustedInstallLifecycleResult =
   | Readonly<{ kind: "lifecycle"; result: PluginLifecycleResult; enabledExisting: boolean }>
   | Readonly<{ kind: "current-state"; activation: "enabled"; revision: TrustedInstallCandidate["revision"]["revision"] }>
-  | Readonly<{ kind: "conflict"; reason: "already-installed-different-revision" | "pending-transition" }>
-  | Readonly<{ kind: "recovery-required" }>
+  | Readonly<{ kind: "conflict"; reason: "already-installed-different-revision" }>
   | Readonly<{
       kind: "boundary-failure";
       boundary: "before-transaction";
@@ -72,14 +71,10 @@ export async function executeTrustedInstallLifecycle(
   }
   if (!loaded.ok) {
     const cleanup = await releaseBeforeTransaction(candidate);
-    return cleanup ?? { kind: "recovery-required" };
+    return cleanup ?? { kind: "boundary-failure", boundary: "before-transaction", reason: "adapter-failed" };
   }
   const records = "installed" in loaded.snapshot ? loaded.snapshot.installed.plugins : loaded.snapshot.project.plugins;
   const current = records.find((record) => record.plugin === candidate.binding.plugin);
-  if (current?.pendingTransition !== undefined) {
-    const cleanup = await releaseBeforeTransaction(candidate);
-    return cleanup ?? { kind: "conflict", reason: "pending-transition" };
-  }
   if (current !== undefined && current.selectedRevision !== candidate.binding.immutableRevision) {
     const cleanup = await releaseBeforeTransaction(candidate);
     return cleanup ?? { kind: "conflict", reason: "already-installed-different-revision" };

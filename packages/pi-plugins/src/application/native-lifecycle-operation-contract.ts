@@ -3,7 +3,6 @@ import { ContentDigestSchema } from "../domain/content-manifest.js";
 import { ConfigurationKeySchema } from "../domain/configuration.js";
 import { PluginKeySchema } from "../domain/identity.js";
 import { GenerationSchema } from "../domain/state/config-state.js";
-import { PendingTransitionRefSchema } from "../domain/state/references.js";
 import { ProjectKeySchema, ScopeReferenceSchema } from "../domain/state/scope.js";
 import { EpochMillisecondsSchema } from "./ports/lifecycle-clock.js";
 import { SensitiveValue } from "./sensitive-value.js";
@@ -56,7 +55,6 @@ export const NativeLifecycleProgressPhaseRegistry = Object.freeze({
   trustDecision: { tag: "trust-decision", order: 4 },
   projectFileWrite: { tag: "project-file-write", order: 5 },
   lifecycleTransaction: { tag: "lifecycle-transaction", order: 6 },
-  runtimeObservation: { tag: "runtime-observation", order: 7 },
   projectReconciliation: { tag: "project-reconciliation", order: 8 },
   uninstallCleanup: { tag: "uninstall-cleanup", order: 9 },
   finalization: { tag: "finalization", order: 10 },
@@ -65,7 +63,7 @@ export const NativeLifecycleProgressPhaseRegistry = Object.freeze({
 export const NativeLifecycleProgressPhaseSchema = z.enum(
   Object.values(NativeLifecycleProgressPhaseRegistry).map((entry) => entry.tag) as [
     "preflight", "authority-revalidation", "candidate-preparation", "configuration-custody",
-    "trust-decision", "project-file-write", "lifecycle-transaction", "runtime-observation",
+    "trust-decision", "project-file-write", "lifecycle-transaction",
     "project-reconciliation", "uninstall-cleanup", "finalization", "completed",
   ],
 );
@@ -74,7 +72,6 @@ export const NativeLifecycleStableCodeRegistry = Object.freeze({
   invalidRequest: { tag: "INVALID_REQUEST" },
   notInstalled: { tag: "NOT_INSTALLED" },
   wrongActivation: { tag: "WRONG_ACTIVATION" },
-  pendingTransition: { tag: "PENDING_TRANSITION" },
   incompatible: { tag: "INCOMPATIBLE" },
   untrusted: { tag: "UNTRUSTED" },
   unconfigured: { tag: "UNCONFIGURED" },
@@ -135,7 +132,6 @@ export const LifecycleTargetExpectationSchema = z.object({
   selectedRevision: ContentDigestSchema,
   activation: z.enum(["enabled", "disabled"]),
   targetDigest: ContentDigestSchema,
-  pendingTransition: z.literal("none"),
 }).strict().readonly();
 
 export const NativeLifecycleTargetBindingSchema = z.object({
@@ -148,7 +144,6 @@ export const NativeLifecycleTargetBindingSchema = z.object({
   inspectionSnapshotId: InspectionSnapshotIdSchema,
   detailId: InspectionDetailIdSchema,
   projectEpoch: ContentDigestSchema.optional(),
-  transition: z.literal("none"),
 }).strict().readonly();
 
 export const NativeLifecycleOperationPreviewSchema = z.object({
@@ -221,7 +216,7 @@ const ComponentCountsSchema = z.object({
   mcpServers: z.number().int().nonnegative(),
 }).strict().readonly();
 const UninstallCleanupViewSchema = z.object({
-  persistentData: z.enum(["retained", "deleted", "recovery-required"]),
+  persistentData: z.enum(["retained", "deleted", "pending"]),
   configuration: z.literal("retained"),
   trust: z.literal("retained"),
   revisions: z.literal("collection-deferred"),
@@ -246,16 +241,14 @@ const ResultBase = {
 } as const;
 
 export const NativeLifecycleOperationResultSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("succeeded"), ...ResultBase, before: NativeLifecycleTargetBindingSchema.optional(), after: NativeLifecycleTargetBindingSchema.optional(), syncDigest: ContentDigestSchema.optional(), components: ComponentCountsSchema.optional(), cleanup: UninstallCleanupViewSchema.optional() }).strict().readonly(),
+  z.object({ kind: z.literal("succeeded"), ...ResultBase, before: NativeLifecycleTargetBindingSchema.optional(), after: NativeLifecycleTargetBindingSchema.optional(), syncDigest: ContentDigestSchema.optional(), components: ComponentCountsSchema.optional(), cleanup: UninstallCleanupViewSchema.optional(), activation: z.enum(["applied", "live-next-start"]).optional() }).strict().readonly(),
   z.object({ kind: z.literal("current-state"), ...ResultBase, reason: z.enum(["already-enabled", "already-disabled", "revision-current", "already-uninstalled", "project-converged"]), target: NativeLifecycleTargetBindingSchema.optional(), syncDigest: ContentDigestSchema.optional() }).strict().readonly(),
   z.object({ kind: z.literal("needs-action"), ...ResultBase, operation: z.literal("project-sync"), actions: z.array(ProjectSyncRequiredActionSchema).nonempty().max(NativeLifecycleOperationSessionPolicy.maxSyncActions).readonly() }).strict().readonly(),
   z.object({ kind: z.literal("cancelled"), ...ResultBase, phase: NativeLifecycleProgressPhaseSchema }).strict().readonly(),
   z.object({ kind: z.literal("stale"), ...ResultBase, reason: z.enum(["session", "inspection", "target", "candidate", "configuration", "consent", "project", "file", "capability"]) }).strict().readonly(),
-  z.object({ kind: z.literal("conflict"), ...ResultBase, reason: z.enum(["operation-in-progress", "pending-transition", "target-changed", "state-generation-changed", "file-changed", "unresolved-merge", "concurrent-mutation"]) }).strict().readonly(),
+  z.object({ kind: z.literal("conflict"), ...ResultBase, reason: z.enum(["operation-in-progress", "target-changed", "state-generation-changed", "file-changed", "unresolved-merge", "concurrent-mutation"]) }).strict().readonly(),
   z.object({ kind: z.literal("rejected"), ...ResultBase, code: NativeLifecycleStableCodeSchema }).strict().readonly(),
-  z.object({ kind: z.literal("rolled-back"), ...ResultBase, operation: z.enum(["enable", "disable", "update", "uninstall"]), failure: z.enum(["reload-rejected", "activation-unavailable", "observation-mismatch", "adapter-error"]), restored: NativeLifecycleTargetBindingSchema }).strict().readonly(),
-  z.object({ kind: z.literal("staged"), ...ResultBase, operation: z.literal("update"), transition: PendingTransitionRefSchema, committed: GenerationSchema.optional() }).strict().readonly(),
-  z.object({ kind: z.literal("recovery-required"), ...ResultBase, code: NativeLifecycleStableCodeSchema, transition: PendingTransitionRefSchema.optional(), committed: GenerationSchema.optional(), action: z.literal("run-recovery") }).strict().readonly(),
+  z.object({ kind: z.literal("degraded"), ...ResultBase, operation: z.enum(["enable", "disable", "update", "uninstall"]), failure: z.object({ plugin: PluginKeySchema, code: z.string().min(1), explanation: z.string().min(1) }).strict().readonly(), repairHint: z.enum(["repair", "rollback", "both"]).optional() }).strict().readonly(),
   z.object({ kind: z.literal("failed"), ...ResultBase, code: z.enum(["ADAPTER_FAILED", "PROGRESS_DELIVERY_FAILED", "PROJECT_INTENT_WRITE_FAILED", "CLEANUP_FAILED", "DISPOSED"]) }).strict().readonly(),
   z.object({ kind: z.literal("expired") }).strict().readonly(),
   z.object({ kind: z.literal("disposed") }).strict().readonly(),
@@ -275,7 +268,7 @@ export const NativeLifecycleOperationResultSchema = z.discriminatedUnion("kind",
   }
 });
 
-export const NativeLifecycleOperationSessionStateSchema = z.enum(["previewed", "applying", "succeeded", "current-state", "needs-action", "cancelled", "stale", "conflict", "rejected", "rolled-back", "recovery-required", "staged", "failed", "expired", "disposed"]);
+export const NativeLifecycleOperationSessionStateSchema = z.enum(["previewed", "applying", "succeeded", "current-state", "needs-action", "cancelled", "stale", "conflict", "rejected", "degraded", "failed", "expired", "disposed"]);
 
 export const NativeLifecycleOperationSessionViewSchema = z.object({
   token: NativeLifecycleOperationTokenSchema,

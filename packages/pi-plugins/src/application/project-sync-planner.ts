@@ -150,12 +150,10 @@ function prerequisites(desired: PortableProjectDeclaration, context: Readonly<{ 
     const record = records.get(plugin.plugin);
     if (record === undefined) { const action = requiredAction("install-plugin", { plugin: plugin.plugin }, sha256); required.set(action.id, action); continue; }
     const status = readiness.get(plugin.plugin);
-    if (record.pendingTransition !== undefined || status?.pending) { const action = requiredAction("run-recovery", { plugin: plugin.plugin }, sha256); required.set(action.id, action); }
     if (!constraintMatches(plugin, record, sha256)) { const action = requiredAction("update-plugin", { plugin: plugin.plugin }, sha256); required.set(action.id, action); }
     if (status?.trust === "missing") { const action = requiredAction("review-trust", { plugin: plugin.plugin }, sha256); required.set(action.id, action); }
     if (status?.configuration === "missing") { const action = requiredAction("provide-configuration", { plugin: plugin.plugin }, sha256); required.set(action.id, action); }
   }
-  for (const plugin of context.snapshot.project.plugins) if (plugin.pendingTransition !== undefined) { const action = requiredAction("run-recovery", { plugin: plugin.plugin }, sha256); required.set(action.id, action); }
   return Object.freeze([...required.values()].sort((left, right) => compareUtf8(left.id, right.id)));
 }
 

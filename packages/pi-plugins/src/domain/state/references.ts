@@ -17,7 +17,6 @@ export const StateReferenceKindRegistry = {
   pluginData: { tag: "plugin-data-v1" },
   pluginConfiguration: { tag: "plugin-configuration-v1" },
   trustSubject: { tag: "trust-subject-v1" },
-  pendingTransition: { tag: "pending-transition-v1" },
   runtimeProjection: { tag: "runtime-projection-v1" },
 } as const;
 
@@ -70,11 +69,6 @@ export const TrustSubjectRefSchema = taggedSha256<"TrustSubjectRef">(
 );
 export type TrustSubjectRef = z.infer<typeof TrustSubjectRefSchema>;
 
-export const PendingTransitionRefSchema = taggedSha256<"PendingTransitionRef">(
-  StateReferenceKindRegistry.pendingTransition.tag,
-);
-export type PendingTransitionRef = z.infer<typeof PendingTransitionRefSchema>;
-
 export const ProjectionRootRefSchema = taggedSha256<"ProjectionRootRef">(
   StateReferenceKindRegistry.runtimeProjection.tag,
 );
@@ -87,7 +81,6 @@ export const StateReferenceSchema = z.union([
   PluginDataRefSchema,
   PluginConfigurationRefSchema,
   TrustSubjectRefSchema,
-  PendingTransitionRefSchema,
   ProjectionRootRefSchema,
 ]);
 export type StateReference = z.infer<typeof StateReferenceSchema>;
@@ -243,10 +236,6 @@ export function deriveTrustSubjectRef(identity: ReferenceIdentity, sha256: Sha25
   return deriveTaggedReference(StateReferenceKindRegistry.trustSubject.tag, TrustSubjectRefSchema, identity, sha256, "deriveTrustSubjectRef") as TrustSubjectRef;
 }
 
-export function derivePendingTransitionRef(identity: ReferenceIdentity, sha256: Sha256): PendingTransitionRef {
-  return deriveTaggedReference(StateReferenceKindRegistry.pendingTransition.tag, PendingTransitionRefSchema, identity, sha256, "derivePendingTransitionRef") as PendingTransitionRef;
-}
-
 export function deriveProjectionRootRef(
   identity: Readonly<{ scope: ScopeReference; plugin: PluginKey; projectionDigest: ContentDigest }>,
   sha256: Sha256,
@@ -300,10 +289,6 @@ export function verifyPluginConfigurationRef(candidate: unknown, identity: Refer
 
 export function verifyTrustSubjectRef(candidate: unknown, identity: ReferenceIdentity, sha256: Sha256): TrustSubjectRef {
   return verifyReference(TrustSubjectRefSchema, candidate, identity, sha256, deriveTrustSubjectRef, "trust subject reference does not match its identity") as TrustSubjectRef;
-}
-
-export function verifyPendingTransitionRef(candidate: unknown, identity: ReferenceIdentity, sha256: Sha256): PendingTransitionRef {
-  return verifyReference(PendingTransitionRefSchema, candidate, identity, sha256, derivePendingTransitionRef, "pending transition reference does not match its identity") as PendingTransitionRef;
 }
 
 export function verifyProjectionRootRef(

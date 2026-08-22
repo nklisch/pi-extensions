@@ -22,7 +22,6 @@ export function deriveLifecycleTargetDigest(
   sha256: Sha256,
 ) {
   const record = InstalledPluginRecordSchema.parse(recordInput);
-  if (record.pendingTransition !== undefined) throw new Error("pending lifecycle targets cannot be bound");
   return hashContent(encoder.encode(`native-lifecycle-target-v1\0${canonicalJson({ scope, record })}`), sha256);
 }
 
@@ -88,7 +87,6 @@ function buildTarget(
     inspectionSnapshotId: request.inspectionSnapshotId,
     detailId: request.detailId,
     ...(projectEpoch === undefined ? {} : { projectEpoch }),
-    transition: "none",
   });
   const expectation = LifecycleTargetExpectationSchema.parse({
     generation: scopeBinding.generation,
@@ -96,7 +94,6 @@ function buildTarget(
     selectedRevision: record.selectedRevision,
     activation: record.activation,
     targetDigest,
-    pendingTransition: "none",
   });
   return Object.freeze({ binding, expectation, scope, record, snapshot, capabilityDigest: snapshot.binding.capability.digest, ...(projectEpoch === undefined ? {} : { projectEpoch }) });
 }
@@ -120,7 +117,6 @@ export function createNativeLifecycleTargetService(input: Readonly<{
     }
     const authority = findRecord(snapshot, subject.scope, subject.plugin);
     if (authority === undefined || authority.record.selectedRevision !== subject.selectedRevision) return { kind: "stale", reason: "target" };
-    if (authority.record.pendingTransition !== undefined) return { kind: "blocked", reason: "pending-transition" };
     if (recoveryBlocked(snapshot, subject.scope, subject.plugin)) return { kind: "blocked", reason: "recovery-required" };
     try { return { kind: "ready", target: buildTarget(request, snapshot, authority.scope, authority.record, input.sha256) }; }
     catch { return { kind: "unavailable", reason: "capability" }; }
@@ -137,7 +133,6 @@ export function createNativeLifecycleTargetService(input: Readonly<{
     }
     const authority = findRecord(snapshot, target.binding.scope, target.binding.plugin);
     if (authority === undefined) return { kind: "stale", reason: "target" };
-    if (authority.record.pendingTransition !== undefined) return { kind: "blocked", reason: "pending-transition" };
     if (recoveryBlocked(snapshot, target.binding.scope, target.binding.plugin)) return { kind: "blocked", reason: "recovery-required" };
     const digest = deriveLifecycleTargetDigest(target.binding.scope, authority.record, input.sha256);
     if (digest !== target.binding.targetDigest || authority.record.selectedRevision !== target.binding.selectedRevision || authority.record.activation !== target.binding.activation) {

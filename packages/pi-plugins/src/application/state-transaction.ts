@@ -121,8 +121,9 @@ export async function runScopedMutation<T>(
       throw error;
     }
     const snapshot = validateLoadResult(loaded, scope);
-    const decision = plan(snapshot);
-    if (isPromiseLike(decision)) throw new TypeError("scoped mutation plans must be synchronous");
+    const candidate = plan(snapshot);
+    if (isPromiseLike(candidate)) throw new TypeError("scoped mutation plans must be synchronous");
+    const decision = candidate;
     if (decision === null || typeof decision !== "object") throw new TypeError("scoped mutation plan returned an invalid decision");
     if (decision.kind === "reject" || decision.kind === "no-op") return decision;
     if (decision.kind !== "commit" || typeof decision.mutation !== "object" || decision.mutation === null) {

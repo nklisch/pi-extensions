@@ -18,6 +18,7 @@ export function createBackgroundUpdateCoordinator(dependencies: Readonly<{
   notifications?: UpdateNotificationService;
   automatic?: AutomaticUpdateCoordinator;
   status: MutableHostStatus;
+  convergence?: { sweep(signal: AbortSignal): Promise<void> };
 }>): BackgroundUpdateCoordinator {
   let controller: AbortController | undefined;
   let task: Promise<void> | undefined;
@@ -25,6 +26,10 @@ export function createBackgroundUpdateCoordinator(dependencies: Readonly<{
 
   async function maintain(signal: AbortSignal): Promise<number | undefined> {
     let degraded = false;
+    if (dependencies.convergence !== undefined) {
+      try { await dependencies.convergence.sweep(signal); }
+      catch (error) { if (signal.aborted) throw signal.reason ?? error; degraded = true; }
+    }
     // Publication follows policy/lifecycle disposition. This order prevents an
     // initial manual-looking event when effective policy is automatic.
     if (dependencies.notifications !== undefined) {

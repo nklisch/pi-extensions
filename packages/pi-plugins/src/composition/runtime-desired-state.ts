@@ -74,15 +74,6 @@ function selected(record: InstalledPluginRecord) {
   return record.revisions.find((revision) => revision.revision === record.selectedRevision);
 }
 
-/** The committed candidate with the in-flight marker removed for runtime construction. */
-function stripPendingTransition(record: InstalledPluginRecord): InstalledPluginRecord {
-  // Authority records were schema-validated when read; only the marker is
-  // removed, so re-parsing is redundant (and would fail records whose
-  // revision evidence is genuinely unavailable).
-  const { pendingTransition: _pendingTransition, ...rest } = record;
-  return rest as InstalledPluginRecord;
-}
-
 /** Rebuild exact desired runtime state from authority; caches are replaceable. */
 export async function buildRuntimeDesiredState(input: Readonly<{
   installed: InstalledPluginLoader;
@@ -142,16 +133,7 @@ export async function buildRuntimeDesiredState(input: Readonly<{
 
   for (const entry of effectiveRecords) {
     signal.throwIfAborted();
-    // A pending transition is a committed candidate awaiting activation — a
-    // deliberately staged update or an interrupted operation. Build the
-    // runtime from the committed record without the marker so reconstruction
-    // can activate it; the post-reconstruction recovery sweep settles the
-    // journal with observations available, finalizing what runs and rolling
-    // back what does not. Excluding pending records here stranded every
-    // staged update: no observation, conservative rollback on every start.
-    const record = entry.record.pendingTransition === undefined
-      ? entry.record
-      : stripPendingTransition(entry.record);
+    const record = entry.record;
     if (record.activation !== "enabled") continue;
     const revision = selected(record);
     if (revision === undefined) {

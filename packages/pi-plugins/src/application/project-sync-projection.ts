@@ -82,7 +82,7 @@ export function projectProjectSyncMachineState(input: Readonly<{
     plugins: Object.freeze(input.snapshot.project.plugins.map((record) => ({
       plugin: record.plugin,
       selectedRevision: record.selectedRevision,
-      pending: record.pendingTransition !== undefined,
+      pending: false,
       trust: readiness.get(record.plugin)?.trust ?? "ready",
       configuration: readiness.get(record.plugin)?.configuration ?? "ready",
     })).sort((left, right) => compareUtf8(left.plugin, right.plugin))),

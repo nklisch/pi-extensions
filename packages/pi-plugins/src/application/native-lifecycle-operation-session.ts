@@ -39,7 +39,7 @@ export type NativeLifecycleOperationSessionLookup =
   | Readonly<{ kind: "found"; entry: NativeLifecycleOperationSessionEntry }>
   | Readonly<{ kind: "missing" | "expired" | "disposed" }>;
 
-const terminalStates = new Set<NativeLifecycleOperationSessionState>(["succeeded", "current-state", "needs-action", "cancelled", "stale", "conflict", "rejected", "rolled-back", "recovery-required", "staged", "failed", "expired", "disposed"]);
+const terminalStates = new Set<NativeLifecycleOperationSessionState>(["succeeded", "current-state", "needs-action", "cancelled", "stale", "conflict", "rejected", "degraded", "failed", "expired", "disposed"]);
 
 export function createNativeLifecycleOperationSessionRegistry(input: Readonly<{
   clock: LifecycleClock;

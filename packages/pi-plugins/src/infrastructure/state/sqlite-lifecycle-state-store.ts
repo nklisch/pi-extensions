@@ -12,7 +12,6 @@ import {
 } from "../../application/state-contract.js";
 import { hashStateDocument, decodeStateDocument, encodeStateDocument, StateCodecError, StateVersionCutoverError, StateCorruptionSchema } from "../../domain/state/codec.js";
 import { GenerationSchema } from "../../domain/state/config-state.js";
-import { InstalledPluginRecordSchema } from "../../domain/state/installed-state.js";
 import { createStatePointersDocument, type PointerDocumentKind, type StatePointersDocument } from "../../domain/state/pointers.js";
 import { deriveStateBlobRef } from "../../domain/state/references.js";
 import { createScopeContext, ScopeContextSchema, toScopeReference, type ScopeContext } from "../../domain/state/scope.js";
@@ -541,10 +540,9 @@ export async function createNodeLifecycleStateAdapters(input: Readonly<{
     stateDatabase: input.paths.stateDatabase,
     hostRoot: input.paths.hostRoot ?? resolve(join(stateRoot, "..", "..")),
     sha256: input.sha256,
-    // U1 is additive: the shipped schema still owns pendingTransition. The
-    // migration module remains fully testable/directly usable, but adapter
-    // startup does not rewrite legacy state until U2 removes that field.
-    enabled: !Object.prototype.hasOwnProperty.call(InstalledPluginRecordSchema.unwrap().shape, "pendingTransition"),
+    // Migration runs before the schema is opened so legacy markers are stripped
+    // through the canonical codec without changing the document version.
+    enabled: true,
     signal: new AbortController().signal,
   });
   const project = createScopeContext(input.currentProject, input.sha256);

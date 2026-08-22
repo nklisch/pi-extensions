@@ -3,7 +3,7 @@ import { RuntimeCapabilitySnapshotSchema, type RuntimeCapabilitySnapshot } from 
 import { compareUtf8 } from "../domain/canonical-json.js";
 import { deriveMarketplaceRegistrationId, deriveMarketplaceSnapshotToken } from "../domain/marketplace-registration.js";
 import { toScopeReference, type ScopeContext } from "../domain/state/scope.js";
-import { LifecycleRecoveryResultSchema, type LifecycleRecoveryResult } from "../application/recovery-contract.js";
+import { ConvergenceReportSchema, type ConvergenceReport } from "../application/convergence-service.js";
 import { createInactiveProjectionExpectation, type ProjectionExpectation } from "../application/ports/runtime-projection.js";
 import type { LifecycleStateStore } from "../application/ports/lifecycle-state-store.js";
 import type { LifecycleClock } from "../application/ports/lifecycle-clock.js";
@@ -131,7 +131,8 @@ export function createNativeInspectionEvidence(input: Readonly<{
   skillHook: Readonly<{ observe(expectation: ProjectionExpectation, signal: AbortSignal): Promise<SkillHookContributionObservationResult> }>;
   mcp: Pick<McpLifecycleParticipant, "status">;
   capabilities?: RuntimeCapabilitySnapshot;
-  recovery: LifecycleRecoveryResult;
+  convergence?: ConvergenceReport;
+  recovery?: ConvergenceReport;
   startup: HostStartupResult;
   status?: HostStatusService;
   clock: LifecycleClock;
@@ -142,7 +143,7 @@ export function createNativeInspectionEvidence(input: Readonly<{
   }
   const scopes = [...input.scopes].sort(scopeOrder);
   const capabilities = input.capabilities === undefined ? undefined : RuntimeCapabilitySnapshotSchema.parse(input.capabilities);
-  const recovery = LifecycleRecoveryResultSchema.parse(input.recovery);
+  const convergence = ConvergenceReportSchema.parse(input.convergence ?? input.recovery ?? { results: [], deferred: false, processed: 0 });
   const capabilityDigest = capabilities === undefined ? undefined : digest("inspection-capability-v1", capabilities, input.sha256);
 
   async function captureAuthority(signal: AbortSignal): Promise<AuthorityCapture> {
@@ -257,7 +258,7 @@ export function createNativeInspectionEvidence(input: Readonly<{
       currentProject: { projectKey: currentProject.projectKey, trust: currentProject.trust },
       runtime,
     }, input.sha256);
-    const recoveryDigest = digest("inspection-recovery-v1", recovery, input.sha256);
+    const recoveryDigest = digest("inspection-convergence-v1", convergence, input.sha256);
     const hostStatus = input.status?.snapshot();
     const updateDigest = digest("inspection-update-v1", {
       scopes: states.filter((result) => result.ok).map((result) => ({
@@ -289,7 +290,7 @@ export function createNativeInspectionEvidence(input: Readonly<{
       return Object.freeze({
         ...captured,
         ...(capabilities === undefined ? {} : { capabilities }),
-        recovery,
+        convergence,
         startup: input.startup,
         ...(input.status === undefined ? {} : { hostStatus: input.status.snapshot() }),
       });

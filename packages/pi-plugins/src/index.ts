@@ -958,7 +958,6 @@ export {
   PluginDataRefSchema,
   PluginConfigurationRefSchema,
   TrustSubjectRefSchema,
-  PendingTransitionRefSchema,
   ProjectionRootRefSchema,
   StateReferenceSchema,
   ReferenceIdentitySchema,
@@ -968,7 +967,6 @@ export {
   derivePluginDataRef,
   derivePluginConfigurationRef,
   deriveTrustSubjectRef,
-  derivePendingTransitionRef,
   deriveProjectionRootRef,
   verifyStateBlobRef,
   verifyMarketplaceContentRef,
@@ -976,7 +974,6 @@ export {
   verifyPluginDataRef,
   verifyPluginConfigurationRef,
   verifyTrustSubjectRef,
-  verifyPendingTransitionRef,
   verifyProjectionRootRef,
 } from "./domain/state/references.js";
 export type {
@@ -988,7 +985,6 @@ export type {
   PluginDataRef,
   PluginConfigurationRef,
   TrustSubjectRef,
-  PendingTransitionRef,
   ProjectionRootRef,
   StateReference,
   ReferenceIdentity,
@@ -1200,6 +1196,10 @@ export type {
   ScopedMutationResult,
   ScopedMutationRecheckAuthority,
 } from "./application/state-transaction.js";
+export { createConvergenceService, ConvergenceDiagnosticCodeSchema, ConvergenceResultSchema, ConvergenceReportSchema, DefaultConvergencePolicy } from "./application/convergence-service.js";
+export type { ConvergenceDiagnosticCode, ConvergenceResult, ConvergenceReport, ConvergenceService, ConvergenceServiceDependencies } from "./application/convergence-service.js";
+export { createArtifactGc, DEFAULT_CONVERGENCE_GRACE_DAYS, CONVERGENCE_FOREGROUND_BUDGET_MS, CONVERGENCE_FOREGROUND_ITEM_BUDGET } from "./infrastructure/convergence/artifact-gc.js";
+export type { ArtifactGc, ArtifactGcKind, ArtifactGcCandidate, ArtifactGcReport } from "./infrastructure/convergence/artifact-gc.js";
 export {
   PendingDeleteMarkerSchema,
   PENDING_DELETE_GRACE_MS,
@@ -1213,13 +1213,7 @@ export type {
   PendingDeleteReplayResult,
 } from "./infrastructure/cleanup/pending-data-deletion.js";
 
-export { createLifecycleTransitionReconciler } from "./application/lifecycle-transition-reconciler.js";
-export type {
-  LifecycleTransitionReconciler,
-  LifecycleTransitionReconcilerDependencies,
-} from "./application/lifecycle-transition-reconciler.js";
 export type { LifecycleStateInventoryPort } from "./application/ports/lifecycle-state-inventory.js";
-export type { RecoveryArtifactsPort } from "./application/ports/recovery-artifacts.js";
 
 export {
   createPromotionPlan,
@@ -1253,36 +1247,6 @@ export type {
   RuntimeProjectionCachePort,
 } from "./application/runtime-projection-cache.js";
 
-// Mutation coordination is a portable application contract. The SQLite
-// adapter, physical lock roots, retry timers, and protocol schema remain an
-// infrastructure composition detail.
-export { MutationSubjectSchema } from "./application/mutation-coordination.js";
-export type {
-  KeyedMutationScheduler,
-  MutationSubject,
-} from "./application/mutation-coordination.js";
-export {
-  createKeyedMutationScheduler,
-  RecursiveMutationAcquisitionError,
-} from "./infrastructure/state/keyed-mutation-scheduler.js";
-export type {
-  ScopeLockLease,
-  ScopeLockManager,
-} from "./application/ports/scope-lock.js";
-export {
-  CommittedMutationCleanupError,
-  MutationCleanupError,
-  createGenerationMutationCoordinator,
-} from "./application/generation-mutation-coordinator.js";
-export type {
-  GenerationMutationCoordinator,
-  GenerationMutationCoordinatorDependencies,
-  GenerationMutationResult,
-  PreparedMutation,
-  PreparedMutationContext,
-  PreparedMutationRequest,
-} from "./application/generation-mutation-coordinator.js";
-
 // Whole-plugin lifecycle is exposed as one facade plus narrow, adapter-neutral
 // evidence ports. Candidate preparation and guarded mutation helpers stay
 // private so callers cannot bypass transaction policy.
@@ -1299,10 +1263,7 @@ export {
   LifecycleOutcomeSchema,
   LifecyclePluginStateSchema,
   LifecyclePluginReferenceSchema,
-  PendingTransitionIdentitySchema,
   LifecyclePluginRequestSchema,
-  LifecycleRecoveryEvidenceSchema,
-  deriveLifecyclePendingTransitionRef,
 } from "./application/plugin-lifecycle-contract.js";
 export type {
   LifecycleOperation,
@@ -1312,9 +1273,7 @@ export type {
   LifecycleOutcome,
   LifecyclePluginState,
   LifecyclePluginReference,
-  PendingTransitionIdentity,
   LifecyclePluginRequest,
-  LifecycleRecoveryEvidence,
 } from "./application/plugin-lifecycle-contract.js";
 
 export {
@@ -1379,7 +1338,7 @@ export type {
   McpLifecycleStatusResult,
   McpLifecycleParticipant,
 } from "./runtime/mcp/lifecycle-participant.js";
-export { createMcpRevisionLeaseProvider } from "./runtime/mcp/revision-lease-provider.js";
+export { createMcpRuntimeBindingProvider } from "./runtime/mcp/mcp-runtime-binding-provider.js";
 
 export {
   createSkillHookSnapshotLoader,
@@ -1420,32 +1379,6 @@ export type {
 } from "./runtime/skills/resource-discovery.js";
 
 export {
-  LifecycleTransitionRecordSchemaV1,
-  LifecycleTransitionStatusSchema,
-  LifecycleTransitionJournalEntrySchemaV1,
-  LifecycleTransitionJournalEntrySchemaV2,
-  LifecycleUninstallCleanupStatusSchema,
-  migrateLifecycleTransitionJournalEntryV1,
-  LifecycleTransitionPrepareResultSchema,
-  LifecycleTransitionOutcomeSchema,
-  LifecycleTransitionSettleRequestSchema,
-  TransitionJournalReadResultSchema,
-  createLifecycleTransitionRecord,
-} from "./application/ports/lifecycle-transition-store.js";
-export type {
-  LifecycleTransitionRecord,
-  LifecycleTransitionPrepareResult,
-  LifecycleTransitionStatus,
-  LifecycleTransitionJournalEntryV1,
-  LifecycleTransitionJournalEntry,
-  LifecycleUninstallCleanupStatus,
-  LifecycleTransitionOutcome,
-  LifecycleTransitionSettleRequest,
-  TransitionJournalReadResult,
-  LifecycleTransitionStore,
-} from "./application/ports/lifecycle-transition-store.js";
-
-export {
   LifecycleOperationIdSchema,
   parseLifecycleOperationId,
 } from "./application/ports/lifecycle-operation-id.js";
@@ -1475,8 +1408,6 @@ export type {
   EnablePluginRequest,
   DisablePluginRequest,
   UninstallPluginRequest,
-  LifecycleActivationFailure,
-  LifecycleCleanupIntent,
   PluginLifecycleResult,
   PluginLifecycleService,
   PluginLifecycleServiceDependencies,
@@ -1699,60 +1630,10 @@ export type {
   NodeMarketplaceDiscoveryServicesOptions,
 } from "./composition/create-marketplace-discovery-services.js";
 
-export {
-  DefaultLifecycleRecoveryPolicy,
-  RecoveryDiagnosticCodeSchema,
-  RecoveryPolicySchema,
-  TransitionRecoveryResultSchema,
-  LifecycleRecoveryResultSchema,
-  RecoveryEvidenceSchema,
-  RecoveryClassificationSchema,
-} from "./application/recovery-contract.js";
-export type {
-  RecoveryDiagnosticCode,
-  RecoveryPolicy,
-  TransitionRecoveryResult,
-  LifecycleRecoveryResult,
-  RecoveryEvidence,
-  RecoveryClassification,
-} from "./application/recovery-contract.js";
-export { createLifecycleRecoveryService } from "./application/recovery-service.js";
-export type {
-  LifecycleRecoveryService,
-  LifecycleRecoveryServiceDependencies,
-  LifecycleRecoveryServiceRequest,
-} from "./application/recovery-service.js";
-
-export {
-  RetainedArtifactRefSchema,
-  RevisionArtifactKindSchema,
-} from "./application/ports/revision-artifact-store.js";
-export type {
-  RetainedArtifactRef,
-  RevisionArtifactKind,
-  RevisionArtifactCandidate,
-  RevisionArtifactCollection,
-  RevisionArtifactStore,
-} from "./application/ports/revision-artifact-store.js";
-export { DefaultRevisionCollectionPolicy, RevisionCollectionPolicySchema, RevisionCollectionResultSchema } from "./application/revision-collection-service.js";
-export {
-  RevisionLeaseSchema,
-  RevisionLeaseOwnerStatusSchema,
-  RevisionLeaseCollectionSchema,
-} from "./application/ports/revision-lease-store.js";
-export type { RevisionLease, RevisionLeaseOwnerStatus, RevisionLeaseCollection, RevisionLeaseStore } from "./application/ports/revision-lease-store.js";
-export { RevisionRetentionMarkSchema, RevisionRetentionSnapshotSchema } from "./application/ports/revision-retention-store.js";
-export type { RevisionRetentionMark, RevisionRetentionSnapshot, RevisionRetentionStore } from "./application/ports/revision-retention-store.js";
 export { PersistentDataRemovalPlanSchema } from "./application/ports/persistent-data-removal.js";
 export type { PersistentDataRemovalPlan, PersistentDataRemovalPort } from "./application/ports/persistent-data-removal.js";
-export { createRevisionCollectionService } from "./application/revision-collection-service.js";
-export type { RevisionCollectionPolicy, RevisionCollectionResult, RevisionCollectionDependencies } from "./application/revision-collection-service.js";
 export { ConfirmedUninstallCleanupResultSchema, createConfirmedUninstallCleanup } from "./application/confirmed-uninstall-cleanup.js";
 export type { ConfirmedUninstallCleanupResult, ConfirmedUninstallCleanupDependencies, ConfirmedUninstallCleanupRequest } from "./application/confirmed-uninstall-cleanup.js";
-export { createNativeUninstallCleanupService } from "./application/native-uninstall-cleanup.js";
-export type { NativeUninstallCleanupResult, NativeUninstallCleanupService } from "./application/native-uninstall-cleanup.js";
-export { createNodeRecoveryAdapters } from "./infrastructure/recovery/create-node-recovery-adapters.js";
-export type { NodeRecoveryAdapterOptions, NodeRecoveryAdapters } from "./infrastructure/recovery/create-node-recovery-adapters.js";
 
 export {
   TrustedInstallSessionPolicy,

@@ -11,7 +11,7 @@ import type { PluginConfigurationStore } from "../application/ports/plugin-confi
 import type { ProjectTrustPort, CurrentProjectRuntimeContext } from "../application/ports/project-trust.js";
 import type { ProjectionExpectation } from "../application/ports/runtime-projection.js";
 import type { PluginInspectionService } from "../application/inspection-service.js";
-import type { LifecycleRecoveryResult } from "../application/recovery-contract.js";
+import type { ConvergenceReport } from "../application/convergence-service.js";
 import type { NativeInspectionService } from "../application/native-inspection-contract.js";
 import type { RuntimeCapabilitySnapshot } from "../domain/compatibility-policy.js";
 import type { ScopeContext } from "../domain/state/scope.js";
@@ -34,7 +34,8 @@ export function createNativeInspectionComposition(input: Readonly<{
   skillHook: Readonly<{ observe(expectation: ProjectionExpectation, signal: AbortSignal): Promise<SkillHookContributionObservationResult> }>;
   mcp: Pick<McpLifecycleParticipant, "status">;
   capabilities?: RuntimeCapabilitySnapshot;
-  recovery: LifecycleRecoveryResult;
+  convergence?: ConvergenceReport;
+  recovery?: ConvergenceReport;
   startup: HostStartupResult;
   status?: HostStatusService;
   configurations: PluginConfigurationStore;
@@ -57,7 +58,7 @@ export function createNativeInspectionComposition(input: Readonly<{
     skillHook: input.skillHook,
     mcp: input.mcp,
     ...(input.capabilities === undefined ? {} : { capabilities: input.capabilities }),
-    recovery: input.recovery,
+    convergence: input.convergence ?? input.recovery ?? { results: [], deferred: false, processed: 0 },
     startup: input.startup,
     ...(input.status === undefined ? {} : { status: input.status }),
     clock: input.clock,

@@ -18,7 +18,7 @@ function lifecycleLines(envelope: NativeControlEnvelope): readonly string[] | un
   if (value.kind === "expired" || value.kind === "disposed") {
     return Object.freeze([`${envelope.command.path.join(" ") || "plugin"} · ${value.kind}`]);
   }
-  const target = "before" in value ? value.before : "target" in value ? value.target : "restored" in value ? value.restored : undefined;
+  const target = "before" in value ? value.before : "target" in value ? value.target : undefined;
   const subject = target === undefined ? value.operation : `${target.plugin} · ${value.operation}`;
   const lines = [`${subject} · ${value.kind}`];
   if (value.kind === "current-state") lines.push("already in the wanted state — nothing to do");
@@ -26,8 +26,7 @@ function lifecycleLines(envelope: NativeControlEnvelope): readonly string[] | un
   if (value.kind === "cancelled") lines.push(`cancelled during ${plainLifecyclePhase(value.phase)}`);
   if (value.kind === "stale" || value.kind === "conflict") lines.push("things changed — refresh and try again");
   if (value.kind === "rejected" || value.kind === "failed") lines.push(plainLifecycleFailure(value.code));
-  if (value.kind === "recovery-required") lines.push("setup didn't finish — run recovery to complete it");
-  if (value.kind === "rolled-back") lines.push(`${plainLifecycleFailure(value.failure)} · ${value.restored.plugin} was restored`);
+  if (value.kind === "degraded") lines.push("plugin is degraded — repair or rollback is available");
   if (value.kind === "succeeded" && value.cleanup !== undefined) {
     lines.push(`persistent data ${value.cleanup.persistentData} · configuration ${value.cleanup.configuration} · trust ${value.cleanup.trust}`);
   }

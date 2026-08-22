@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ActivationObservation } from "../application/ports/lifecycle-reload.js";
-import type { PendingTransitionRef } from "../domain/state/references.js";
 import type { ScopeReference } from "../domain/state/scope.js";
 import type { PiSessionBinding } from "../composition/packaged-plugin-host-contract.js";
 
@@ -12,7 +11,6 @@ type TicketState = {
   sessionId: string;
   cwd: string;
   scope: ScopeReference;
-  transition: PendingTransitionRef;
   claimed: boolean;
   settled: boolean;
   resolve: (observations: readonly ActivationObservation[]) => void;
@@ -29,13 +27,13 @@ function registry(): Registry {
   return created;
 }
 
-export type PiReloadTicket = Readonly<{ id: string; sessionId: string; cwd: string; scope: ScopeReference; transition: PendingTransitionRef }>;
+export type PiReloadTicket = Readonly<{ id: string; sessionId: string; cwd: string; scope: ScopeReference }>;
 export type PiOperationContextPort = Readonly<{
   /** Consume the one reload authority carried by an admitted Pi call frame. */
   takeReloadContext(): ExtensionContext | undefined;
 }>;
 export type PiReloadBroker = Readonly<{
-  open(binding: PiSessionBinding, scope: ScopeReference, transition: PendingTransitionRef): PiReloadTicket;
+  open(binding: PiSessionBinding, scope: ScopeReference): PiReloadTicket;
   claimSuccessor(binding: PiSessionBinding): PiReloadTicket | undefined;
   publish(ticket: PiReloadTicket, observations: readonly ActivationObservation[]): void;
   fail(ticket: PiReloadTicket, error?: unknown): void;
@@ -43,11 +41,11 @@ export type PiReloadBroker = Readonly<{
 }>;
 
 function publicTicket(state: TicketState): PiReloadTicket {
-  return Object.freeze({ id: state.id, sessionId: state.sessionId, cwd: state.cwd, scope: state.scope, transition: state.transition });
+  return Object.freeze({ id: state.id, sessionId: state.sessionId, cwd: state.cwd, scope: state.scope });
 }
 function exact(state: TicketState, ticket: PiReloadTicket): boolean {
   return state.id === ticket.id && state.sessionId === ticket.sessionId && state.cwd === ticket.cwd &&
-    JSON.stringify(state.scope) === JSON.stringify(ticket.scope) && state.transition === ticket.transition;
+    JSON.stringify(state.scope) === JSON.stringify(ticket.scope);
 }
 
 export function createPiReloadBroker(): PiReloadBroker {
@@ -57,7 +55,7 @@ export function createPiReloadBroker(): PiReloadBroker {
     if (state === undefined || !exact(state, ticket)) throw new Error("Pi reload ticket is unavailable");
     return state;
   }
-  function open(binding: PiSessionBinding, scope: ScopeReference, transition: PendingTransitionRef): PiReloadTicket {
+  function open(binding: PiSessionBinding, scope: ScopeReference): PiReloadTicket {
     if ([...states.tickets.values()].some((ticket) => !ticket.settled && ticket.sessionId === binding.sessionId)) {
       throw new Error("a Pi reload ticket is already pending for this session");
     }
@@ -69,7 +67,7 @@ export function createPiReloadBroker(): PiReloadBroker {
     // immediately so that exact failure remains broker evidence rather than an
     // unhandled process-level rejection.
     void promise.catch(() => undefined);
-    const state: TicketState = { id: randomUUID(), sessionId: binding.sessionId, cwd: binding.cwd, scope, transition, claimed: false, settled: false, resolve, reject, promise };
+    const state: TicketState = { id: randomUUID(), sessionId: binding.sessionId, cwd: binding.cwd, scope, claimed: false, settled: false, resolve, reject, promise };
     states.tickets.set(state.id, state);
     return publicTicket(state);
   }

@@ -4,8 +4,6 @@ import { join } from "node:path";
 import { createHookFailureLog } from "../runtime/hooks/hook-failure-log.js";
 import { VERSION as PI_VERSION, getAgentDir, type ExtensionCommandContext, type ExtensionContext, type SessionShutdownEvent, type SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import { createCompatibilityService } from "../application/compatibility-service.js";
-import { createGenerationMutationCoordinator } from "../application/generation-mutation-coordinator.js";
-import { createLifecycleTransitionReconciler } from "../application/lifecycle-transition-reconciler.js";
 import { createMarketplaceInspectionService } from "../application/marketplace-inspection-service.js";
 import { createMarketplacePluginProbe } from "../application/marketplace-plugin-probe.js";
 import { createPluginLifecycleComposition } from "../application/plugin-lifecycle-service.js";
@@ -15,15 +13,14 @@ import { verifyPluginConfigurationDocument } from "../domain/configured-values.j
 import { createTrustCandidate } from "../domain/trust-policy.js";
 import { toScopeReference } from "../domain/state/scope.js";
 import { createRuntimeProjectionCache } from "../infrastructure/filesystem/runtime-projection-cache.js";
-import { createKeyedMutationScheduler } from "../infrastructure/state/keyed-mutation-scheduler.js";
-import { createSqliteScopeLockManager } from "../infrastructure/state/sqlite-scope-lock.js";
 import { createNodeLifecycleStateAdapters } from "../infrastructure/state/sqlite-lifecycle-state-store.js";
 import { createSqlitePluginConfigurationStore } from "../infrastructure/configuration/sqlite-plugin-configuration-store.js";
 import { createNodeConfigurationPathPort } from "../infrastructure/configuration/node-configuration-path.js";
 import { createNodeHostIdentifiers } from "../infrastructure/node/node-identifiers.js";
 import { createNodeLifecycleClock } from "../infrastructure/node/node-lifecycle-clock.js";
 import { createNodeContentInfrastructure } from "../infrastructure/filesystem/create-content-store.js";
-import { createNodeRecoveryAdapters } from "../infrastructure/recovery/create-node-recovery-adapters.js";
+import { createNodeConvergenceService } from "../infrastructure/convergence/create-node-convergence.js";
+import { createPendingDeleteMarkerStore } from "../infrastructure/cleanup/pending-data-deletion.js";
 import { createPlatformSecretStore } from "../infrastructure/secrets/create-platform-secret-store.js";
 import { createNodeMcpLaunchEnvironment } from "../infrastructure/environment/node-mcp-launch-environment.js";
 import { createNodeHookExecutableResolver } from "../infrastructure/process/hook-executable-resolver.js";
@@ -41,7 +38,6 @@ import { createCandidateContentLeasePort } from "./candidate-content-lease.js";
 import { createNativeInspectionComposition } from "./create-native-inspection-service.js";
 import { createComposedTrustedInstallationService } from "./create-trusted-installation-service.js";
 import { createComposedNativeLifecycleOperationService } from "./create-native-lifecycle-operation-service.js";
-import { createNativeUninstallCleanupService } from "../application/native-uninstall-cleanup.js";
 import { createNodeProjectIntentFilePort } from "../infrastructure/project/node-project-intent-file.js";
 import { deriveInspectionDetailId, deriveInspectionEvidenceSnapshotId } from "../application/native-inspection-identifiers.js";
 import { createHostConfigurationServices } from "./create-host-configuration.js";
@@ -213,8 +209,6 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         const hookVisibility = createHookContextVisibilityProvider(state.state);
         const configurations = await createSqlitePluginConfigurationStore({ root: paths.configurationRoot });
         own(async () => configurations[Symbol.asyncDispose]());
-        const recoveryAdapters = await createNodeRecoveryAdapters({ hostRoot: paths.hostRoot });
-        own(() => recoveryAdapters.close());
         const content = await createNodeContentInfrastructure({ hostRoot: paths.hostRoot });
         const secrets = await createPlatformSecretStore();
         own(() => secrets.close());
@@ -261,8 +255,6 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           project,
           configuration: configuration.execution,
           hookVisibility,
-          leases: recoveryAdapters.leases,
-          clock,
           sha256,
           failureLog: createHookFailureLog({ file: join(paths.hostRoot, "logs", "hooks.jsonl") }),
           ...(qualification.subagents.lifecycle === undefined ? {} : { subagents: qualification.subagents.lifecycle }),
@@ -275,9 +267,6 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           project,
           configuration: configuration.execution,
           environment: createNodeMcpLaunchEnvironment(),
-          leases: recoveryAdapters.leases,
-          clock,
-          sessionId: binding.current().sessionId,
           sha256,
         });
         own(() => mcp.close());
@@ -321,26 +310,20 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           selections,
           skillHook,
           mcp,
-          transitions: recoveryAdapters.transitions,
           markDraining: claim.markDraining,
           sha256,
         });
-        const locks = await createSqliteScopeLockManager({
-          lockRoot: paths.lockRoot,
-          retryDelayMs: { minimum: 5, maximum: 100 },
-        });
-        const mutations = createGenerationMutationCoordinator({ scheduler: createKeyedMutationScheduler(), locks, state: state.state });
+        const mutations = state.state;
         const hostPrecedenceConfig = createHostPrecedenceService({ state: state.state, mutations, sha256 });
         const hookVisibilityConfig = createHookVisibilityService({ state: state.state, mutations, sha256 });
-        const reconciler = createLifecycleTransitionReconciler({ mutations, state: state.state, reload, transitions: recoveryAdapters.transitionStore, sha256 });
         const sourceOptions = {
           ...(options.source ?? {}),
           networkPolicy: options.source?.networkPolicy ?? networkEgressPolicyOptionsFromEnvironment(process.env),
         };
         const materializers = createNodeSourceMaterializers(sourceOptions);
+        const pendingDeletes = createPendingDeleteMarkerStore({ root: join(paths.hostRoot, "cleanup", "v1", "pending-deletes") });
         const lifecycleComposition = createPluginLifecycleComposition({
           state: state.state,
-          mutations,
           content: content.content,
           materializer: materializers.plugins,
           inspector: inspection,
@@ -348,26 +331,25 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           installed: content.installed,
           projections,
           reload,
-          transitions: recoveryAdapters.transitionStore,
-          operationIds: identifiers.operationIds,
           projectTrust: project.trust,
           projectRoots: project.authority,
           configurations,
           secrets: secrets.store,
           paths: configurationPaths,
+          pendingDeletes,
+          dataRemoval: content.dataRemoval,
           sha256,
         });
         const lifecycle = lifecycleComposition.application;
-        const uninstallCleanup = createNativeUninstallCleanupService({ transitions: recoveryAdapters.transitions, data: content.dataRemoval, clock });
-        const recovery = recoveryAdapters.createRecoveryService({
+        const convergence = createNodeConvergenceService({
           state: state.state,
           inventory: state.inventory,
-          reconciler,
-          reload,
-          uninstallCleanup,
+          hostRoot: paths.hostRoot,
+          dataRemoval: content.dataRemoval,
+          sha256,
           clock,
+          projectionReferences: () => latestDesired === undefined ? undefined : new Set(latestDesired.selections.flatMap((selection) => selection.skillHook.prepared.expectation.kind === "active" ? [selection.skillHook.prepared.expectation.projectionRef.slice(selection.skillHook.prepared.expectation.projectionRef.lastIndexOf(":") + 1)] : [])),
         });
-        const collection = recoveryAdapters.createCollectionService({ state: state.state, inventory: state.inventory, mutations, clock });
         const marketplaceInspection = createMarketplaceInspectionService({
           content: createManifestContentReader(sha256),
           readers: { claude: readClaudeMarketplace, codex: readCodexMarketplace, merge: mergeMarketplaces },
@@ -427,26 +409,8 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
             });
           }
         }
-        // Recovery runs after runtime reconstruction so activation
-        // observations exist when pending transitions are classified: a
-        // committed candidate whose projection now runs finalizes as
-        // completed. Before this ordering, the sweep ran with an empty
-        // observation map and compensated (rolled back) every interrupted
-        // transition on every start. If reconstruction failed, observations
-        // are absent and recovery keeps the conservative compensate path.
-        const recoveryResult = await recovery.recover({
-          requiredScopes: [{ kind: "user" }, project.scope],
-          ...(successor === undefined ? {} : { reservedTransitions: [successor.transition] }),
-        }, startupSignal);
-        const unresolvedRecovery: HostBlockedPlugin[] = successor === undefined
-          ? recoveryResult.results
-              .filter((result) => result.kind === "blocked" || result.kind === "deferred")
-              .map((result) => ({
-                plugin: result.plugin ?? "host-recovery",
-                code: `RECOVERY_${result.code}`,
-                explanation: "startup recovery did not settle authoritative pending state",
-              }))
-          : [];
+        const recoveryResult = await convergence.sweep({ scopes: [{ kind: "user" }, project.scope], signal: startupSignal });
+        const unresolvedRecovery: HostBlockedPlugin[] = recoveryResult.results.filter((result) => result.kind !== "completed").map((result) => ({ plugin: result.plugin ?? "convergence", code: `CONVERGENCE_${result.code}`, explanation: "startup convergence retained work for a later pass" }));
         const startup = startupResult({
           blocked: [...(latestDesired?.blocked ?? []), ...unresolvedRecovery, ...runtimeStartupBlocked],
           mcp: qualification.mcp,
@@ -470,7 +434,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           skillHook: skillHook.participant,
           mcp: mcp.participant,
           capabilities: capabilitySnapshot,
-          recovery: recoveryResult,
+          convergence: recoveryResult,
           startup,
           status: hostStatus,
           configurations,
@@ -579,7 +543,6 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           projectWriteIds: identifiers.projectIntentWriteIds,
           registrations: marketplaceComposition.application.registration,
           lifecycle: lifecycleComposition,
-          uninstallCleanup,
           clock,
           sessionIds: identifiers.operationIds,
           hostEpoch,
@@ -625,6 +588,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           cancel: requireOperationContext(operations.application.cancel),
         });
         const background = createBackgroundUpdateCoordinator({
+          convergence: { sweep: async (signal) => { await convergence.sweep({ scopes: [{ kind: "user" }, project.scope], signal }); } },
           scheduler: marketplaceComposition.updates.scheduler,
           schedulerStatus: marketplaceComposition.updates.schedulerStatus,
           notifications: updates.notifications,

@@ -10,7 +10,7 @@ import type { ScopeReference } from "../../domain/state/scope.js";
 import type { CurrentProjectRuntimeContext } from "./project-trust.js";
 import type { RuntimeContributionObservation } from "./lifecycle-reload.js";
 import type { McpBridgeTransport, McpRuntimeServerKey, McpSourceStatus } from "./mcp-runtime.js";
-import type { LifecycleRecoveryResult } from "../recovery-contract.js";
+import type { ConvergenceReport } from "../convergence-service.js";
 import type { EpochMilliseconds } from "./lifecycle-clock.js";
 
 export type InspectionSnapshotBinding = Readonly<{
@@ -80,7 +80,9 @@ export type InspectionEvidenceSnapshot = Readonly<{
   currentProject: CurrentProjectRuntimeContext;
   capabilities?: RuntimeCapabilitySnapshot;
   runtime: readonly InstalledRuntimeEvidence[];
-  recovery: LifecycleRecoveryResult;
+  convergence: ConvergenceReport;
+  /** Legacy name accepted only at the composition boundary during migration. */
+  recovery?: ConvergenceReport;
   startup: HostStartupResult;
   hostStatus?: HostStatusSnapshot;
 }>;

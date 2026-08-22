@@ -1,7 +1,7 @@
 import { NativeControlCommandRegistry, type NativeControlCommand } from "./native-control-registry.js";
 import type { NativeControlApplicationDependencies, NativeControlDispatchContext } from "./ports/native-control-applications.js";
 import type { NativeControlDispatchResult } from "./native-control-projection.js";
-import { presentMarketplaceAddFailure, presentRecoveryRequired } from "./native-failure-presenter.js";
+import { presentMarketplaceAddFailure } from "./native-failure-presenter.js";
 import { automaticRunHumanLines, automaticRunStatus } from "./native-automatic-run-presenter.js";
 import { humanForSelectionFailure, projectNativeControlFailure, projectNativeControlResponse } from "./native-control-projection.js";
 import { toSafeDisplayField } from "./native-inspection-display.js";
@@ -27,7 +27,6 @@ function pluginSelector(request: any) {
 function installStatus(command: NativeControlCommand["command"], result: TrustedInstallOpenResult | TrustedInstallActivationResult): NativeControlDispatchResult {
   const operation = result.kind === "opened" ? { kind: "trusted-install" as const, token: result.session.token }
     : result.kind === "needs-input" ? { kind: "trusted-install" as const, token: result.session.token }
-    : result.kind === "recovery-required" && result.session !== undefined ? { kind: "trusted-install" as const, token: result.session.token }
     : undefined;
   const status = result.kind === "opened" || result.kind === "succeeded" ? "ok"
     : result.kind === "current-state" ? "no-change"
@@ -36,14 +35,11 @@ function installStatus(command: NativeControlCommand["command"], result: Trusted
     : result.kind === "conflict" ? "conflict"
     : result.kind === "unavailable" || result.kind === "expired" || result.kind === "disposed" ? "unavailable"
     : result.kind === "rejected" ? "rejected"
-    : result.kind === "rolled-back" ? "partial"
-    : result.kind === "recovery-required" ? "recovery-required"
     : result.kind === "cancelled" ? "cancelled"
     : "failed";
   return projectNativeControlResponse(command, result, {
     status,
     ...(operation === undefined ? {} : { operation }),
-    ...(result.kind === "recovery-required" ? { human: [presentRecoveryRequired()] } : {}),
   });
 }
 
@@ -56,14 +52,12 @@ function lifecycleStatus(command: NativeControlCommand["command"], result: Nativ
     : result.kind === "conflict" ? "conflict"
     : result.kind === "unavailable" || result.kind === "expired" || result.kind === "disposed" ? "unavailable"
     : result.kind === "rejected" ? "rejected"
-    : result.kind === "rolled-back" ? "partial"
-    : result.kind === "recovery-required" ? "recovery-required"
+    : result.kind === "degraded" ? "partial"
     : result.kind === "cancelled" ? "cancelled"
     : "failed";
   return projectNativeControlResponse(command, result, {
     status,
     ...(operation === undefined ? {} : { operation }),
-    ...(result.kind === "recovery-required" ? { human: [presentRecoveryRequired()] } : {}),
   });
 }
 
@@ -243,14 +237,13 @@ export function createNativeControlMutationDispatcher(dependencies: NativeContro
             : result.kind === "stale" ? "stale"
             : result.kind === "rejected" ? "rejected"
             : result.kind === "unavailable" ? "unavailable"
-            : "recovery-required";
+            : "failed";
           const human = result.kind === "granted"
             ? [toSafeDisplayField(`trusted ${result.plugin} — restart or reload pi to activate`, { maxScalars: 256 })]
             : [];
           return projectNativeControlResponse(command.command, result, {
             status,
             human,
-            ...(result.kind === "recovery-required" ? { human: [presentRecoveryRequired()] } : {}),
           });
         }
         case "updates.policy.apply":

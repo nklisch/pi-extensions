@@ -78,7 +78,7 @@ export function createAutomaticUpdateLifecycleAdapter(dependencies: Readonly<{
         selected.evidence.source.pluginSourceIdentity === notice.available.pluginSourceIdentity ? "stable" as const : "changed" as const;
       if (current === undefined || selected === undefined) return { candidate: "current", source, target: "stale", project: "trusted", recovery: "clear", configuration: "valid", secrets: "available", capability: "available" };
       const project = await projectAuthorized(current.scope, signal) ? "trusted" as const : "untrusted" as const;
-      const recovery = current.record.pendingTransition === undefined ? "clear" as const : "required" as const;
+      const recovery = "clear" as const;
       const detailId = deriveInspectionDetailId({
         version: 1,
         subject: "marketplace-candidate",
@@ -116,7 +116,7 @@ export function createAutomaticUpdateLifecycleAdapter(dependencies: Readonly<{
       const [resolved, current] = await Promise.all([resolve(notice, signal), target(notice, signal)]);
       if (resolved.kind !== "resolved" || current === undefined) return { kind: "stale" };
       if ("unauthorized" in current) return { kind: "rejected", code: "UNTRUSTED" };
-      if (current.record.pendingTransition !== undefined) return { kind: "stale" };
+
       const selected = current.record.revisions.find((revision) => revision.revision === current.record.selectedRevision);
       if (selected === undefined) return { kind: "stale" };
       const candidate = resolved.candidate;
@@ -132,7 +132,6 @@ export function createAutomaticUpdateLifecycleAdapter(dependencies: Readonly<{
         selectedRevision: current.record.selectedRevision,
         activation: current.record.activation,
         targetDigest: deriveLifecycleTargetDigest(toScopeReference(current.scope), current.record, dependencies.sha256),
-        pendingTransition: "none",
       });
       const sourceContext = candidate.entry.source.value.kind === "marketplace-path" ? {
         kind: "marketplace" as const,
@@ -176,13 +175,11 @@ export function createAutomaticUpdateLifecycleAdapter(dependencies: Readonly<{
         activation,
       }, signal);
       switch (result.kind) {
-        case "changed":
-        case "unchanged":
-        case "stale":
-        case "rolled-back":
-        case "recovery-required":
-        case "staged":
-          return { kind: result.kind };
+        case "applied": return { kind: "changed" };
+        case "current": return { kind: "unchanged" };
+        case "live-next-start": return { kind: "staged" };
+        case "degraded": return { kind: "rejected", code: "CAPABILITY_UNAVAILABLE" };
+        case "stale": return { kind: "stale" };
         case "rejected": {
           const code = result.code === "INCOMPATIBLE" || result.code === "UNTRUSTED" || result.code === "UNCONFIGURED" || result.code === "AVAILABLE_REVISION_CHANGED" || result.code === "CONFIGURATION_STALE" || result.code === "PROJECTION_FAILED" || result.code === "PROMOTION_FAILED" || result.code === "ABORTED"
             ? result.code : "UNTRUSTED";

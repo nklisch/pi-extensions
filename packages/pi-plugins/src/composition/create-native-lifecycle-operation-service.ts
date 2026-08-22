@@ -24,9 +24,7 @@ import type { ProjectTrustPort } from "../application/ports/project-trust.js";
 import type { InspectionReadinessPort } from "../application/ports/inspection-readiness.js";
 import type { PluginInspectionService } from "../application/inspection-service.js";
 import type { MarketplaceCatalogService } from "../application/marketplace-catalog-service.js";
-import type { GenerationMutationCoordinator } from "../application/generation-mutation-coordinator.js";
 import type { PluginLifecycleComposition } from "../application/plugin-lifecycle-service.js";
-import type { NativeUninstallCleanupService } from "../application/native-uninstall-cleanup.js";
 import type { MarketplaceRegistrationService } from "../application/marketplace-registration-service.js";
 import type { ProjectSyncReadinessSnapshot } from "../application/project-sync-projection.js";
 import type { ProjectGenerationSnapshot } from "../application/state-contract.js";
@@ -48,14 +46,13 @@ export function createComposedNativeLifecycleOperationService(input: Readonly<{
   secretCustody: HostCapabilityStatus;
   userBaseDirectory: string;
   state: LifecycleStateStore;
-  mutations: GenerationMutationCoordinator;
+  mutations: LifecycleStateStore;
   projectTrust: ProjectTrustPort;
   projectRoots: ProjectRootAuthorityPort;
   projectFiles: ProjectIntentFilePort;
   projectWriteIds: ProjectIntentWriteIdPort;
   registrations: Pick<MarketplaceRegistrationService, "remove">;
   lifecycle: PluginLifecycleComposition;
-  uninstallCleanup: NativeUninstallCleanupService;
   clock: LifecycleClock;
   sessionIds: LifecycleOperationIdPort;
   hostEpoch: ContentDigest;
@@ -88,7 +85,6 @@ export function createComposedNativeLifecycleOperationService(input: Readonly<{
     trust,
     evidence: input.evidence,
     projectRoots: input.projectRoots,
-    uninstallCleanup: input.uninstallCleanup,
     sha256: input.sha256,
   });
   const sync = createProjectSyncService({

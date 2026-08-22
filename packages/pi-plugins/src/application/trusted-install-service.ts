@@ -239,42 +239,32 @@ export function createTrustedInstallationService(dependencies: TrustedInstallati
       return finish(entry, { kind: "current-state", plugin: entry.candidate.binding.plugin, scope: entry.candidate.binding.scope, revision: lifecycle.revision, activation: lifecycle.activation, reason: "already-active", progress: entry.progress, retained: safeRetained(entry) });
     }
     if (lifecycle.kind === "conflict") return finish(entry, conflict(entry, lifecycle.reason));
-    if (lifecycle.kind === "recovery-required") return finish(entry, { kind: "recovery-required", action: "run-recovery", progress: entry.progress, retained: safeRetained(entry) });
     const result = lifecycle.result;
-    if (result.kind === "changed") {
+    if (result.kind === "applied" || result.kind === "live-next-start") {
       if (lifecycle.enabledExisting) {
         progress(entry, "activation-observation", "completed");
         progress(entry, "completed", "completed");
         return finish(entry, { kind: "current-state", plugin: entry.candidate.binding.plugin, scope: entry.candidate.binding.scope, revision: entry.candidate.binding.immutableRevision, activation: "enabled", reason: "enabled-existing", progress: entry.progress, retained: safeRetained(entry) });
-      }
-      const observation = result.observation;
-      if (observation.kind !== "active" || observation.plugin !== entry.candidate.binding.plugin || observation.revision !== entry.candidate.binding.immutableRevision || JSON.stringify(observation.scope) !== JSON.stringify(entry.candidate.binding.scope)) {
-        return finish(entry, { kind: "recovery-required", action: "run-recovery", progress: entry.progress, retained: safeRetained(entry) });
       }
       progress(entry, "activation-observation", "completed");
       progress(entry, "completed", "completed");
       const counts = entry.candidate.detail.compatibility.components.counts;
       return finish(entry, {
         kind: "succeeded", plugin: entry.candidate.binding.plugin, scope: entry.candidate.binding.scope,
-        revision: entry.candidate.binding.immutableRevision, projectionDigest: observation.projectionDigest,
+        revision: entry.candidate.binding.immutableRevision, projectionDigest: entry.candidate.binding.contentDigest,
         components: { skills: counts.skills, hooks: counts.hooks, mcpServers: counts.mcpServers },
         progress: entry.progress,
         diagnostics: entry.candidate.detail.diagnostics.filter((diagnostic) => diagnostic.category !== "trust" && diagnostic.category !== "configuration" && diagnostic.category !== "freshness"),
         retained: safeRetained(entry),
       });
     }
-    if (result.kind === "unchanged") return finish(entry, { kind: "current-state", plugin: entry.candidate.binding.plugin, scope: entry.candidate.binding.scope, revision: entry.candidate.binding.immutableRevision, activation: "enabled", reason: "already-active", progress: entry.progress, retained: safeRetained(entry) });
+    if (result.kind === "current") return finish(entry, { kind: "current-state", plugin: entry.candidate.binding.plugin, scope: entry.candidate.binding.scope, revision: entry.candidate.binding.immutableRevision, activation: "enabled", reason: "already-active", progress: entry.progress, retained: safeRetained(entry) });
+    if (result.kind === "degraded") return finish(entry, { kind: "failed", code: "ADAPTER_FAILED", progress: entry.progress, retained: safeRetained(entry) });
     if (result.kind === "stale") return finish(entry, conflict(entry, "concurrent-mutation"));
-    if (result.kind === "rolled-back") return finish(entry, { kind: "rolled-back", failure: result.failure.kind, restored: true, progress: entry.progress, retained: safeRetained(entry) });
-    if (result.kind === "recovery-required") return finish(entry, { kind: "recovery-required", transition: result.transition, ...(result.committed === undefined ? {} : { committed: result.committed }), action: "run-recovery", progress: entry.progress, retained: safeRetained(entry) });
-    // Installs never stage (staging is update-only); keep the facade contract
-    // coherent if that ever changes by surfacing the pending transition.
-    if (result.kind === "staged") return finish(entry, { kind: "recovery-required", transition: result.transition, committed: result.snapshot.generation, action: "run-recovery", progress: entry.progress, retained: safeRetained(entry) });
     if (result.code === "ABORTED") return finish(entry, cancelled(entry, "activation-transaction"));
     if (result.code === "AVAILABLE_REVISION_CHANGED") return finish(entry, stale(entry, "candidate"));
     if (result.code === "CONFIGURATION_STALE") return finish(entry, stale(entry, "configuration"));
     if (result.code === "ALREADY_INSTALLED") return finish(entry, conflict(entry, "already-installed-different-revision"));
-    if (result.code === "PENDING_TRANSITION") return finish(entry, conflict(entry, "pending-transition"));
     return finish(entry, { kind: "rejected", code: result.code, diagnostics: entry.candidate.detail.diagnostics, progress: entry.progress, retained: safeRetained(entry) });
   }
 
@@ -476,10 +466,7 @@ export function createTrustedInstallationService(dependencies: TrustedInstallati
           if (granted.recorded === true) entry.retained.trust = true;
           return finish(entry, { kind: "rejected", code: "PROJECT_UNTRUSTED", diagnostics: [], progress: entry.progress, retained: safeRetained(entry) });
         }
-        if (granted.kind === "recovery-required") {
-          entry.trustRecoveryPending = true;
-          return pauseForWorkflowRecovery(entry, "retry-trust-recovery");
-        }
+        if (granted.kind === "unavailable") return finish(entry, { kind: "rejected", code: "ADAPTER_FAILED", diagnostics: [], progress: entry.progress, retained: safeRetained(entry) });
         entry.retained.trust = true;
       }
       progress(entry, phase, "completed", options);

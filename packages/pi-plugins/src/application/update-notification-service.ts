@@ -14,7 +14,7 @@ import {
   type UpdateNoticeId,
 } from "../domain/update-policy.js";
 import type { Sha256 } from "../domain/source.js";
-import type { GenerationMutationCoordinator } from "./generation-mutation-coordinator.js";
+import { runScopedMutation } from "./state-transaction.js";
 import { createMarketplaceUpdateRecordsMutation, marketplaceUpdateRecords } from "./marketplace-update-state.js";
 import {
   NativeUpdateAcknowledgmentRequestSchema,
@@ -77,7 +77,7 @@ export interface UpdateNotificationService {
 export type UpdateNotificationServiceDependencies = Readonly<{
   state: LifecycleStateStore;
   inventory: LifecycleStateInventoryPort;
-  mutations: GenerationMutationCoordinator;
+  mutations: LifecycleStateStore;
   clock: LifecycleClock;
   sha256: Sha256;
   publisher?: UpdateNotificationPublisherPort;
@@ -148,15 +148,16 @@ export function createUpdateNotificationService(dependencies: UpdateNotification
       const projected = transform(loaded.snapshot);
       if (projected === undefined) return undefined;
       if (canonicalJson(projected.records) === canonicalJson(records(loaded.snapshot))) return projected.value;
-      const result = await dependencies.mutations.runPreparedMutation(
-        { scope, plugins: [], expectedGeneration: loaded.snapshot.generation },
-        async ({ snapshot }) => {
+      const result = await runScopedMutation(dependencies.mutations,
+        scope,
+        (snapshot) => {
           const current = transform(snapshot);
-          if (current === undefined) throw new Error("NOTICE_AUTHORITY_STALE");
+          if (current === undefined) return { kind: "reject" as const, value: undefined };
           return {
+            kind: "commit" as const,
             mutation: replaceRecords(snapshot, current.records, dependencies.sha256),
             value: current.value,
-            beforeCommit: async () => {
+            recheckAuthority: async () => {
               if (!await authorized(scope, signal)) throw new Error("PROJECT_AUTHORITY_STALE");
             },
           };

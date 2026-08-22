@@ -16,7 +16,7 @@ import {
   type UpdatePolicyChange,
 } from "../domain/update-policy.js";
 import type { Sha256 } from "../domain/source.js";
-import type { GenerationMutationCoordinator } from "./generation-mutation-coordinator.js";
+import { runScopedMutation } from "./state-transaction.js";
 import { marketplaceUpdateRecords } from "./marketplace-update-state.js";
 import {
   NativeUpdatePolicyApplyRequestSchema,
@@ -52,7 +52,7 @@ export interface NativeUpdatePolicyService {
 export type NativeUpdatePolicyServiceDependencies = Readonly<{
   state: LifecycleStateStore;
   inventory: LifecycleStateInventoryPort;
-  mutations: GenerationMutationCoordinator;
+  mutations: LifecycleStateStore;
   sha256: Sha256;
   clock: LifecycleClock;
   currentProject?: Extract<ScopeContext, { kind: "project" }>;
@@ -350,12 +350,14 @@ export function createNativeUpdatePolicyService(dependencies: NativeUpdatePolicy
     if (!currentAuthority) return NativeUpdatePolicyApplyResultSchema.parse({ kind: "stale", reason: "generation" });
     const before = canonicalJson("config" in loaded.snapshot ? loaded.snapshot.config : loaded.snapshot.project);
     try {
-      const result = await dependencies.mutations.runPreparedMutation(
-        { scope: context, plugins: parsed.change.kind === "application" && parsed.change.target.kind === "plugin" ? [parsed.change.target.plugin] : [], expectedGeneration: loaded.snapshot.generation },
-        async ({ snapshot }) => ({
+      const result = await runScopedMutation(
+        dependencies.mutations,
+        context,
+        (snapshot) => ({
+          kind: "commit" as const,
           mutation: mutateSnapshot(snapshot, parsed.change),
           value: undefined,
-          beforeCommit: async () => {
+          recheckAuthority: async () => {
             if (context.kind === "user") return;
             const current = await authorizeCurrentScope(context, dependencies, signal);
             if (current.kind === "project-untrusted") throw new Error("PROJECT_TRUST_STALE");

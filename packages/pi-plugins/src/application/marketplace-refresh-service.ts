@@ -7,7 +7,7 @@ import {
 import { createMarketplaceSnapshotRecord, type MarketplaceSnapshotRecord } from "../domain/state/installed-state.js";
 import { ScopeContextSchema, toScopeReference, type ScopeContext } from "../domain/state/scope.js";
 import { createPromotionPlan } from "./content-promotion.js";
-import type { GenerationMutationCoordinator } from "./generation-mutation-coordinator.js";
+import { runScopedMutation } from "./state-transaction.js";
 import type { MarketplaceInspectionService } from "./marketplace-inspection-contract.js";
 import type { ContentStorePort } from "./ports/content-store.js";
 import type { LifecycleClock } from "./ports/lifecycle-clock.js";
@@ -177,51 +177,38 @@ async function mutateClaimRecord(
 ): Promise<"committed" | "stale" | "removed"> {
   const expectedRecord = recordFor(expected, registrationIdValue, dependencies.sha256);
   if (expectedRecord === undefined) return "removed";
-  let authority = expected;
-  // Refresh work intentionally occurs outside the scope lock. An unrelated
-  // writer may therefore advance the generation before a claim is acquired or
-  // settled. Rebase only while the target registration is byte-for-byte the
-  // authority originally inspected, so concurrent policy, notice, source, and
-  // claim changes are never overwritten by stale refresh memory.
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const result = await dependencies.mutations.runPreparedMutation(
-        { scope, plugins: [], expectedGeneration: authority.generation },
-        async (context) => {
-          const current = recordFor(context.snapshot, registrationIdValue, dependencies.sha256);
-          if (current === undefined) throw new Error("REMOVED_DURING_REFRESH");
-          if (!recordsEqual(current, expectedRecord)) throw new Error("STATE_STALE");
-          return {
-            mutation: replaceRecord(context.snapshot, replacement, dependencies.sha256),
-            value: undefined,
-            beforeCommit: async () => {
-              await assertScopeAuthority(dependencies, scope, signal);
-              if (schedulerLeaseId !== undefined && (dependencies.schedulerLeases === undefined ||
-                  !(await dependencies.schedulerLeases.validate(scope, schedulerLeaseId, dependencies.clock.nowEpochMilliseconds(), signal)))) {
-                throw new Error("STATE_STALE");
-              }
-            },
-          };
-        },
-        signal,
-      );
-      if (result.kind === "committed") return "committed";
-      if (result.kind !== "stale-generation") return "stale";
-    } catch (error) {
-      if (error instanceof Error && error.message === "REMOVED_DURING_REFRESH") return "removed";
-      if (error instanceof Error && error.message === "STATE_STALE") return "stale";
-      throw error;
-    }
-
-    await assertScopeAuthority(dependencies, scope, signal);
-    const latest = await dependencies.state.read(scope, signal);
-    if (!latest.ok) return "stale";
-    const latestRecord = recordFor(latest.snapshot, registrationIdValue, dependencies.sha256);
-    if (latestRecord === undefined) return "removed";
-    if (!recordsEqual(latestRecord, expectedRecord)) return "stale";
-    authority = latest.snapshot;
+  // Refresh work intentionally occurs outside the state transaction. The plan
+  // therefore rechecks the original registration and scheduler claim directly
+  // against the latest snapshot before the short CAS commit.
+  try {
+    const result = await runScopedMutation(
+      dependencies.mutations,
+      scope,
+      (snapshot) => {
+        const current = recordFor(snapshot, registrationIdValue, dependencies.sha256);
+        if (current === undefined) throw new Error("REMOVED_DURING_REFRESH");
+        if (!recordsEqual(current, expectedRecord)) throw new Error("STATE_STALE");
+        return {
+          kind: "commit" as const,
+          mutation: replaceRecord(snapshot, replacement, dependencies.sha256),
+          value: undefined,
+          recheckAuthority: async () => {
+            await assertScopeAuthority(dependencies, scope, signal);
+            if (schedulerLeaseId !== undefined && (dependencies.schedulerLeases === undefined ||
+                !(await dependencies.schedulerLeases.validate(scope, schedulerLeaseId, dependencies.clock.nowEpochMilliseconds(), signal)))) {
+              throw new Error("STATE_STALE");
+            }
+          },
+        };
+      },
+      signal,
+    );
+    return result.kind === "committed" ? "committed" : "stale";
+  } catch (error) {
+    if (error instanceof Error && error.message === "REMOVED_DURING_REFRESH") return "removed";
+    if (error instanceof Error && error.message === "STATE_STALE") return "stale";
+    throw error;
   }
-  return "stale";
 }
 
 type AutomaticDispositionInput =
@@ -243,7 +230,6 @@ export function automaticDisposition(result: AutomaticDispositionInput): "automa
         case "NOT_INSTALLED":
         case "ALREADY_INSTALLED":
         case "WRONG_ACTIVATION":
-        case "PENDING_TRANSITION":
         case "INCOMPATIBLE":
         case "UNTRUSTED":
         case "UNCONFIGURED":
@@ -318,7 +304,7 @@ export interface MarketplaceRefreshService {
 export type MarketplaceRefreshServiceDependencies = Readonly<{
   inventory: LifecycleStateInventoryPort;
   state: LifecycleStateStore;
-  mutations: GenerationMutationCoordinator;
+  mutations: LifecycleStateStore;
   clock: LifecycleClock;
   claimIds: RefreshClaimIdPort;
   claimOwners?: RefreshClaimOwnerPort;
@@ -521,26 +507,33 @@ export function createMarketplaceRefreshService(dependencies: MarketplaceRefresh
       const unchanged = oldSnapshot !== undefined && oldSnapshot.source.revision === selected.source.revision && oldSnapshot.contentDigest === selected.contentDigest && oldSnapshot.binding === selected.binding;
       const discovery = discoveredNotifications(latestAuthority, scope, id, selected, probes, completedAt, dependencies.sha256);
       const plan = createPromotionPlan({ kind: "marketplace", allocation, materialized }, dependencies.sha256);
-      let publicationAuthority = latest.snapshot;
-      let result: Awaited<ReturnType<GenerationMutationCoordinator["runPreparedMutation"]>> | undefined;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        result = await dependencies.mutations.runPreparedMutation(
-          { scope, plugins: [], expectedGeneration: publicationAuthority.generation },
-          async (context) => {
-            const authority = recordFor(context.snapshot, id, dependencies.sha256);
+      let promoted: Awaited<ReturnType<ContentStorePort["promote"]>>;
+      try {
+        // Promotion is slow filesystem work and must happen before the short
+        // state transaction. The content identity makes retries idempotent.
+        promoted = await dependencies.content.promote(plan, signal);
+      } catch (error) {
+        if (signal.aborted) throw error;
+        throw Object.assign(new Error("PROMOTION_FAILED"), { cause: error });
+      }
+      if (promoted.identity.kind !== "marketplace") throw new Error("PROMOTION_FAILED");
+      const currentCadence = await cadence(signal);
+      const result = await runScopedMutation(
+        dependencies.mutations,
+        scope,
+          (snapshot) => {
+            const authority = recordFor(snapshot, id, dependencies.sha256);
             if (authority === undefined) throw new Error("REMOVED_DURING_REFRESH");
             if (authority.refresh.claim?.id !== claimId || deriveMarketplaceSourceIdentity(authority.source, dependencies.sha256) !== deriveMarketplaceSourceIdentity(current.source, dependencies.sha256)) throw new Error("STATE_STALE");
-            await assertScopeAuthority(dependencies, scope, signal);
-            // Policy and origin are authoritative in the locked snapshot. Only
-            // refresh memory and newly discovered notification facts belong to
-            // this long-running refresh operation.
+            // Policy and origin are authoritative in the latest snapshot. Only
+            // refresh memory and newly discovered notification facts are written.
             const discovered = discoveredNotifications(authority, scope, id, selected, probes, completedAt, dependencies.sha256);
             const schedule = authority.source.kind === "local-git" ? undefined : deriveUpdateSchedule({
               registrationId: id,
               outcome: "success",
               failureCount: 0,
               anchorAt: completedAt,
-              cadence: await cadence(signal),
+              cadence: currentCadence,
             }, dependencies.sha256);
             const { schedule: _previousSchedule, ...settledRefresh } = withoutRefreshClaim(authority);
             const publicationRecord = MarketplaceRegistrationRecordSchema.parse({
@@ -553,38 +546,21 @@ export function createMarketplaceRefreshService(dependencies: MarketplaceRefresh
                 consecutiveFailures: 0,
               },
             });
-            let promoted: Awaited<ReturnType<ContentStorePort["promote"]>>;
-            try {
-              promoted = await dependencies.content.promote(plan, signal);
-            } catch (error) {
-              if (signal.aborted) throw error;
-              throw Object.assign(new Error("PROMOTION_FAILED"), { cause: error });
-            }
-            if (promoted.identity.kind !== "marketplace") throw new Error("PROMOTION_FAILED");
-            const records = marketplaceUpdateRecords(context.snapshot).map((record) => registrationId(scope, record, dependencies.sha256) === id ? publicationRecord : record);
-            const snapshots = [...marketplaceSnapshots(context.snapshot)];
-            const index = snapshots.findIndex((snapshot) => snapshot.marketplace === current.marketplace);
+            const records = marketplaceUpdateRecords(snapshot).map((record) => registrationId(scope, record, dependencies.sha256) === id ? publicationRecord : record);
+            const snapshots = [...marketplaceSnapshots(snapshot)];
+            const index = snapshots.findIndex((candidate) => candidate.marketplace === current.marketplace);
             if (index >= 0) snapshots[index] = selected;
             else snapshots.push(selected);
             return {
-              mutation: createMarketplaceRegistrationSnapshotMutation(context.snapshot, records, snapshots, dependencies.sha256),
+              kind: "commit" as const,
+              mutation: createMarketplaceRegistrationSnapshotMutation(snapshot, records, snapshots, dependencies.sha256),
               value: undefined,
-              beforeCommit: () => assertScopeAuthority(dependencies, scope, signal),
+              recheckAuthority: () => assertScopeAuthority(dependencies, scope, signal),
             };
-          },
-          signal,
-        );
-        if (result.kind === "committed") break;
-        if (result.kind !== "stale-generation") throw new Error("STATE_STALE");
-        await assertScopeAuthority(dependencies, scope, signal);
-        const rebased = await dependencies.state.read(scope, signal);
-        if (!rebased.ok) throw new Error("STATE_STALE");
-        const rebasedRecord = recordFor(rebased.snapshot, id, dependencies.sha256);
-        if (rebasedRecord === undefined) throw new Error("REMOVED_DURING_REFRESH");
-        if (rebasedRecord.refresh.claim?.id !== claimId || deriveMarketplaceSourceIdentity(rebasedRecord.source, dependencies.sha256) !== deriveMarketplaceSourceIdentity(current.source, dependencies.sha256)) throw new Error("STATE_STALE");
-        publicationAuthority = rebased.snapshot;
-      }
-      if (result?.kind !== "committed") throw new Error("STATE_STALE");
+        },
+        signal,
+      );
+      if (result.kind !== "committed") throw new Error("STATE_STALE");
       const committed = recordFor(result.snapshot, id, dependencies.sha256)!;
       // Once state proves publication, caller cancellation cannot turn the
       // committed refresh into a cancelled result.

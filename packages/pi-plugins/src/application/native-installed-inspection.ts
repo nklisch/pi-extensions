@@ -4,7 +4,7 @@ import { compareUtf8 } from "../domain/canonical-json.js";
 import type { ComponentId } from "../domain/components.js";
 import { parsePluginKey } from "../domain/identity.js";
 import type { InstalledPluginRecord, InstalledRevisionRecord } from "../domain/state/installed-state.js";
-import { toScopeReference, type ScopeContext, type ScopeReference } from "../domain/state/scope.js";
+import { ScopeReferenceSchema, toScopeReference, type ScopeContext, type ScopeReference } from "../domain/state/scope.js";
 import { createTrustCandidate } from "../domain/trust-policy.js";
 import type { InstalledPluginLoader } from "./ports/installed-plugin-loader.js";
 import type { InspectionReadinessPort } from "./ports/inspection-readiness.js";
@@ -80,12 +80,12 @@ function sameIds(left: readonly ComponentId[], right: readonly ComponentId[]): b
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
-function recoveryTransition(subject: InstalledInspectionDetailSubject, snapshot: InspectionEvidenceSnapshot): "none" | "deferred" | "blocked" | "recovery-required" {
-  const matches = snapshot.recovery.results.filter((result) =>
-    sameScope(result.scope, subject.scope) && result.plugin === subject.plugin);
+function recoveryTransition(subject: InstalledInspectionDetailSubject, snapshot: InspectionEvidenceSnapshot): "none" | "deferred" | "blocked" {
+  const convergence = snapshot.convergence ?? snapshot.recovery ?? { results: [] };
+  const matches = convergence.results.filter((result) => result.scope !== undefined && sameScope(ScopeReferenceSchema.parse(result.scope), subject.scope) && result.plugin === subject.plugin);
   if (matches.some((result) => result.kind === "blocked")) return "blocked";
   if (matches.some((result) => result.kind === "deferred")) return "deferred";
-  return snapshot.startup.blocked.some((entry) => entry.plugin === subject.plugin) ? "recovery-required" : "none";
+  return snapshot.startup.blocked.some((entry) => entry.plugin === subject.plugin) ? "blocked" : "none";
 }
 
 function updateState(
@@ -296,16 +296,11 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
       const skillsStatus = participantStatus({ evidence: runtime, participant: "skills-hooks", expectedSkills, expectedHooks, selectedRevision: subject.selectedRevision, activeExpected });
       const mcpStatus = participantStatus({ evidence: runtime, participant: "mcp", expectedMcp, selectedRevision: subject.selectedRevision, activeExpected });
       const recovery = recoveryTransition(subject, snapshot);
-      // A pending transition is deliberately staged (live next start) unless
-      // the startup sweep already failed to settle it — then it is stuck.
-      const transition = authority.record.pendingTransition !== undefined
-        ? (recovery === "none" ? "pending" as const : recovery)
-        : recovery;
+      const transition = recovery;
       const update = updateState(subject, snapshot, authority.revision, dependencies.sha256);
       const findings: NativeDiagnosticInput["findings"][number][] = [];
-      if (transition === "pending") findings.push(finding("updateStaged", detailId));
-      else if (transition === "deferred") findings.push(finding("recoveryDeferred", detailId));
-      else if (transition === "blocked" || transition === "recovery-required") findings.push(finding("recoveryRequired", detailId));
+      if (transition === "deferred") findings.push(finding("recoveryDeferred", detailId));
+      else if (transition === "blocked") findings.push(finding("recoveryRequired", detailId));
       if (trust === "project-untrusted") findings.push(finding("projectUntrusted", detailId));
       if (report === undefined) findings.push(finding("capabilityUnavailable", detailId));
       else {
@@ -386,7 +381,7 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
           provenance: projectSafeProvenance(assessment.requirement.provenance),
         })).sort((left, right) => compareUtf8(left.id, right.id)),
       });
-      const activationState = transition !== "none" ? (transition === "pending" ? "pending" : "recovery-required")
+      const activationState = transition !== "none" ? "recovery-required"
         : condition === "blocked" ? "blocked"
         : !localRuntimeCurrent ? "unavailable"
         : authority.record.activation === "disabled" ? "inactive"

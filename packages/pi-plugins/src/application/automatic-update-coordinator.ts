@@ -5,7 +5,7 @@ import { MarketplaceRegistrationRecordSchema, UpdateNoticeIdSchema, UpdateNotice
 import type { Sha256 } from "../domain/source.js";
 import { AutomaticUpdateEligibilitySchema, type AutomaticUpdateEligibility, type AutomaticUpdateEligibilityReason } from "./automatic-update-eligibility.js";
 import type { AutomaticTrustContinuity } from "./automatic-trust-continuity.js";
-import type { GenerationMutationCoordinator } from "./generation-mutation-coordinator.js";
+import { runScopedMutation } from "./state-transaction.js";
 import { createMarketplaceUpdateRecordsMutation, marketplaceUpdateRecords } from "./marketplace-update-state.js";
 import { NativeAutomaticUpdateRunRequestSchema, NativeAutomaticUpdateRunResultSchema, type NativeAutomaticUpdateRunRequest, type NativeAutomaticUpdateRunResult } from "./native-update-contract.js";
 import type { AutomaticUpdateLifecyclePort, AutomaticUpdateLifecycleResult } from "./ports/automatic-update-lifecycle.js";
@@ -27,7 +27,7 @@ export interface AutomaticUpdateCoordinator {
 export type AutomaticUpdateCoordinatorDependencies = Readonly<{
   state: LifecycleStateStore;
   inventory: LifecycleStateInventoryPort;
-  mutations: GenerationMutationCoordinator;
+  mutations: LifecycleStateStore;
   policy: UpdatePolicyAuthorityPort;
   lifecycle: AutomaticUpdateLifecyclePort;
   continuity: AutomaticTrustContinuity;
@@ -116,15 +116,16 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
       const unchanged = records.every((record) => record.notices.every((notice) =>
         notice.id !== id || JSON.stringify(update(notice)) === JSON.stringify(notice)));
       if (unchanged) return true;
-      const result = await dependencies.mutations.runPreparedMutation(
-        { scope: context, plugins: [], expectedGeneration: loaded.snapshot.generation },
-        async ({ snapshot }) => ({
+      const result = await runScopedMutation(dependencies.mutations,
+        context,
+        (snapshot) => ({
+          kind: "commit" as const,
           mutation: createMarketplaceUpdateRecordsMutation(snapshot, marketplaceUpdateRecords(snapshot).map((record) => MarketplaceRegistrationRecordSchema.parse({
             ...record,
             notices: record.notices.map((notice) => notice.id === id ? update(notice) : notice),
           })), dependencies.sha256),
           value: undefined,
-          beforeCommit: async () => {
+          recheckAuthority: async () => {
             if (!await authorized(context, signal)) throw new Error("PROJECT_AUTHORITY_STALE");
           },
         }),

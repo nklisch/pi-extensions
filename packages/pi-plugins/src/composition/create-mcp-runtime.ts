@@ -1,8 +1,6 @@
 import type { ContentStorePort } from "../application/ports/content-store.js";
-import type { LifecycleClock } from "../application/ports/lifecycle-clock.js";
 import type { McpLaunchEnvironmentPort } from "../application/ports/mcp-launch-environment.js";
 import type { McpRuntimePort } from "../application/ports/mcp-runtime.js";
-import type { RevisionLeaseStore } from "../application/ports/revision-lease-store.js";
 import { createMcpLaunchContextPort } from "../application/mcp-launch-context.js";
 import { createInactiveProjectionExpectation } from "../application/ports/runtime-projection.js";
 import type { Sha256 } from "../domain/source.js";
@@ -17,7 +15,7 @@ import {
   type McpLifecycleState,
   type McpLifecycleTransitionRequest,
 } from "../runtime/mcp/lifecycle-participant.js";
-import { createMcpRevisionLeaseProvider } from "../runtime/mcp/revision-lease-provider.js";
+import { createMcpRuntimeBindingProvider } from "../runtime/mcp/mcp-runtime-binding-provider.js";
 import type { HostConfigurationDependencies } from "./create-host-configuration.js";
 import type { RuntimeSelectionCatalog } from "./runtime-selection-catalog.js";
 import { disposeSequentially } from "./sequential-cleanup.js";
@@ -54,13 +52,10 @@ export function createComposedMcpRuntime(input: Readonly<{
   project: PiProjectContextAdapters;
   configuration: HostConfigurationDependencies;
   environment: McpLaunchEnvironmentPort;
-  leases: RevisionLeaseStore;
-  clock: LifecycleClock;
-  sessionId: string;
+  sessionId?: string;
   sha256: Sha256;
 }>): ComposedMcpRuntime {
-  if (input === null || typeof input !== "object" || typeof input.sha256 !== "function" ||
-      typeof input.sessionId !== "string" || input.sessionId.length === 0) {
+  if (input === null || typeof input !== "object" || typeof input.sha256 !== "function") {
     throw new TypeError("MCP runtime composition dependencies are required");
   }
   const context = createMcpLaunchContextPort({
@@ -71,7 +66,7 @@ export function createComposedMcpRuntime(input: Readonly<{
     configuration: input.configuration,
     sha256: input.sha256,
   });
-  const leaseProviders = new Set<ReturnType<typeof createMcpRevisionLeaseProvider>>();
+  const leaseProviders = new Set<ReturnType<typeof createMcpRuntimeBindingProvider>>();
   const participant = createMcpLifecycleParticipant({
     ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
     launchValues(registration) {
@@ -83,12 +78,9 @@ export function createComposedMcpRuntime(input: Readonly<{
       });
     },
     runtimeLeases(registration) {
-      const provider = createMcpRevisionLeaseProvider({
+      const provider = createMcpRuntimeBindingProvider({
         source: registration,
         active: input.selections,
-        leases: input.leases,
-        clock: input.clock,
-        sessionId: input.sessionId,
         sha256: input.sha256,
       });
       leaseProviders.add(provider);

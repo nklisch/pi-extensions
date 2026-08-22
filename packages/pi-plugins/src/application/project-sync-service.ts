@@ -2,7 +2,6 @@ import { canonicalJson } from "../domain/canonical-json.js";
 import { hashContent, type ContentDigest } from "../domain/content-manifest.js";
 import { toScopeReference, type ProjectKey } from "../domain/state/scope.js";
 import type { Sha256 } from "../domain/source.js";
-import type { GenerationMutationCoordinator } from "./generation-mutation-coordinator.js";
 import {
   LifecycleTargetExpectationSchema,
   NativeLifecycleOperationResultSchema,
@@ -59,7 +58,7 @@ export interface ProjectSyncService {
 
 export type ProjectSyncServiceDependencies = Readonly<{
   state: LifecycleStateStore;
-  mutations: GenerationMutationCoordinator;
+  mutations: LifecycleStateStore;
   projectRoots: ProjectRootAuthorityPort;
   projectTrust: ProjectTrustPort;
   files: ProjectIntentFilePort;
@@ -241,7 +240,7 @@ export function createProjectSyncService(dependencies: ProjectSyncServiceDepende
           }
           const committed = await commitProjectSyncDeclarationDigest({ snapshot: latest, digest: planning.plan.desiredDigest!, mutations: dependencies.mutations, sha256: dependencies.sha256 }, signal);
           if (committed.kind === "stale") return result(context, progress, { kind: "conflict", reason: "state-generation-changed" }, completed, actions.slice(index).map((entry) => entry.id), projectFile, committed.actual);
-          if (committed.kind === "recovery-required") return result(context, progress, { kind: "recovery-required", code: "ADAPTER_FAILED", ...(committed.committed === undefined ? {} : { committed: committed.committed }), action: "run-recovery" }, completed, actions.slice(index).map((entry) => entry.id), projectFile, committed.committed);
+          if (committed.kind === "unavailable") return result(context, progress, { kind: "failed", code: "ADAPTER_FAILED" }, completed, actions.slice(index).map((entry) => entry.id), projectFile, latest.generation);
           latest = committed.snapshot;
           completed.push(action.id);
           await progress.emit({ phase: "finalization", state: "completed", actionId: action.id });
@@ -258,18 +257,16 @@ export function createProjectSyncService(dependencies: ProjectSyncServiceDepende
             if (action.kind === "uninstall-plugin") { completed.push(action.id); continue; }
             return result(context, progress, { kind: "conflict", reason: "target-changed" }, completed, actions.slice(index).map((entry) => entry.id), projectFile, latest.generation);
           }
-          if (record.pendingTransition !== undefined) return result(context, progress, { kind: "conflict", reason: "pending-transition" }, completed, actions.slice(index).map((entry) => entry.id), projectFile, latest.generation);
-          const expectation = LifecycleTargetExpectationSchema.parse({ generation: latest.generation, plugin: record.plugin, selectedRevision: record.selectedRevision, activation: record.activation, targetDigest: deriveLifecycleTargetDigest(toScopeReference(latest.scope), record, dependencies.sha256), pendingTransition: "none" });
+          const expectation = LifecycleTargetExpectationSchema.parse({ generation: latest.generation, plugin: record.plugin, selectedRevision: record.selectedRevision, activation: record.activation, targetDigest: deriveLifecycleTargetDigest(toScopeReference(latest.scope), record, dependencies.sha256) });
           const lifecycle = action.kind === "enable-plugin"
             ? await dependencies.lifecycle.enable({ scope: latest.scope, plugin: record.plugin, configurationPathContext: dependencies.configurationPathContext(context.root, latest), expectedTarget: expectation, origin: "sync" }, signal)
             : action.kind === "disable-plugin"
               ? await dependencies.lifecycle.disable({ scope: latest.scope, plugin: record.plugin, expectedTarget: expectation, origin: "sync" }, signal)
               : await dependencies.lifecycle.uninstall({ scope: latest.scope, plugin: record.plugin, expectedTarget: expectation, origin: "sync", retainedData: "keep" }, signal);
-          if (lifecycle.kind === "changed" || lifecycle.kind === "unchanged") {
+          if (lifecycle.kind === "applied" || lifecycle.kind === "live-next-start" || lifecycle.kind === "current") {
             latest = lifecycle.snapshot as ProjectGenerationSnapshot;
-            lifecycleChanged = lifecycle.kind === "changed";
-          } else if (lifecycle.kind === "recovery-required") return result(context, progress, { kind: "recovery-required", code: "PENDING_TRANSITION", transition: lifecycle.transition, ...(lifecycle.committed === undefined ? {} : { committed: lifecycle.committed }), action: "run-recovery" }, completed, actions.slice(index).map((entry) => entry.id), projectFile, lifecycle.committed);
-          else if (lifecycle.kind === "stale") return result(context, progress, { kind: "conflict", reason: "target-changed" }, completed, actions.slice(index).map((entry) => entry.id), projectFile, lifecycle.actual);
+            lifecycleChanged = lifecycle.kind !== "current";
+          } else if (lifecycle.kind === "stale") return result(context, progress, { kind: "conflict", reason: "target-changed" }, completed, actions.slice(index).map((entry) => entry.id), projectFile, lifecycle.actual);
           else return result(context, progress, { kind: "failed", code: "ADAPTER_FAILED" }, completed, actions.slice(index).map((entry) => entry.id), projectFile, latest.generation);
         }
         completed.push(action.id);

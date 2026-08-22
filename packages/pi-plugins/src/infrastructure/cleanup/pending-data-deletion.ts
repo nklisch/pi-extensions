@@ -1,36 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { z } from "zod";
 import { canonicalJson } from "../../domain/canonical-json.js";
-import { PluginKeySchema, type PluginKey } from "../../domain/identity.js";
-import { PluginDataRefSchema, type PluginDataRef } from "../../domain/state/references.js";
-import { ScopeReferenceSchema, type ScopeReference } from "../../domain/state/scope.js";
 import { EpochMillisecondsSchema, type EpochMilliseconds } from "../../application/ports/lifecycle-clock.js";
+import { PendingDeleteMarkerSchema, PENDING_DELETE_GRACE_MS, type PendingDeleteMarker, type PendingDeleteMarkerStore, type PendingDeleteReplayResult, type PluginKey, type ScopeReference, type PluginDataRef } from "../../application/ports/pending-data-deletion.js";
 import type { PersistentDataRemovalPort } from "../../application/ports/persistent-data-removal.js";
-
-export const PENDING_DELETE_GRACE_MS = 60 * 60 * 1_000;
-
-export const PendingDeleteMarkerSchema = z.object({
-  scope: ScopeReferenceSchema,
-  plugin: PluginKeySchema,
-  dataRef: PluginDataRefSchema,
-  requestedAt: EpochMillisecondsSchema,
-}).strict().readonly();
-export type PendingDeleteMarker = z.infer<typeof PendingDeleteMarkerSchema>;
-
-export type PendingDeleteMarkerStore = Readonly<{
-  root: string;
-  path(marker: PendingDeleteMarker): string;
-  create(marker: PendingDeleteMarker): Promise<void>;
-  remove(marker: PendingDeleteMarker): Promise<void>;
-  list(signal?: AbortSignal): Promise<readonly PendingDeleteMarker[]>;
-}>;
-
-export type PendingDeleteReplayResult = Readonly<{
-  marker: PendingDeleteMarker;
-  outcome: "deleted" | "discarded-installed" | "retained" | "invalid";
-}>;
 
 function assertSignal(signal: AbortSignal | undefined): void {
   signal?.throwIfAborted();
@@ -160,4 +134,5 @@ export async function replayPendingDeleteMarkers(input: Readonly<{
   return Object.freeze(results);
 }
 
-export { PluginDataRefSchema, type PluginDataRef, type ScopeReference, type PluginKey };
+export { PendingDeleteMarkerSchema, PENDING_DELETE_GRACE_MS } from "../../application/ports/pending-data-deletion.js";
+export type { PendingDeleteMarker, PendingDeleteMarkerStore, PendingDeleteReplayResult, PluginDataRef, ScopeReference, PluginKey } from "../../application/ports/pending-data-deletion.js";

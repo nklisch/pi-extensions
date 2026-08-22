@@ -11,7 +11,6 @@ import type { LifecycleStateStore } from "../application/ports/lifecycle-state-s
 import type { ProjectTrustPort } from "../application/ports/project-trust.js";
 import type { InstalledPluginLoader } from "../application/ports/installed-plugin-loader.js";
 import type { UpdateNotificationPublisherPort } from "../application/ports/update-notification-publisher.js";
-import type { GenerationMutationCoordinator } from "../application/generation-mutation-coordinator.js";
 import type { ScopeContext } from "../domain/state/scope.js";
 import type { Sha256 } from "../domain/source.js";
 import type { CurrentProjectRuntimeContext } from "../application/ports/project-trust.js";
@@ -20,7 +19,7 @@ import type { UpdateSchedulerStatusProjection } from "../application/update-sche
 export function createNativeUpdateManagementComposition(input: Readonly<{
   state: LifecycleStateStore;
   inventory: LifecycleStateInventoryPort;
-  mutations: GenerationMutationCoordinator;
+  mutations: LifecycleStateStore;
   clock: LifecycleClock;
   sha256: Sha256;
   scheduler: MarketplaceUpdateScheduler;
