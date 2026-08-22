@@ -1186,6 +1186,32 @@ export type {
   StateLoadResult,
 } from "./application/state-contract.js";
 export type { LifecycleStateStore } from "./application/ports/lifecycle-state-store.js";
+export {
+  runScopedMutation,
+  SCOPED_MUTATION_MAX_ATTEMPTS,
+} from "./application/state-transaction.js";
+export type {
+  ScopedMutationCommitDecision,
+  ScopedMutationRejectDecision,
+  ScopedMutationNoopDecision,
+  ScopedMutationDecision,
+  ScopedMutationPlan,
+  ScopedMutationRetryableResult,
+  ScopedMutationResult,
+  ScopedMutationRecheckAuthority,
+} from "./application/state-transaction.js";
+export {
+  PendingDeleteMarkerSchema,
+  PENDING_DELETE_GRACE_MS,
+  pendingDeleteMarkerFilename,
+  createPendingDeleteMarkerStore,
+  replayPendingDeleteMarkers,
+} from "./infrastructure/cleanup/pending-data-deletion.js";
+export type {
+  PendingDeleteMarker,
+  PendingDeleteMarkerStore,
+  PendingDeleteReplayResult,
+} from "./infrastructure/cleanup/pending-data-deletion.js";
 
 export { createLifecycleTransitionReconciler } from "./application/lifecycle-transition-reconciler.js";
 export type {

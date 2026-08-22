@@ -1,6 +1,13 @@
 import * as api from "@nklisch/pi-plugins";
 
 const expectedExports = [
+  "PENDING_DELETE_GRACE_MS",
+  "PendingDeleteMarkerSchema",
+  "SCOPED_MUTATION_MAX_ATTEMPTS",
+  "createPendingDeleteMarkerStore",
+  "pendingDeleteMarkerFilename",
+  "replayPendingDeleteMarkers",
+  "runScopedMutation",
   "NativeControlAdmissionError",
   "NativeControlArgvSchema",
   "NativeControlCommandIdSchema",

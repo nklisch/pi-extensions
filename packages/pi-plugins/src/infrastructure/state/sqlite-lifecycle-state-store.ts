@@ -1,6 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
-import { basename } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type { LifecycleStateInventoryPort } from "../../application/ports/lifecycle-state-inventory.js";
 import type { LifecycleStateStore } from "../../application/ports/lifecycle-state-store.js";
 import {
@@ -12,11 +12,13 @@ import {
 } from "../../application/state-contract.js";
 import { hashStateDocument, decodeStateDocument, encodeStateDocument, StateCodecError, StateVersionCutoverError, StateCorruptionSchema } from "../../domain/state/codec.js";
 import { GenerationSchema } from "../../domain/state/config-state.js";
+import { InstalledPluginRecordSchema } from "../../domain/state/installed-state.js";
 import { createStatePointersDocument, type PointerDocumentKind, type StatePointersDocument } from "../../domain/state/pointers.js";
 import { deriveStateBlobRef } from "../../domain/state/references.js";
 import { createScopeContext, ScopeContextSchema, toScopeReference, type ScopeContext } from "../../domain/state/scope.js";
 import type { Sha256 } from "../../domain/source.js";
 import { createLifecycleStateDefaultDocuments } from "./lifecycle-state-defaults.js";
+import { runLifecycleConvergenceMigration, type LifecycleConvergenceMigrationReport } from "./lifecycle-convergence-migration.js";
 import { ensurePrivateLockRoot, verifyLocalFilesystemCapability } from "./local-lock-filesystem.js";
 import { openSqliteDatabase, type OpenSqliteDatabase } from "./sqlite-open.js";
 
@@ -25,7 +27,7 @@ const VERSION = 1;
 const SQLITE_BUSY = 5;
 // Loaded hosts serialize many processes on one scope database; keep the
 // busy budget in the same ~5s class as initialization waits.
-const MAX_BUSY_RETRIES = 24;
+export const LIFECYCLE_STATE_BUSY_RETRY_BUDGET = 24;
 
 type OpenScopeDatabase = {
   readonly database: DatabaseSync;
@@ -44,6 +46,19 @@ type BlobRow = {
 };
 
 type PointerRow = { generation: number; pointer_json: string };
+
+export class LifecycleStateBusyError extends Error {
+  readonly code = "STATE_BUSY" as const;
+  readonly attempts: number;
+  readonly operation: "read" | "commit";
+
+  constructor(operation: "read" | "commit", attempts: number, cause?: unknown) {
+    super("lifecycle state is busy; another session is mid-write", cause === undefined ? undefined : { cause });
+    this.name = "LifecycleStateBusyError";
+    this.attempts = attempts;
+    this.operation = operation;
+  }
+}
 
 export class LifecycleStateAdapterError extends Error {
   readonly code: "STATE_CORRUPT" | "STATE_ADAPTER_FAILED";
@@ -319,6 +334,7 @@ function readSnapshot(database: DatabaseSync, scope: ScopeContext, sha256: Sha25
 
 type LifecycleStatePathPlan = Readonly<{
   stateRoot: string;
+  hostRoot?: string;
   stateDatabase(scope: ReturnType<typeof toScopeReference>): string;
 }>;
 
@@ -389,7 +405,8 @@ class SqliteLifecycleStateAdapter implements LifecycleStateStore {
       } catch (error) {
         rollback(handle.database);
         if (signal.aborted) throw signal.reason;
-        if (!isBusy(error) || attempt >= MAX_BUSY_RETRIES) throw error;
+        if (!isBusy(error)) throw error;
+        if (attempt >= LIFECYCLE_STATE_BUSY_RETRY_BUDGET) throw new LifecycleStateBusyError("read", attempt + 1, error);
         await waitForBusy(signal, attempt);
       }
     }
@@ -441,7 +458,8 @@ class SqliteLifecycleStateAdapter implements LifecycleStateStore {
       } catch (error) {
         rollback(handle.database);
         if (signal.aborted) throw signal.reason;
-        if (!isBusy(error) || attempt >= MAX_BUSY_RETRIES) throw error;
+        if (!isBusy(error)) throw error;
+        if (attempt >= LIFECYCLE_STATE_BUSY_RETRY_BUDGET) throw new LifecycleStateBusyError("commit", attempt + 1, error);
         await waitForBusy(signal, attempt);
       }
     }
@@ -503,6 +521,7 @@ class SqliteLifecycleStateAdapter implements LifecycleStateStore {
 export type NodeLifecycleStateAdapters = Readonly<{
   state: LifecycleStateStore;
   inventory: LifecycleStateInventoryPort;
+  migration: LifecycleConvergenceMigrationReport;
   close(): Promise<void>;
 }>;
 
@@ -517,6 +536,17 @@ export async function createNodeLifecycleStateAdapters(input: Readonly<{
   }
   const stateRoot = await ensurePrivateLockRoot(input.paths.stateRoot);
   await (input.verifyLocalFilesystem ?? verifyLocalFilesystemCapability)(stateRoot);
+  const migration = await runLifecycleConvergenceMigration({
+    stateRoot,
+    stateDatabase: input.paths.stateDatabase,
+    hostRoot: input.paths.hostRoot ?? resolve(join(stateRoot, "..", "..")),
+    sha256: input.sha256,
+    // U1 is additive: the shipped schema still owns pendingTransition. The
+    // migration module remains fully testable/directly usable, but adapter
+    // startup does not rewrite legacy state until U2 removes that field.
+    enabled: !Object.prototype.hasOwnProperty.call(InstalledPluginRecordSchema.unwrap().shape, "pendingTransition"),
+    signal: new AbortController().signal,
+  });
   const project = createScopeContext(input.currentProject, input.sha256);
   if (project.kind !== "project") throw new TypeError("current project scope is required");
   const adapter = new SqliteLifecycleStateAdapter(input.paths, input.sha256);
@@ -536,6 +566,7 @@ export async function createNodeLifecycleStateAdapters(input: Readonly<{
   return Object.freeze({
     state: adapter,
     inventory: { discover: (signal) => adapter.discover(signal) },
+    migration,
     close: () => adapter.close(),
   });
 }
