@@ -1636,8 +1636,6 @@ export type {
 
 export { PersistentDataRemovalPlanSchema } from "./application/ports/persistent-data-removal.js";
 export type { PersistentDataRemovalPlan, PersistentDataRemovalPort } from "./application/ports/persistent-data-removal.js";
-export { ConfirmedUninstallCleanupResultSchema, createConfirmedUninstallCleanup } from "./application/confirmed-uninstall-cleanup.js";
-export type { ConfirmedUninstallCleanupResult, ConfirmedUninstallCleanupDependencies, ConfirmedUninstallCleanupRequest } from "./application/confirmed-uninstall-cleanup.js";
 
 export {
   TrustedInstallSessionPolicy,

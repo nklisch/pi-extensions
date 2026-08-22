@@ -99,6 +99,57 @@ describe("lifecycle convergence migration", () => {
 
   });
 
+  it("defers a corrupt legacy scope without wiping it from post-migration reads", async () => {
+    const { root, stateRoot, hostRoot } = await fixture();
+    const paths = createPluginHostPathPlan(root);
+    const identity: ProjectIdentity = {
+      kind: "path-only",
+      canonicalRoot: pathToFileURL(root).href as never,
+      limitation: "identity-changes-with-canonical-root",
+    };
+    const project = createScopeContext({ kind: "project", identity, projectKey: deriveProjectKey(identity, sha256) }, sha256);
+    if (project.kind !== "project") throw new Error("project fixture failed");
+    const adapters = await createNodeLifecycleStateAdapters({ paths, currentProject: project, sha256, verifyLocalFilesystem: async () => {} });
+    await adapters.close();
+
+    const database = new DatabaseSync(paths.stateDatabase({ kind: "user" }));
+    const current = database.prepare("SELECT generation, pointer_json FROM current_pointer WHERE singleton = 1").get() as { generation: number; pointer_json: string };
+    const pointer = JSON.parse(current.pointer_json) as { documents: Array<{ kind: string; blob: string; digest: string; generation: number }> };
+    const selected = pointer.documents.find((entry) => entry.kind === "installedUser")!;
+    const row = database.prepare("SELECT document FROM state_blobs WHERE blob_ref = ?").get(selected.blob) as { document: string };
+    const raw = JSON.parse(row.document) as { plugins: Array<Record<string, unknown>> };
+    raw.generation = current.generation + 1;
+    raw.plugins.push({
+      plugin: "demo@community",
+      activation: "enabled",
+      selectedRevision: `sha256:${"0".repeat(64)}`,
+      revisions: [],
+      pendingTransition: `pending-transition-v1:sha256:${"d".repeat(64)}`,
+    });
+    const digest = hashStateDocument(raw as never, sha256);
+    const blob = deriveStateBlobRef({ scope: { kind: "user" }, generation: current.generation, kind: "installedUser", digest }, sha256);
+    database.prepare("UPDATE state_blobs SET blob_ref = ?, digest = ?, document = ? WHERE blob_ref = ?").run(blob, digest, JSON.stringify(raw), selected.blob);
+    pointer.documents = pointer.documents.map((entry) => entry.kind === "installedUser" ? { ...entry, blob, digest } : entry);
+    database.prepare("UPDATE current_pointer SET pointer_json = ? WHERE singleton = 1").run(JSON.stringify({ ...JSON.parse(current.pointer_json), documents: pointer.documents }));
+    database.close();
+
+    const options = { stateRoot, hostRoot, stateDatabase: paths.stateDatabase, sha256 };
+    const migration = await runLifecycleConvergenceMigration(options);
+    expect(migration.deferred).toBe(true);
+    expect(migration.scopes).toContainEqual(expect.objectContaining({ scope: { kind: "user" }, changed: false, deferred: true }));
+    const untouched = new DatabaseSync(paths.stateDatabase({ kind: "user" }), { readOnly: true });
+    expect(untouched.prepare("SELECT generation FROM current_pointer WHERE singleton = 1").get()).toEqual({ generation: current.generation });
+    const untouchedBlob = untouched.prepare("SELECT document FROM state_blobs WHERE blob_ref = ?").get(blob) as { document: string };
+    expect(JSON.parse(untouchedBlob.document).plugins[0]).toHaveProperty("pendingTransition");
+    untouched.close();
+
+    const reopened = await createNodeLifecycleStateAdapters({ paths, currentProject: project, sha256, verifyLocalFilesystem: async () => {} });
+    const read = await reopened.state.read({ kind: "user" }, new AbortController().signal);
+    expect(read.ok).toBe(false);
+    if (!read.ok) expect(read.corruptions.length).toBeGreaterThan(0);
+    await reopened.close();
+  });
+
   it("harvests completed pending deletes before dropping legacy databases", async () => {
     const { stateRoot, hostRoot } = await fixture();
     const journalRoot = join(hostRoot, "recovery", "journal", "v1");

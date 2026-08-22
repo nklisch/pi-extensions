@@ -205,10 +205,11 @@ async function harvestJournals(hostRoot: string, signal: AbortSignal | undefined
   const journalRoot = join(hostRoot, JOURNAL_DIRECTORY);
   let names: string[];
   try { names = await readdir(journalRoot); }
-  catch (error) { if (isMissing(error)) return { markers: 0, deleted: 0, complete: true }; throw error; }
+  catch (error) { if (isMissing(error)) return { markers: 0, deleted: 0, complete: true }; return { markers: 0, deleted: 0, complete: false }; }
   const markerStore = createPendingDeleteMarkerStore({ root: join(hostRoot, "cleanup", "v1", "pending-deletes") });
   let markers = 0;
   let deleted = 0;
+  let complete = true;
   const seenReferences = new Set<string>();
   for (const name of names.filter((entry) => entry.endsWith(".sqlite")).sort()) {
     abort(signal);
@@ -226,60 +227,68 @@ async function harvestJournals(hostRoot: string, signal: AbortSignal | undefined
         markers += 1;
       }
     } catch (error) {
-      try { database?.close(); } catch { /* retain the journal on close failure */ }
-      return { markers, deleted, complete: false };
+      if (signal?.aborted) throw error;
+      complete = false;
+      try { database?.close(); } catch { /* retain the journal and continue with siblings */ }
+      continue;
     }
-    try { database?.close(); } catch { return { markers, deleted, complete: false }; }
+    try { database?.close(); }
+    catch { complete = false; continue; }
     try { await unlink(path); deleted += 1; }
-    catch (error) { if (!isMissing(error)) return { markers, deleted, complete: false }; }
+    catch (error) { if (!isMissing(error)) complete = false; }
   }
-  return { markers, deleted, complete: true };
+  return { markers, deleted, complete };
 }
 
-async function removeLegacyDatabases(hostRoot: string): Promise<number> {
+async function removeLegacyDatabases(hostRoot: string): Promise<Readonly<{ removed: number; complete: boolean }>> {
   let removed = 0;
+  let complete = true;
   for (const relative of LEGACY_DATABASE_DIRECTORIES) {
     const directory = join(hostRoot, relative);
     let names: string[];
     try { names = await readdir(directory); }
-    catch (error) { if (isMissing(error)) continue; throw error; }
+    catch (error) { if (isMissing(error)) continue; complete = false; continue; }
     for (const name of names.filter((entry) => entry.endsWith(".sqlite"))) {
       try { await unlink(join(directory, name)); removed += 1; }
-      catch (error) { if (!isMissing(error)) throw error; }
+      catch (error) { if (!isMissing(error)) complete = false; }
     }
   }
-  return removed;
+  return { removed, complete };
 }
 
-async function removeLegacySidecars(root: string, removeEmptyDirectories = false): Promise<void> {
+async function removeLegacySidecars(root: string, removeEmptyDirectories = false): Promise<boolean> {
   let entries;
   try { entries = await readdir(root, { withFileTypes: true }); }
-  catch (error) { if (isMissing(error)) return; throw error; }
+  catch (error) { if (isMissing(error)) return true; return false; }
+  let complete = true;
   for (const entry of entries) {
     const path = join(root, entry.name);
     if (entry.isDirectory()) {
-      await removeLegacySidecars(path, removeEmptyDirectories);
+      complete = await removeLegacySidecars(path, removeEmptyDirectories) && complete;
       if (removeEmptyDirectories) {
-        try { await rmdir(path); } catch (error) { if (!isMissing(error) && (error as NodeJS.ErrnoException).code !== "ENOTEMPTY") throw error; }
+        try { await rmdir(path); } catch (error) { if (!isMissing(error) && (error as NodeJS.ErrnoException).code !== "ENOTEMPTY") complete = false; }
       }
       continue;
     }
     if (entry.name.endsWith(".owner") || entry.name === ".identity" || entry.name === ".sqlite-root.identity") {
-      try { await unlink(path); } catch (error) { if (!isMissing(error)) throw error; }
+      try { await unlink(path); } catch (error) { if (!isMissing(error)) complete = false; }
     }
   }
+  return complete;
 }
 
-async function removeRootSidecars(root: string): Promise<void> {
+async function removeRootSidecars(root: string): Promise<boolean> {
   let entries;
   try { entries = await readdir(root, { withFileTypes: true }); }
-  catch (error) { if (isMissing(error)) return; throw error; }
+  catch (error) { if (isMissing(error)) return true; return false; }
+  let complete = true;
   for (const entry of entries) {
     if (entry.isDirectory()) continue;
     if (entry.name.endsWith(".owner") || entry.name === ".identity" || entry.name === ".sqlite-root.identity") {
-      try { await unlink(join(root, entry.name)); } catch (error) { if (!isMissing(error)) throw error; }
+      try { await unlink(join(root, entry.name)); } catch (error) { if (!isMissing(error)) complete = false; }
     }
   }
+  return complete;
 }
 
 /**
@@ -298,41 +307,54 @@ export async function runLifecycleConvergenceMigration(input: LifecycleConvergen
   }
   await mkdir(input.stateRoot, { recursive: true, mode: 0o700 });
   let names: string[];
+  let deferred = false;
   try { names = await readdir(input.stateRoot); }
-  catch (error) { if (isMissing(error)) names = []; else throw error; }
+  catch (error) { if (isMissing(error)) names = []; else { names = []; deferred = true; } }
   const scopes: StateMigrationOutcome[] = [];
   for (const name of names.filter((entry) => entry === "user.sqlite" || /^project-[0-9a-f]{64}\.sqlite$/u.test(entry)).sort()) {
     abort(signal);
     const path = join(input.stateRoot, name);
     let file;
-    try { file = await stat(path); } catch { continue; }
+    try { file = await stat(path); }
+    catch (error) { if (!isMissing(error)) deferred = true; continue; }
     if (!file.isFile()) continue;
     scopes.push(migrateStateScope(path, input.sha256));
   }
 
-  const harvested = await harvestJournals(resolve(input.hostRoot), signal);
+  const resolvedHostRoot = resolve(input.hostRoot);
+  const harvested = await harvestJournals(resolvedHostRoot, signal);
   let deletedLegacyDatabases = harvested.deleted;
+  deferred ||= !harvested.complete;
   if (harvested.complete) {
-    deletedLegacyDatabases += await removeLegacyDatabases(resolve(input.hostRoot));
-    const resolvedHostRoot = resolve(input.hostRoot);
-    await removeRootSidecars(resolvedHostRoot);
+    const legacyDatabases = await removeLegacyDatabases(resolvedHostRoot);
+    deletedLegacyDatabases += legacyDatabases.removed;
+    deferred ||= !legacyDatabases.complete;
+    // Cleanup is best effort by design. A locked or unreadable legacy file is
+    // retained for the next startup instead of preventing healthy scopes from
+    // opening.
+    const rootSidecarsComplete = await removeRootSidecars(resolvedHostRoot);
+    deferred ||= !rootSidecarsComplete;
     // Only retired roots are recursively pruned. The state root is created
     // before this migration and must remain available for the first adapter
     // open, even when it has no databases yet.
     const recoveryRoot = join(resolvedHostRoot, "recovery");
-    await removeLegacySidecars(recoveryRoot, true);
-    try { await rmdir(recoveryRoot); } catch (error) { if (!isMissing(error) && (error as NodeJS.ErrnoException).code !== "ENOTEMPTY") throw error; }
-    await removeLegacySidecars(join(resolvedHostRoot, "locks"), true);
+    const recoveryCleanupComplete = await removeLegacySidecars(recoveryRoot, true);
+    deferred ||= !recoveryCleanupComplete;
+    try { await rmdir(recoveryRoot); } catch (error) { if (!isMissing(error) && (error as NodeJS.ErrnoException).code !== "ENOTEMPTY") deferred = true; }
+    const lockCleanupComplete = await removeLegacySidecars(join(resolvedHostRoot, "locks"), true);
+    deferred ||= !lockCleanupComplete;
     // Owner sidecars are one level below the two legacy staging roots; avoid
     // walking published content on every migration check.
-    await removeRootSidecars(join(resolvedHostRoot, "staging", "v1"));
-    await removeRootSidecars(join(resolvedHostRoot, "generated", "v1", ".staging"));
+    const stagingSidecarsComplete = await removeRootSidecars(join(resolvedHostRoot, "staging", "v1"));
+    deferred ||= !stagingSidecarsComplete;
+    const projectionSidecarsComplete = await removeRootSidecars(join(resolvedHostRoot, "generated", "v1", ".staging"));
+    deferred ||= !projectionSidecarsComplete;
   }
   return Object.freeze({
     scopes: Object.freeze(scopes.map((entry) => Object.freeze(entry))),
     harvestedMarkers: harvested.markers,
     deletedLegacyDatabases,
-    deferred: scopes.some((entry) => entry.deferred) || !harvested.complete,
+    deferred: deferred || scopes.some((entry) => entry.deferred),
   });
 }
 

@@ -63,6 +63,7 @@ export const LifecycleRejectionCodeRegistry = {
   untrusted: { tag: "UNTRUSTED" },
   unconfigured: { tag: "UNCONFIGURED" },
   malformed: { tag: "MALFORMED" },
+  busy: { tag: "BUSY" },
   projectionFailed: { tag: "PROJECTION_FAILED" },
   promotionFailed: { tag: "PROMOTION_FAILED" },
   aborted: { tag: "ABORTED" },

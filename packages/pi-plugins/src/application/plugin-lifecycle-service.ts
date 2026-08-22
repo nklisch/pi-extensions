@@ -254,7 +254,7 @@ async function activate(dependencies: PluginLifecycleServiceDependencies, operat
 function mapMutation<T>(operation: LifecycleOperation, result: ScopedMutationResult<T>, signal: AbortSignal): PluginLifecycleResult | { kind: "committed"; snapshot: GenerationSnapshot } {
   if (result.kind === "committed") return { kind: "committed", snapshot: result.snapshot };
   if (result.kind === "stale") return { kind: "stale", operation, expected: GenerationSchema.parse(result.expected), ...(result.actual === undefined ? {} : { actual: GenerationSchema.parse(result.actual) }) };
-  if (result.kind === "retryable") return rejected(operation, "MALFORMED");
+  if (result.kind === "retryable") return rejected(operation, result.code);
   if (result.kind === "reject") return result.value as PluginLifecycleResult;
   if (result.kind === "no-op") return result.value as PluginLifecycleResult;
   if (signal.aborted) return rejected(operation, "ABORTED");
@@ -317,8 +317,16 @@ function createPluginLifecycleImplementation(dependencies: PluginLifecycleServic
         const result = await preparePluginCandidate(preparation, candidateRequest, signal);
         if (result.kind === "rejected") return rejected(operation, mapPreparationCode(result.code));
         prepared = result.candidate;
-        if (prepared.plugin !== plugin) return rejected(operation, "MALFORMED");
-        if (operation === "update" && previous !== undefined && previous.selectedRevision === prepared.record.selectedRevision && previous.activation === "enabled") return current(operation, initial);
+        if (prepared.plugin !== plugin) {
+          await discardCandidate(dependencies, prepared);
+          prepared = undefined;
+          return rejected(operation, "MALFORMED");
+        }
+        if (operation === "update" && previous !== undefined && previous.selectedRevision === prepared.record.selectedRevision && previous.activation === "enabled") {
+          await discardCandidate(dependencies, prepared);
+          prepared = undefined;
+          return current(operation, initial);
+        }
       } else if (operation === "enable") {
         const enableRequest = request as EnablePluginRequest;
         const result = await prepareEnableCandidate(preparation, { operation: "enable", scope, installed: previous!, trustRecords: await trustFor(enableRequest, signal), configurationPathContext: enableRequest.configurationPathContext, ...(enableRequest.expectedConfigurationRevision === undefined ? {} : { expectedConfigurationRevision: enableRequest.expectedConfigurationRevision }) } satisfies EnableCandidatePreparationRequest, signal);
@@ -349,7 +357,11 @@ function createPluginLifecycleImplementation(dependencies: PluginLifecycleServic
     try {
       if (prepared?.promotion !== undefined) {
         const promotion = await dependencies.content.promote(prepared.promotion, signal);
-        if (!sameJson(promotion.identity, prepared.promotion.identity) || !sameJson(promotion.manifest, prepared.promotion.manifest)) return rejected(operation, "PROMOTION_FAILED");
+        if (!sameJson(promotion.identity, prepared.promotion.identity) || !sameJson(promotion.manifest, prepared.promotion.manifest)) {
+          await discardCandidate(dependencies, prepared);
+          prepared = undefined;
+          return rejected(operation, "PROMOTION_FAILED");
+        }
       }
       const mutation = runScopedMutation<PluginLifecycleResult | undefined>(dependencies.state, scope, (snapshot: GenerationSnapshot) => {
         const latest = targetRecord(snapshot, plugin);

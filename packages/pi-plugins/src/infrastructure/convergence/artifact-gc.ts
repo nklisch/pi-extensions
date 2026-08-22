@@ -24,6 +24,10 @@ export function createArtifactGc(input: Readonly<{ hostRoot: string; maxItems?: 
   const budgetMs = input.budgetMs ?? CONVERGENCE_FOREGROUND_BUDGET_MS;
   const roots: readonly Readonly<{ kind: ArtifactGcKind; path: string }> [] = [
     { kind: "staging", path: join(input.hostRoot, "staging", "v1") },
+    // Projection preparation uses a separate staging root; it follows the
+    // same grace policy as source staging and must not be hidden by the
+    // published generated/v1 scan's `.staging` skip.
+    { kind: "staging", path: join(input.hostRoot, "generated", "v1", ".staging") },
     { kind: "marketplace", path: join(input.hostRoot, "stores", "v1", "marketplaces") },
     { kind: "revision", path: join(input.hostRoot, "stores", "v1", "plugins") },
     { kind: "projection", path: join(input.hostRoot, "generated", "v1") },
@@ -45,6 +49,8 @@ export function createArtifactGc(input: Readonly<{ hostRoot: string; maxItems?: 
       let names: string[];
       try { names = await readdir(root.path); }
       catch (error) { if (missing(error)) continue; incompleteEvidence = true; retained += 1; continue; }
+      const candidates: string[] = [];
+      let categoryIncomplete = false;
       for (const name of names.sort()) {
         request.signal.throwIfAborted();
         if (processed >= maxItems || Date.now() - started >= budgetMs) { deferred = true; break; }
@@ -54,10 +60,24 @@ export function createArtifactGc(input: Readonly<{ hostRoot: string; maxItems?: 
         const path = join(root.path, name);
         let info;
         try { info = await lstat(path); }
-        catch (error) { if (!missing(error)) { incompleteEvidence = true; retained += 1; } continue; }
-        if (info.isSymbolicLink() || !info.isDirectory() && !info.isFile()) { incompleteEvidence = true; retained += 1; continue; }
+        catch (error) {
+          if (!missing(error)) { categoryIncomplete = true; retained += 1; }
+          continue;
+        }
+        if (info.isSymbolicLink() || !info.isDirectory() && !info.isFile()) { categoryIncomplete = true; retained += 1; continue; }
         const key = `${root.kind}:${name}`;
         if (request.referenced.has(key) || now - info.mtimeMs < grace) { retained += 1; continue; }
+        candidates.push(path);
+      }
+      if (categoryIncomplete) {
+        // A single unreadable entry makes the category's absence proof
+        // incomplete. Do not collect the otherwise eligible siblings on this
+        // pass; the next pass can reassess the whole category.
+        incompleteEvidence = true;
+        retained += candidates.length;
+        continue;
+      }
+      for (const path of candidates) {
         try { await rm(path, { recursive: true, force: true }); removed += 1; }
         catch { incompleteEvidence = true; retained += 1; }
       }

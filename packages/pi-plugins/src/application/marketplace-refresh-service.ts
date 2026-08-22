@@ -234,6 +234,7 @@ export function automaticDisposition(result: AutomaticDispositionInput): "automa
         case "UNTRUSTED":
         case "UNCONFIGURED":
         case "MALFORMED": return "manual-required";
+        case "BUSY":
         case "PROJECTION_FAILED":
         case "PROMOTION_FAILED":
         case "ABORTED":

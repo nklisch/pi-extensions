@@ -70,7 +70,7 @@ class MemoryState implements LifecycleStateStore {
   }
 }
 
-function dependencies(state: MemoryState, reload: LifecycleReloadPort["reload"] = async () => ({ kind: "accepted" })): PluginLifecycleServiceDependencies {
+function dependencies(state: LifecycleStateStore, reload: LifecycleReloadPort["reload"] = async () => ({ kind: "accepted" })): PluginLifecycleServiceDependencies {
   return {
     state,
     content: {},
@@ -153,6 +153,19 @@ describe("plugin lifecycle service", () => {
     expect(result.kind).toBe("applied");
     expect(state.commits).toBe(2);
     expect(state.current.installed.plugins[0]?.activation).toBe("disabled");
+  });
+
+  it("maps exhausted state-write contention to the typed BUSY rejection", async () => {
+    const current = snapshot(0, "enabled");
+    const busyState: LifecycleStateStore = {
+      async read() { return { ok: true, snapshot: current }; },
+      async commit() { throw Object.assign(new Error("another session is mid-write"), { name: "LifecycleStateBusyError" }); },
+    };
+    const service = createPluginLifecycleService(dependencies(busyState));
+
+    const result = await service.disable({ scope, plugin: plugin.identity.key }, signal);
+
+    expect(result).toMatchObject({ kind: "rejected", operation: "disable", code: "BUSY" });
   });
 
   it("keeps the selected revision authoritative and does not add a transition marker", async () => {
