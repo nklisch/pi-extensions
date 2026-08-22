@@ -66,6 +66,13 @@ Target model:
 
 Named behavior deltas:
 
+- **No session can block another session's lifecycle operations** (key user
+  requirement, 2026-08-22). No journal fences, owner locks, durable leases, or
+  pending markers may gate an install, update, enable, disable, or uninstall
+  issued from any session. The only permitted cross-session coupling is the
+  short sqlite write transaction itself (bounded by busy budget and released
+  by the OS on process death) and transient CAS `stale` retries. Any design
+  element that can durably block a foreign session's operation is a defect.
 - No automatic rollback; a bad update is degraded-and-visible with the
   fall-back rule preserving self-healing across restarts.
 - `recovery-required` / `staged` / "needs recovery; restart pi" states and
@@ -88,6 +95,11 @@ packages (no cross-package consumers of the deleted machinery — verified).
 
 ## Closure evidence
 
+- Multi-session non-blocking: with one session mid-operation (or hung), a
+  second session's install/update/enable/disable/uninstall completes within
+  the busy/retry budget or returns a transient `stale`/`busy` rejection —
+  never a durable block. Verified by an e2e that races two host processes
+  and by structural absence of fences.
 - `npm run check` green (validation, builds, typecheck, tests, pack
   inspection) with the recovery/journal test suites removed or rewritten.
 - krometrail-class wedge is structurally impossible: no pending-transition
