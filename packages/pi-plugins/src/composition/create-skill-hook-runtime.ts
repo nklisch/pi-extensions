@@ -42,6 +42,8 @@ export type ComposedSkillHookRuntime = Readonly<{
   hooks: GuardedCommandHookExecutor;
   catalog: SkillHookRuntimeCatalog;
   subagent?: RegisteredSubagentHookRuntime;
+  /** Registration is host-wide, but degradation is reported per plugin by desired-state reconstruction. */
+  subagentRegistrationAvailable: boolean;
   replaceSessionLease(selections: readonly RuntimeSelection[], signal: AbortSignal): Promise<void>;
   quiesce(): void;
   resume(): void;
@@ -67,6 +69,7 @@ export async function createComposedSkillHookRuntime(input: Readonly<{
   const failureLog = input.failureLog ?? createNullHookFailureLog();
   let subagent: RegisteredSubagentHookRuntime | undefined;
   let coordinator: SubagentHookCoordinator | undefined;
+  let subagentRegistrationAvailable = input.subagents !== undefined;
   let closePromise: Promise<void> | undefined;
   try {
     delegates.bindSession(input.binding);
@@ -123,12 +126,22 @@ export async function createComposedSkillHookRuntime(input: Readonly<{
         continuationBudget: 3,
         failureLog,
       });
-      subagent = await registerSubagentHookRuntime({
-        lifecycle: input.subagents,
-        qualification,
-        coordinator,
-        runtimeSignal: runtimeAbort.signal,
-      });
+      try {
+        subagent = await registerSubagentHookRuntime({
+          lifecycle: input.subagents,
+          qualification,
+          coordinator,
+          runtimeSignal: runtimeAbort.signal,
+        });
+      } catch (error) {
+        if (runtimeAbort.signal.aborted) throw error;
+        // A failed aggregate registration must not prevent ordinary skills and
+        // hooks from starting. Desired-state reconstruction marks only plugins
+        // declaring SubagentStart/SubagentStop as degraded for this session.
+        subagentRegistrationAvailable = false;
+        try { await coordinator.dispose(); } catch { /* preserve degraded startup */ }
+        coordinator = undefined;
+      }
     }
 
     async function replaceSessionLease(_selections: readonly RuntimeSelection[], signal: AbortSignal): Promise<void> {
@@ -155,6 +168,7 @@ export async function createComposedSkillHookRuntime(input: Readonly<{
       hooks: executor,
       catalog: source.catalog,
       ...(subagent === undefined ? {} : { subagent }),
+      subagentRegistrationAvailable,
       replaceSessionLease,
       quiesce: delegates.quiesce,
       resume: delegates.resume,

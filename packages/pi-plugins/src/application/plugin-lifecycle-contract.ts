@@ -18,6 +18,8 @@ export const LifecycleOperationRegistry = {
   disable: { changesActivation: true },
   update: { changesActivation: true },
   uninstall: { changesActivation: true },
+  repair: { changesActivation: true },
+  rollback: { changesActivation: true },
 } as const;
 
 export type LifecycleOperation = keyof typeof LifecycleOperationRegistry;

@@ -291,6 +291,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
               content: content.content,
               userBaseDirectory: binding.current().cwd,
               sha256,
+              subagentRegistrationAvailable: skillHook.subagentRegistrationAvailable,
             }, signal, overrides);
             return latestDesired;
           },
@@ -412,7 +413,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         const recoveryResult = await convergence.sweep({ scopes: [{ kind: "user" }, project.scope], signal: startupSignal });
         const unresolvedRecovery: HostBlockedPlugin[] = recoveryResult.results.filter((result) => result.kind !== "completed").map((result) => ({ plugin: result.plugin ?? "convergence", code: `CONVERGENCE_${result.code}`, explanation: "startup convergence retained work for a later pass" }));
         const startup = startupResult({
-          blocked: [...(latestDesired?.blocked ?? []), ...unresolvedRecovery, ...runtimeStartupBlocked],
+          blocked: [...(latestDesired?.degraded ?? []), ...unresolvedRecovery, ...runtimeStartupBlocked],
           mcp: qualification.mcp,
           subagents: qualification.subagents,
           piReload: qualification.hostApi,
@@ -421,7 +422,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         const hostStatus = createHostStatusService({
           startup,
           recovery: unresolvedRecovery.length === 0 ? "settled" : "degraded",
-          runtime: [...(latestDesired?.blocked ?? []), ...runtimeStartupBlocked].length === 0 ? "reconciled" : "degraded",
+          runtime: [...(latestDesired?.degraded ?? []), ...runtimeStartupBlocked].length === 0 ? "reconciled" : "degraded",
           schedulerStatus: marketplaceComposition.updates.schedulerStatus,
         });
         const candidateContent = createCandidateContentLeasePort({ content: content.content, materializer: materializers.plugins });
@@ -823,10 +824,17 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
       const resources = activeResources as { discover(request: Readonly<{ reason: "startup" | "reload"; projectTrusted: boolean }>, signal: AbortSignal): Promise<Readonly<{ kind: string; skillPaths?: readonly string[] }>> };
       const result = await resources.discover({ reason: _event.reason, projectTrusted: activeBinding?.isProjectTrusted() === true }, new AbortController().signal);
       if (result.kind === "ready" && reloadSuccessor !== undefined) {
-        reloadSuccessor.reload.publishSuccessor(reloadSuccessor.ticket);
-        reloadSuccessor = undefined;
+        const successor = reloadSuccessor;
+        try {
+          successor.reload.publishSuccessor(successor.ticket);
+        } catch (error) {
+          try { successor.reload.failSuccessor(successor.ticket, error); } catch { /* broker may already be settled */ }
+        } finally {
+          reloadSuccessor = undefined;
+        }
       } else if (result.kind !== "ready" && reloadSuccessor !== undefined) {
-        reloadSuccessor.reload.failSuccessor(reloadSuccessor.ticket, new Error("Pi reload resource publication failed"));
+        const successor = reloadSuccessor;
+        try { successor.reload.failSuccessor(successor.ticket, new Error("Pi reload resource publication failed")); } catch { /* broker may already be settled */ }
         reloadSuccessor = undefined;
       }
       return result.kind === "ready" ? { skillPaths: [...(result.skillPaths ?? [])] } : undefined;

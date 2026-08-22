@@ -13,6 +13,7 @@ import {
   type ScopeContext,
   type ScopeReference,
 } from "../../domain/state/scope.js";
+import { HostBlockedPluginSchema, type HostBlockedPluginObservation } from "../host-observation-contract.js";
 import type { InstalledPluginRecord } from "../../domain/state/installed-state.js";
 import {
   CurrentProjectRuntimeContextSchema,
@@ -147,8 +148,14 @@ export const McpContributionObservationSchema = z.discriminatedUnion("kind", [
 ]);
 export type McpContributionObservation = z.infer<typeof McpContributionObservationSchema>;
 
+export const SuccessorActivationReportSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("applied"), degraded: z.tuple([]) }).strict().readonly(),
+  z.object({ kind: z.literal("degraded"), degraded: z.array(HostBlockedPluginSchema).min(1).readonly() }).strict().readonly(),
+]);
+export type SuccessorActivationReport = z.infer<typeof SuccessorActivationReportSchema>;
+
 export const LifecycleReloadResultSchemaRegistry = {
-  accepted: z.object({ kind: z.literal("accepted") }).strict().readonly(),
+  accepted: z.object({ kind: z.literal("accepted"), report: SuccessorActivationReportSchema.optional() }).strict().readonly(),
   failed: z.object({ kind: z.literal("failed"), code: z.string().min(1) }).strict().readonly(),
 } as const;
 const lifecycleReloadResultSchemas = Object.values(LifecycleReloadResultSchemaRegistry) as [
@@ -265,6 +272,7 @@ export function verifyActivationObservation(input: unknown): ActivationObservati
 export type {
   ContentDigest,
   CurrentProjectRuntimeContext,
+  HostBlockedPluginObservation,
   PluginKey,
   ScopeReference,
 };

@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ActivationObservation } from "../application/ports/lifecycle-reload.js";
+import {
+  SuccessorActivationReportSchema,
+  type SuccessorActivationReport,
+} from "../application/ports/lifecycle-reload.js";
 import type { ScopeReference } from "../domain/state/scope.js";
 import type { PiSessionBinding } from "../composition/packaged-plugin-host-contract.js";
 
@@ -13,9 +16,9 @@ type TicketState = {
   scope: ScopeReference;
   claimed: boolean;
   settled: boolean;
-  resolve: (observations: readonly ActivationObservation[]) => void;
+  resolve: (report: SuccessorActivationReport) => void;
   reject: (error: unknown) => void;
-  promise: Promise<readonly ActivationObservation[]>;
+  promise: Promise<SuccessorActivationReport>;
 };
 type Registry = { tickets: Map<string, TicketState> };
 
@@ -35,9 +38,9 @@ export type PiOperationContextPort = Readonly<{
 export type PiReloadBroker = Readonly<{
   open(binding: PiSessionBinding, scope: ScopeReference): PiReloadTicket;
   claimSuccessor(binding: PiSessionBinding): PiReloadTicket | undefined;
-  publish(ticket: PiReloadTicket, observations: readonly ActivationObservation[]): void;
+  publish(ticket: PiReloadTicket, report: SuccessorActivationReport): void;
   fail(ticket: PiReloadTicket, error?: unknown): void;
-  wait(ticket: PiReloadTicket, signal: AbortSignal): Promise<readonly ActivationObservation[]>;
+  wait(ticket: PiReloadTicket, signal: AbortSignal): Promise<SuccessorActivationReport>;
 }>;
 
 function publicTicket(state: TicketState): PiReloadTicket {
@@ -61,7 +64,7 @@ export function createPiReloadBroker(): PiReloadBroker {
     }
     let resolve!: TicketState["resolve"];
     let reject!: TicketState["reject"];
-    const promise = new Promise<readonly ActivationObservation[]>((accept, decline) => { resolve = accept; reject = decline; });
+    const promise = new Promise<SuccessorActivationReport>((accept, decline) => { resolve = accept; reject = decline; });
     // A successor can fail while the predecessor is still inside
     // `await context.reload()`, before it can call wait(). Attach a handler
     // immediately so that exact failure remains broker evidence rather than an
@@ -77,11 +80,12 @@ export function createPiReloadBroker(): PiReloadBroker {
     matches[0]!.claimed = true;
     return publicTicket(matches[0]!);
   }
-  function publish(ticket: PiReloadTicket, observations: readonly ActivationObservation[]): void {
+  function publish(ticket: PiReloadTicket, reportInput: SuccessorActivationReport): void {
     const state = lookup(ticket);
     if (!state.claimed || state.settled) throw new Error("Pi reload ticket cannot be published");
+    const report = SuccessorActivationReportSchema.parse(reportInput);
     state.settled = true;
-    state.resolve(Object.freeze([...observations]));
+    state.resolve(report);
   }
   function fail(ticket: PiReloadTicket, error: unknown = new Error("Pi reload successor failed")): void {
     const state = lookup(ticket);
@@ -89,7 +93,7 @@ export function createPiReloadBroker(): PiReloadBroker {
     state.settled = true;
     state.reject(error);
   }
-  async function wait(ticket: PiReloadTicket, signal: AbortSignal): Promise<readonly ActivationObservation[]> {
+  async function wait(ticket: PiReloadTicket, signal: AbortSignal): Promise<SuccessorActivationReport> {
     const state = lookup(ticket);
     signal.throwIfAborted();
     const abort = new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));

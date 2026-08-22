@@ -97,7 +97,13 @@ describe("runtime desired state", () => {
     // The candidate is attempted: only its missing revision evidence blocks.
     expect(installed.load).not.toHaveBeenCalled();
     expect(result.selections).toEqual([]);
-    expect(result.blocked).toEqual([{ plugin: "bundle@community", code: "REVISION_UNAVAILABLE", explanation: "selected installed revision is unavailable" }]);
+    expect(result.blocked).toMatchObject([{
+      plugin: "bundle@community",
+      scope: { kind: "user" },
+      selectedRevision: `sha256:${"a".repeat(64)}`,
+      code: "REVISION_UNAVAILABLE",
+      explanation: "selected installed revision is unavailable",
+    }]);
   });
 
   it("re-assesses with the install-time marketplace policy so unchanged runtimes match install-time digests", async () => {
@@ -222,4 +228,66 @@ describe("runtime desired state", () => {
     expect(result.selections.map((selection: { plugin: string }) => selection.plugin)).toEqual([plugin.identity.key]);
     expect(result.blocked).toEqual([]);
   });
+
+  it.each([
+    ["previous good", true, true],
+    ["previous missing", true, false],
+    ["no previous", false, false],
+  ])("uses the session-local fallback matrix: %s", async (_name, hasPreviousPointer, previousAvailable) => {
+    const previousSource = createResolvedPluginSource({ kind: "marketplace-path", marketplaceRevision: "a".repeat(40), path: "./plugin" }, sha256);
+    const brokenSource = createResolvedPluginSource({ kind: "marketplace-path", marketplaceRevision: "b".repeat(40), path: "./plugin" }, sha256);
+    const previousPlugin = NormalizedPluginSchema.parse({ ...pluginForFallback(previousSource), source: previousSource });
+    const brokenPlugin = NormalizedPluginSchema.parse({ ...pluginForFallback(brokenSource), source: brokenSource });
+    const previousCompatibility = CompatibilityReportSchema.parse({ plugin: previousPlugin.identity, activatable: true, components: [], requirements: [], diagnostics: [] });
+    const brokenCompatibility = CompatibilityReportSchema.parse({ plugin: brokenPlugin.identity, activatable: true, components: [], requirements: [], diagnostics: [] });
+    const previousRevision = createInstalledRevisionRecord({ plugin: previousPlugin, compatibility: previousCompatibility, content: createContentManifest([], sha256), scope: { kind: "user" } }, sha256);
+    const brokenRevision = createInstalledRevisionRecord({ plugin: brokenPlugin, compatibility: brokenCompatibility, content: createContentManifest([], sha256), scope: { kind: "user" } }, sha256);
+    const record = {
+      plugin: brokenPlugin.identity.key,
+      activation: "enabled" as const,
+      selectedRevision: brokenRevision.revision,
+      ...(hasPreviousPointer ? { previousRevision: previousRevision.revision } : {}),
+      revisions: previousAvailable ? [previousRevision, brokenRevision] : [brokenRevision],
+    };
+    const currentProject = { identity, projectKey, trust: { kind: "untrusted" as const } };
+    const loaded = {
+      plugin: previousPlugin,
+      compatibility: previousCompatibility,
+      marketplaceSource: createResolvedMarketplaceSource({ declared: { kind: "github", repository: "example/plugins" }, revision: "a".repeat(40) }, sha256),
+      content: createContentManifest([], sha256),
+      binding: previousRevision.revision,
+    };
+    const load = vi.fn(async ({ revision: candidate }: { revision: typeof previousRevision | typeof brokenRevision }) => {
+      if (candidate.revision === brokenRevision.revision) throw Object.assign(new Error("broken selected revision"), { code: "INSTALLED_DESCRIPTOR_CORRUPT" });
+      return loaded;
+    });
+    const result = await buildRuntimeDesiredState({
+      installed: { load } as never,
+      compatibility: { assess: vi.fn(async (_request: unknown) => previousCompatibility) } as never,
+      projections: { prepare: vi.fn(async (expectation: unknown) => expectation), read: vi.fn(async () => ({ kind: "ready" as const, value: { digest: `sha256:${"c".repeat(64)}` } })) } as never,
+      project: { scope: projectScope, current: () => currentProject, revalidate: async () => currentProject } as never,
+      state: { read: async () => ({ ok: true as const, snapshot: { scope: { kind: "user" as const }, generation: 1 as never, pointers: pointers(), config: { schemaVersion: 2 as const, generation: 1 as never, records: [] }, installed: { schemaVersion: 2 as const, generation: 1 as never, marketplaces: [], plugins: [record] }, trust: { schemaVersion: 1 as const, generation: 1 as never, records: [] }, corruptions: [] } }) } as never,
+      userBaseDirectory: "/workspace",
+      sha256,
+    }, new AbortController().signal);
+    expect(load).toHaveBeenCalledWith(expect.objectContaining({ revision: brokenRevision }), expect.any(AbortSignal));
+    if (previousAvailable) {
+      expect(result.selections[0]?.revision.revision).toBe(previousRevision.revision);
+      expect(result.degraded[0]).toMatchObject({ plugin: brokenPlugin.identity.key, selectedRevision: brokenRevision.revision, runningRevision: previousRevision.revision });
+    } else {
+      expect(result.selections).toEqual([]);
+      expect(result.degraded[0]).toMatchObject({ plugin: brokenPlugin.identity.key, selectedRevision: brokenRevision.revision });
+      expect(result.degraded[0]?.runningRevision).toBeUndefined();
+    }
+  });
 });
+
+function pluginForFallback(source: ReturnType<typeof createResolvedPluginSource>) {
+  return {
+    identity: { key: "fallback@community", marketplaceName: "community", marketplaceEntryName: "fallback" },
+    source,
+    configuration: { options: [] },
+    components: { skills: [], hooks: [], mcpServers: [], foreign: [] },
+    metadata: [],
+  };
+}

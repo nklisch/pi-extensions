@@ -84,6 +84,19 @@ export type EnablePluginRequest = Readonly<{
 }> & ExpectedLifecycleTarget;
 export type DisablePluginRequest = Readonly<{ scope: ScopeContext; plugin: PluginKey; origin?: LifecycleOrigin }> & ExpectedLifecycleTarget;
 export type UninstallPluginRequest = Readonly<{ scope: ScopeContext; plugin: PluginKey; origin?: LifecycleOrigin; retainedData?: LifecycleRetainedData }> & ExpectedLifecycleTarget;
+/** Repair needs the current catalog handoff because installed state retains only
+ * hashed source evidence, never executable URLs or paths. */
+export type RepairPluginRequest = Readonly<{
+  scope: ScopeContext;
+  plugin: PluginKey;
+  entry: NormalizedMarketplaceEntry;
+  marketplaceSource: ResolvedMarketplaceSource;
+  sourceContext: SourceContext;
+  trustRecords?: readonly TrustStateRecord[];
+  configurationPathContext: ConfigurationPathContext;
+  expectedConfigurationRevision?: ContentDigest;
+}>;
+export type RollbackPluginRequest = Readonly<{ scope: ScopeContext; plugin: PluginKey }> & ExpectedLifecycleTarget;
 
 /** Lifecycle outcomes intentionally describe state authority, not a durable operation journal. */
 export type PluginLifecycleResult =
@@ -100,6 +113,8 @@ export interface PluginLifecycleService {
   disable(request: DisablePluginRequest, signal: AbortSignal): Promise<PluginLifecycleResult>;
   update(request: UpdatePluginRequest, signal: AbortSignal): Promise<PluginLifecycleResult>;
   uninstall(request: UninstallPluginRequest, signal: AbortSignal): Promise<PluginLifecycleResult>;
+  repair(request: RepairPluginRequest, signal: AbortSignal): Promise<PluginLifecycleResult>;
+  rollback(request: RollbackPluginRequest, signal: AbortSignal): Promise<PluginLifecycleResult>;
 }
 
 export type PreparedLifecycleMutationRequest = Readonly<{
@@ -191,14 +206,44 @@ async function exactConfigurationState(dependencies: PluginLifecycleServiceDepen
 }
 
 function appendPrevious(candidate: InstalledPluginRecord, previous: InstalledPluginRecord | undefined, operation: LifecycleOperation): InstalledPluginRecord {
-  if (operation !== "update" || previous === undefined || previous.selectedRevision === candidate.selectedRevision) return candidate;
-  return InstalledPluginRecordSchema.parse({ ...candidate, previousRevision: previous.selectedRevision });
+  if (operation !== "update" || previous === undefined) return candidate;
+  const previousRevision = previous.selectedRevision === candidate.selectedRevision
+    ? previous.previousRevision
+    : previous.selectedRevision;
+  return InstalledPluginRecordSchema.parse({
+    ...candidate,
+    ...(previousRevision === undefined ? {} : { previousRevision }),
+  });
+}
+
+function sourceEvidenceMatches(candidate: InstalledPluginRecord["revisions"][number], expected: InstalledPluginRecord["revisions"][number]): boolean {
+  const actual = candidate.evidence.source;
+  const wanted = expected.evidence.source;
+  if (actual.kind !== wanted.kind || actual.sourceHash !== wanted.sourceHash) return false;
+  if ("revision" in actual && "revision" in wanted && actual.revision !== wanted.revision) return false;
+  if ("marketplaceRevision" in actual && "marketplaceRevision" in wanted && actual.marketplaceRevision !== wanted.marketplaceRevision) return false;
+  if (actual.kind === "npm" && wanted.kind === "npm" && actual.sourceRevision !== wanted.sourceRevision) return false;
+  return true;
 }
 
 async function activate(dependencies: PluginLifecycleServiceDependencies, operation: LifecycleOperation, scope: ScopeContext, snapshot: GenerationSnapshot, plugin: PluginKey, signal: AbortSignal): Promise<PluginLifecycleResult> {
   try {
     const result = await dependencies.reload.reload({ scope: toScopeReference(scope) }, signal);
-    if (result.kind === "accepted") return { kind: "applied", operation, snapshot, activation: "applied" };
+    if (result.kind === "accepted") {
+      const degraded = result.report?.kind === "degraded"
+        ? result.report.degraded.find((entry) => entry.plugin === plugin && (entry.scope === undefined || sameJson(entry.scope, toScopeReference(scope))))
+        : undefined;
+      if (degraded !== undefined) {
+        return {
+          kind: "degraded",
+          operation,
+          snapshot,
+          failure: { plugin, code: degraded.code, explanation: degraded.explanation },
+          ...(degraded.runningRevision === undefined ? {} : { runningRevision: ContentDigestSchema.parse(degraded.runningRevision) }),
+        };
+      }
+      return { kind: "applied", operation, snapshot, activation: "applied" };
+    }
     if (result.code === "PI_RELOAD_CONTEXT_UNAVAILABLE") return { kind: "live-next-start", operation, snapshot, note: "no-reload-context" };
     return { kind: "live-next-start", operation, snapshot, note: "reload-failed" };
   } catch {
@@ -344,12 +389,110 @@ function createPluginLifecycleImplementation(dependencies: PluginLifecycleServic
     }
   }
 
+  async function repair(request: RepairPluginRequest, signal: AbortSignal): Promise<PluginLifecycleResult> {
+    const operation: LifecycleOperation = "repair";
+    if (signal.aborted) return rejected(operation, "ABORTED");
+    const scope = asScopeContext(request.scope, dependencies.sha256);
+    const plugin = PluginKeySchema.parse(request.plugin);
+    const initial = await load(scope, signal).catch(() => undefined);
+    if (initial === undefined) return rejected(operation, "MALFORMED");
+    const installed = targetRecord(initial, plugin);
+    const selected = installed?.revisions.find((revision) => revision.revision === installed.selectedRevision);
+    if (installed === undefined) return rejected(operation, "NOT_INSTALLED");
+    if (selected === undefined) return rejected(operation, "MALFORMED");
+
+    let prepared: PreparedPluginCandidate | undefined;
+    try {
+      const preparedResult = await preparePluginCandidate(preparation, {
+        operation: "update",
+        scope,
+        entry: request.entry,
+        marketplaceSource: request.marketplaceSource,
+        sourceContext: request.sourceContext,
+        trustRecords: await trustFor(request, signal),
+        configurationPathContext: request.configurationPathContext,
+        existing: installed,
+        expectedRevision: selected.revision,
+        ...(request.expectedConfigurationRevision === undefined ? {} : { expectedConfigurationRevision: request.expectedConfigurationRevision }),
+      }, signal);
+      if (preparedResult.kind === "rejected") return rejected(operation, mapPreparationCode(preparedResult.code));
+      prepared = preparedResult.candidate;
+      if (prepared.plugin !== plugin || prepared.revision.revision !== selected.revision || !sourceEvidenceMatches(prepared.revision, selected)) {
+        await discardCandidate(dependencies, prepared).catch(() => undefined);
+        prepared = undefined;
+        return rejected(operation, "AVAILABLE_REVISION_CHANGED");
+      }
+      if (prepared.promotion !== undefined) {
+        const promotion = await dependencies.content.promote(prepared.promotion, signal);
+        if (!sameJson(promotion.identity, prepared.promotion.identity) || !sameJson(promotion.manifest, prepared.promotion.manifest)) {
+          await discardCandidate(dependencies, prepared).catch(() => undefined);
+          prepared = undefined;
+          return rejected(operation, "PROMOTION_FAILED");
+        }
+      }
+      await discardCandidate(dependencies, prepared);
+      prepared = undefined;
+      const latest = await load(scope, signal);
+      const latestRecord = latest === undefined ? undefined : targetRecord(latest, plugin);
+      if (latest === undefined || latestRecord === undefined || latestRecord.selectedRevision !== selected.revision) {
+        return { kind: "stale", operation, expected: initial.generation, ...(latest === undefined ? {} : { actual: latest.generation }) };
+      }
+      // Repair never commits when the authority pointer already names the
+      // repaired revision. The promotion above is idempotent and is the only
+      // persistent change in the common missing-files case.
+      return activate(dependencies, operation, scope, latest, plugin, signal);
+    } catch (error) {
+      await discardCandidate(dependencies, prepared).catch(() => undefined);
+      if (signal.aborted) return rejected(operation, "ABORTED");
+      if (error instanceof Error && error.message === "AVAILABLE_REVISION_CHANGED") return rejected(operation, "AVAILABLE_REVISION_CHANGED");
+      if (error instanceof Error && error.message.includes("promotion")) return rejected(operation, "PROMOTION_FAILED");
+      return rejected(operation, "MALFORMED");
+    }
+  }
+
+  async function rollback(request: RollbackPluginRequest, signal: AbortSignal): Promise<PluginLifecycleResult> {
+    const operation: LifecycleOperation = "rollback";
+    if (signal.aborted) return rejected(operation, "ABORTED");
+    const scope = asScopeContext(request.scope, dependencies.sha256);
+    const plugin = PluginKeySchema.parse(request.plugin);
+    const initial = await load(scope, signal).catch(() => undefined);
+    if (initial === undefined) return rejected(operation, "MALFORMED");
+    const previous = targetRecord(initial, plugin);
+    const expectedTarget = request.expectedTarget;
+    if (expectedTarget !== undefined && (previous === undefined || expectedTarget.plugin !== plugin || expectedTarget.selectedRevision !== previous.selectedRevision || expectedTarget.activation !== previous.activation || deriveLifecycleTargetDigest(toScopeReference(scope), previous, dependencies.sha256) !== expectedTarget.targetDigest)) {
+      return { kind: "stale", operation, expected: expectedTarget.generation, actual: initial.generation };
+    }
+    if (previous === undefined) return rejected(operation, "NOT_INSTALLED");
+    if (previous.previousRevision === undefined || !previous.revisions.some((revision) => revision.revision === previous.previousRevision)) return rejected(operation, "MALFORMED");
+    const mutation = await runScopedMutation<PluginLifecycleResult | undefined>(dependencies.state, scope, (snapshot: GenerationSnapshot) => {
+      const latest = targetRecord(snapshot, plugin);
+      if (latest === undefined || !sameJson(latest, previous)) {
+        return { kind: "reject" as const, value: { kind: "stale" as const, operation, expected: initial.generation, actual: snapshot.generation } };
+      }
+      const fallback = latest.previousRevision;
+      if (fallback === undefined || !latest.revisions.some((revision) => revision.revision === fallback)) {
+        return { kind: "reject" as const, value: rejected(operation, "MALFORMED") };
+      }
+      const replacement = InstalledPluginRecordSchema.parse({
+        ...latest,
+        selectedRevision: fallback,
+        previousRevision: latest.selectedRevision,
+      });
+      return { kind: "commit" as const, mutation: replaceTarget(snapshot, plugin, replacement, dependencies.sha256), value: undefined };
+    }, signal);
+    const mapped = mapMutation(operation, mutation, signal);
+    if (!("kind" in mapped) || mapped.kind !== "committed") return mapped as PluginLifecycleResult;
+    return activate(dependencies, operation, scope, mapped.snapshot, plugin, signal);
+  }
+
   const application: PluginLifecycleService = Object.freeze({
     install: (request: InstallPluginRequest, signal: AbortSignal) => execute("install", request, signal),
     enable: (request: EnablePluginRequest, signal: AbortSignal) => execute("enable", request, signal),
     disable: (request: DisablePluginRequest, signal: AbortSignal) => execute("disable", request, signal),
     update: (request: UpdatePluginRequest, signal: AbortSignal) => execute("update", request, signal),
     uninstall: (request: UninstallPluginRequest, signal: AbortSignal) => execute("uninstall", request, signal),
+    repair,
+    rollback,
   });
 
   async function executePrepared(operation: "install" | "update", request: PreparedLifecycleMutationRequest & Readonly<{ expectedTarget?: LifecycleTargetExpectation }>, signal: AbortSignal): Promise<PluginLifecycleResult> {

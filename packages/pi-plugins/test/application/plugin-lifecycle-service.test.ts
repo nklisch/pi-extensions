@@ -164,4 +164,30 @@ describe("plugin lifecycle service", () => {
     expect(record.selectedRevision).toBe(revision.revision);
     expect(record).not.toHaveProperty("pendingTransition");
   });
+
+  it("rolls back by one pointer flip while preserving roll-forward evidence", async () => {
+    const newerSource = createResolvedPluginSource({ kind: "marketplace-path", marketplaceRevision: "b".repeat(40), path: "./plugin" }, sha256);
+    const newerPlugin = NormalizedPluginSchema.parse({ ...plugin, source: newerSource });
+    const newerRevision = createInstalledRevisionRecord({ plugin: newerPlugin, compatibility, content, scope }, sha256);
+    const history = createInstalledPluginRecord({
+      plugin: plugin.identity.key,
+      activation: "enabled",
+      selectedRevision: newerRevision.revision,
+      previousRevision: revision.revision,
+      revisions: [
+        { plugin, compatibility, content },
+        { plugin: newerPlugin, compatibility, content },
+      ],
+      scope,
+    }, sha256);
+    const base = snapshot(0);
+    const state = new MemoryState({ ...base, installed: { ...base.installed, plugins: [history] } } as GenerationSnapshot);
+    const service = createPluginLifecycleService(dependencies(state));
+
+    const result = await service.rollback({ scope, plugin: plugin.identity.key }, signal);
+
+    expect(result).toMatchObject({ kind: "applied", operation: "rollback", activation: "applied" });
+    expect(state.commits).toBe(1);
+    expect(state.current.installed.plugins[0]).toMatchObject({ selectedRevision: revision.revision, previousRevision: newerRevision.revision });
+  });
 });

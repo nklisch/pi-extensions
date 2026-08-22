@@ -12,8 +12,25 @@ describe("Pi reload broker", () => {
     expect(broker.claimSuccessor({ ...binding, cwd: "/other" })).toBeUndefined();
     expect(broker.claimSuccessor(binding)).toEqual(ticket);
     expect(broker.claimSuccessor(binding)).toBeUndefined();
-    broker.publish(ticket, []);
-    await expect(broker.wait(ticket, new AbortController().signal)).resolves.toEqual([]);
+    broker.publish(ticket, { kind: "applied", degraded: [] });
+    await expect(broker.wait(ticket, new AbortController().signal)).resolves.toEqual({ kind: "applied", degraded: [] });
+  });
+
+  it("carries a successor degraded report instead of activation observations", async () => {
+    const broker = createPiReloadBroker();
+    const ticket = broker.open({ ...binding, sessionId: "s-degraded" }, scope);
+    expect(broker.claimSuccessor({ ...binding, sessionId: "s-degraded" })).toEqual(ticket);
+    broker.publish(ticket, {
+      kind: "degraded",
+      degraded: [{
+        plugin: "demo@community",
+        scope,
+        selectedRevision: `sha256:${"a".repeat(64)}`,
+        code: "INSTALLED_DESCRIPTOR_CORRUPT",
+        explanation: "selected revision could not be loaded",
+      }],
+    });
+    await expect(broker.wait(ticket, new AbortController().signal)).resolves.toMatchObject({ kind: "degraded", degraded: [{ plugin: "demo@community" }] });
   });
 
   it("retains successor failure that arrives before the predecessor can wait", async () => {
