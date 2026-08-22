@@ -14,6 +14,8 @@ updated: 2026-08-22
 
 # MCP gateway tool missing: programmatic adapter import fails outside jiti
 
+> Workbench version mismatch: stop and offer setup upgrade.
+
 ## Symptom
 
 No `mcp` tool in any pi session, so plugin-provided MCP servers (e.g.

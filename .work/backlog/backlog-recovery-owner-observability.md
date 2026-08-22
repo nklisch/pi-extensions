@@ -14,6 +14,8 @@ updated: 2026-08-16
 
 # Surface why a pending transition is fenced (live owner identity) in Updates/Health
 
+> Workbench version mismatch: stop and offer setup upgrade.
+
 When startup recovery defers a pending transition because its journal owner is
 live (`RECOVERY_OWNER_LIVE` / `OWNER_UNKNOWN`), the user-visible text says
 "needs recovery; restart pi to finish it" with no hint that a *specific other

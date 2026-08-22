@@ -14,6 +14,8 @@ updated: 2026-08-22
 
 # Convergent lifecycle core and state migration
 
+> Workbench version mismatch: stop and offer setup upgrade.
+
 ## Outcome
 
 The two-phase lifecycle machinery — transition journal DB, pending-transition

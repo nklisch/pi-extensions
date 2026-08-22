@@ -14,6 +14,8 @@ updated: 2026-08-06
 
 # Modernize the independent MCP adapter
 
+> Workbench version mismatch: stop and offer setup upgrade.
+
 `@nklisch/pi-mcp-adapter` absorbs the useful runtime, agent-surface, and MCP Apps advances demonstrated by upstream 2.20.1 while remaining an independently owned package with no upstream runtime, release, pinning, or retirement dependency.
 
 The epic preserves the source-qualified programmatic lifecycle, exact replacement and removal, late launch values, runtime leases, schema-on-error, source-qualified cache identity, bounded rendering, integer schema formats, and Plugin Host qualification. It includes core runtime modernization, agent discovery and scripting surfaces, the complete MCP Apps UI trust boundary, and programmatic parity where those surfaces can preserve source ownership. It excludes npm publication and blind behavioral parity where upstream behavior weakens a maintained contract.

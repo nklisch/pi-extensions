@@ -14,6 +14,8 @@ updated: 2026-08-22
 
 # Degraded-state semantics and repair UX
 
+> Workbench version mismatch: stop and offer setup upgrade.
+
 ## Outcome
 
 A plugin whose selected revision fails to load is visibly degraded — with the

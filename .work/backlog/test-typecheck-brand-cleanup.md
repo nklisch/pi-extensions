@@ -7,6 +7,8 @@ updated: 2026-08-02
 
 # Test-suite typecheck: branded-type cleanup
 
+> Workbench version mismatch: stop and offer setup upgrade.
+
 `npx tsc -p tsconfig.test.json --noEmit` in `packages/pi-plugins` reports 716
 errors across ~130 test files (sampled 2026-08-02). The pattern is uniform:
 test fixtures pass plain string literals and inline identity objects where

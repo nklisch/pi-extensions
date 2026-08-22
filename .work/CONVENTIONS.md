@@ -1,6 +1,7 @@
 ---
 owner: workbench
 schema: 1
+workbench_version: 0.10.0
 release_mode: summarized
 completed_items: summarize
 # Optional project overrides—omit to use Workbench defaults:

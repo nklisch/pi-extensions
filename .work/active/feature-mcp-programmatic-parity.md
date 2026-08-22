@@ -14,6 +14,8 @@ updated: 2026-08-06
 
 # Extend useful MCP surfaces to programmatic sources
 
+> Workbench version mismatch: stop and offer setup upgrade.
+
 Programmatic Plugin Host sources gain the useful modern agent and MCP Apps capabilities that can preserve exact source ownership, late launch-value custody, cancellation, runtime leases, approval and output bounds, redaction, and atomic replace/remove cleanup.
 
 This feature evaluates each standalone surface rather than assuming parity. Static file discovery remains disabled. OAuth remains unavailable unless source-qualified credential custody and removal can be proven. Scripting remains unavailable unless it has an explicit source-qualified opt-in and complete call attribution. MCP Apps remain unavailable unless UI metadata, loopback hosting, session authority, and teardown can be qualified to the exact source.

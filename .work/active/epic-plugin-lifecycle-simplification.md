@@ -14,6 +14,8 @@ updated: 2026-08-22
 
 # Replace the transactional plugin lifecycle with files-and-pointer convergence
 
+> Workbench version mismatch: stop and offer setup upgrade.
+
 ## Outcome
 
 pi-plugins lifecycle mutations (install, enable, disable, update, uninstall)
