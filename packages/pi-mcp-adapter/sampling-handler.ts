@@ -1,5 +1,4 @@
 import { type Api, type AssistantMessage, type Message, type Model, type TextContent } from "@earendil-works/pi-ai";
-import { complete } from "@earendil-works/pi-ai/compat";
 import { truncateAtWord } from "./utils.ts";
 import { throwIfAborted } from "./abort.ts";
 import type { ExtensionUIContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
@@ -56,6 +55,25 @@ export async function handleSamplingRequest(
   const messages = params.messages.map(convertSamplingMessage);
   const { model, apiKey, headers } = await resolveSamplingModel(options, params.modelPreferences);
   throwIfAborted(signal);
+
+  // Lazy-import pi-ai/compat so the programmatic entry's static import graph
+  // stays free of @earendil-works/* runtime values. When loaded via pi's
+  // jiti aliases the import succeeds; when loaded via native ESM (the
+  // programmatic path) and a sampling request actually arrives, the import
+  // fails with a clear protocol error rather than crashing module load.
+  // Resolve before asking the user to approve so an incapable host fails fast.
+  let completeFn: typeof import("@earendil-works/pi-ai/compat").complete;
+  try {
+    const compat = await import("@earendil-works/pi-ai/compat");
+    completeFn = compat.complete;
+  } catch (error) {
+    throw new Error(
+      "Sampling is unavailable in this host: @earendil-works/pi-ai could not be resolved. " +
+      "Sampling requires the adapter to run as a jiti-loaded pi extension.",
+      { cause: error },
+    );
+  }
+
   await confirmSampling(
     options,
     "Approve MCP sampling request",
@@ -63,7 +81,7 @@ export async function handleSamplingRequest(
   );
   throwIfAborted(signal);
 
-  const result = await complete(
+  const result = await completeFn(
     model,
     {
       ...(params.systemPrompt !== undefined ? { systemPrompt: params.systemPrompt } : {}),
