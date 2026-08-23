@@ -59,7 +59,7 @@ describe("final from-empty packed registry acceptance", () => {
     });
     expect(installed.installedReceipts).toContainEqual(expect.objectContaining({
       name: "@nklisch/pi-mcp-adapter",
-      version: "2.20.1-nklisch.1",
+      version: "2.21.0-nklisch.0",
       integrity: expect.stringMatching(/^sha512-/u),
     }));
     const bundledSubagents = JSON.parse(await readFile(join(installed.packageRoot, "node_modules", "@nklisch", "pi-subagents", "package.json"), "utf8"));
