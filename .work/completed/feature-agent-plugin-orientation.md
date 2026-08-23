@@ -1,7 +1,7 @@
 ---
 id: feature-agent-plugin-orientation
 kind: feature
-status: active
+status: completed
 tags: [ux, agents]
 parent: null
 blocked_by: []
@@ -10,6 +10,7 @@ research_refs: []
 mock_refs: []
 created: 2026-08-22
 updated: 2026-08-22
+completed: 2026-08-22
 ---
 
 # Agent orientation to the installed plugin set
