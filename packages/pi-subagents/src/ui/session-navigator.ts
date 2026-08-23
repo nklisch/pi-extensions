@@ -38,6 +38,7 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "#src/config/agent-types";
+import { debugLog } from "#src/debug";
 import type { SessionMessage } from "#src/types";
 import { describeActivity, formatDuration, formatModelThinking, type Theme } from "#src/ui/display";
 import { fileSnapshotSource, listNavigableAgents, liveSource, type NavigableSubagent, type RunDisplayMetadata, type TranscriptSource } from "#src/ui/session-navigation";
@@ -160,57 +161,69 @@ export class TranscriptOverlay implements Component {
     this.done = done;
     this.cwd = cwd;
     this.markdownTheme = markdownTheme;
-    this.content = this.rebuild();
-    this.unsubscribe = source.subscribe(() => {
-      if (this.closed) return;
+    try {
       this.content = this.rebuild();
-      this.tui.requestRender();
-    });
-    if (run.completedAt() === undefined) {
-      this.runtimeInterval = setInterval(() => {
-        if (this.closed || this.run.completedAt() !== undefined) {
-          this.clearRuntimeInterval();
-          return;
-        }
-        this.tui.requestRender();
-      }, 100);
+    } catch (error) {
+      debugLog("session navigator initial render", error);
+      this.content = new Container();
+    }
+    try {
+      this.unsubscribe = source.subscribe(() => this.refreshFromSource());
+    } catch (error) {
+      debugLog("session navigator subscribe", error);
+    }
+    if (this.isRunning()) {
+      this.runtimeInterval = setInterval(() => this.refreshRuntime(), 100);
     }
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, "escape") || matchesKey(data, "q")) {
-      this.closed = true;
-      this.clearRuntimeInterval();
-      this.done(undefined);
-      return;
-    }
+    try {
+      if (matchesKey(data, "escape") || matchesKey(data, "q")) {
+        this.closed = true;
+        this.clearRuntimeInterval();
+        this.done(undefined);
+        return;
+      }
 
-    const totalLines = this.buildContentLines(this.innerWidth()).length;
-    const viewportHeight = this.viewportHeight();
-    const maxScroll = Math.max(0, totalLines - viewportHeight);
+      const totalLines = this.buildContentLines(this.innerWidth()).length;
+      const viewportHeight = this.viewportHeight();
+      const maxScroll = Math.max(0, totalLines - viewportHeight);
 
-    if (matchesKey(data, "up") || matchesKey(data, "k")) {
-      this.scrollOffset = Math.max(0, this.scrollOffset - 1);
-      this.autoScroll = this.scrollOffset >= maxScroll;
-    } else if (matchesKey(data, "down") || matchesKey(data, "j")) {
-      this.scrollOffset = Math.min(maxScroll, this.scrollOffset + 1);
-      this.autoScroll = this.scrollOffset >= maxScroll;
-    } else if (matchesKey(data, "pageUp") || matchesKey(data, "shift+up")) {
-      this.scrollOffset = Math.max(0, this.scrollOffset - viewportHeight);
-      this.autoScroll = false;
-    } else if (matchesKey(data, "pageDown") || matchesKey(data, "shift+down")) {
-      this.scrollOffset = Math.min(maxScroll, this.scrollOffset + viewportHeight);
-      this.autoScroll = this.scrollOffset >= maxScroll;
-    } else if (matchesKey(data, "home")) {
-      this.scrollOffset = 0;
-      this.autoScroll = false;
-    } else if (matchesKey(data, "end")) {
-      this.scrollOffset = maxScroll;
-      this.autoScroll = true;
+      if (matchesKey(data, "up") || matchesKey(data, "k")) {
+        this.scrollOffset = Math.max(0, this.scrollOffset - 1);
+        this.autoScroll = this.scrollOffset >= maxScroll;
+      } else if (matchesKey(data, "down") || matchesKey(data, "j")) {
+        this.scrollOffset = Math.min(maxScroll, this.scrollOffset + 1);
+        this.autoScroll = this.scrollOffset >= maxScroll;
+      } else if (matchesKey(data, "pageUp") || matchesKey(data, "shift+up")) {
+        this.scrollOffset = Math.max(0, this.scrollOffset - viewportHeight);
+        this.autoScroll = false;
+      } else if (matchesKey(data, "pageDown") || matchesKey(data, "shift+down")) {
+        this.scrollOffset = Math.min(maxScroll, this.scrollOffset + viewportHeight);
+        this.autoScroll = this.scrollOffset >= maxScroll;
+      } else if (matchesKey(data, "home")) {
+        this.scrollOffset = 0;
+        this.autoScroll = false;
+      } else if (matchesKey(data, "end")) {
+        this.scrollOffset = maxScroll;
+        this.autoScroll = true;
+      }
+    } catch (error) {
+      debugLog("session navigator input", error);
     }
   }
 
   render(width: number): string[] {
+    try {
+      return this.renderSafe(width);
+    } catch (error) {
+      debugLog("session navigator render", error);
+      return [];
+    }
+  }
+
+  private renderSafe(width: number): string[] {
     if (width < 6) return [];
     const th = this.theme;
     const innerW = width - 4;
@@ -252,22 +265,63 @@ export class TranscriptOverlay implements Component {
 
   // fallow-ignore-next-line unused-class-member
   invalidate(): void {
-    this.content.invalidate();
+    try {
+      this.content.invalidate();
+    } catch (error) {
+      debugLog("session navigator invalidate", error);
+    }
   }
 
   dispose(): void {
     this.closed = true;
-    if (this.unsubscribe) {
-      this.unsubscribe();
-      this.unsubscribe = undefined;
+    const unsubscribe = this.unsubscribe;
+    this.unsubscribe = undefined;
+    if (unsubscribe) {
+      try {
+        unsubscribe();
+      } catch (error) {
+        debugLog("session navigator unsubscribe", error);
+      }
     }
     this.clearRuntimeInterval();
   }
 
   // ---- Private ----
 
+  private refreshFromSource(): void {
+    if (this.closed) return;
+    try {
+      this.content = this.rebuild();
+      this.tui.requestRender();
+    } catch (error) {
+      debugLog("session navigator live refresh", error);
+    }
+  }
+
+  private refreshRuntime(): void {
+    try {
+      if (this.closed || !this.isRunning()) {
+        this.clearRuntimeInterval();
+        return;
+      }
+      this.tui.requestRender();
+    } catch (error) {
+      debugLog("session navigator runtime refresh", error);
+      this.clearRuntimeInterval();
+    }
+  }
+
+  private isRunning(): boolean {
+    try {
+      return this.run.completedAt() === undefined;
+    } catch (error) {
+      debugLog("session navigator runtime state", error);
+      return false;
+    }
+  }
+
   private clearRuntimeInterval(): void {
-    if (this.runtimeInterval) {
+    if (this.runtimeInterval !== undefined) {
       clearInterval(this.runtimeInterval);
       this.runtimeInterval = undefined;
     }

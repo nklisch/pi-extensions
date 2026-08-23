@@ -14,6 +14,11 @@ items:
   - feature-clearance-reviewer-judgment
   - feature-clearance-sparse-config-persistence
   - feature-codex-mcp-config
+  - epic-independent-mcp-modernization
+  - feature-mcp-core-modernization
+  - feature-mcp-agent-surface
+  - feature-mcp-apps-modernization
+  - feature-mcp-programmatic-parity
   - epic-subagent-upstream-hardening
   - feature-subagent-agent-policy-controls
   - feature-subagent-child-session-compatibility

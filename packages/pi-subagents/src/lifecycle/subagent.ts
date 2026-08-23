@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentSessionEvent, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { debugLog } from "#src/debug";
+import { debugLog, runDetached, runSafely } from "#src/debug";
 import type { CreateSubagentSessionParams } from "#src/lifecycle/create-subagent-session";
 import {
   type LifecycleInterceptorRegistry,
@@ -264,30 +264,26 @@ export class Subagent {
 	 */
 	async run(): Promise<void> {
 		this.markRunning(Date.now());
-		this.execution.observer?.onStarted?.(this);
-		this.listeners.wireSignal(this.execution.signal, () => this.abort());
+		try {
+			// Observer callbacks are extension-owned sinks, not part of the agent's
+			// work. A stale UI/context callback must not leave a background record
+			// running with a slot held and no terminal notification.
+			runSafely("subagent onStarted observer", () => this.execution.observer?.onStarted?.(this));
+			this.listeners.wireSignal(this.execution.signal, () => this.abort());
 
-		// Guard the await so the no-provider path stays synchronous, preserving
-		// the original run() timing: the factory is called in the same turn as
-		// spawn() when no workspace provider is registered.
-		let cwd: string | undefined;
-		if (this.workspaceBracket.hasProvider()) {
-			try {
+			// Guard the await so the no-provider path stays synchronous, preserving
+			// the original run() timing: the factory is called in the same turn as
+			// spawn() when no workspace provider is registered.
+			let cwd: string | undefined;
+			if (this.workspaceBracket.hasProvider()) {
 				cwd = await this.workspaceBracket.prepare({
 					agentId: this.id,
 					agentType: this.type,
 					baseCwd: this.execution.baseCwd,
 					invocation: this.invocation,
 				});
-			} catch (err) {
-				this.markError(err);
-				this.listeners.release();
-				this.execution.observer?.onRunFinished?.(this);
-				return;
 			}
-		}
 
-		try {
 			this.subagentSession = await this.execution.createSubagentSession({
 				snapshot: this.execution.snapshot,
 				type: this.type,
@@ -296,27 +292,24 @@ export class Subagent {
 				model: this.execution.model,
 				thinkingLevel: this.execution.thinkingLevel,
 			});
-		} catch (err) {
-			// The factory disposed its own session on a post-creation failure.
-			this.failRun(err);
-			return;
-		}
 
-		// The SDK session is authoritative after creation: it has applied its
-		// defaults and model-capability clamp. Keep the record as the one source
-		// consumed by every operator-facing status surface.
-		this._modelLabel = formatModelLabel(this.subagentSession.model ?? this.execution.model ?? this.execution.snapshot.model);
-		this._effectiveThinkingLevel = this.subagentSession.thinkingLevel ?? this._effectiveThinkingLevel;
+			// The SDK session is authoritative after creation: it has applied its
+			// defaults and model-capability clamp. Keep the record as the one source
+			// consumed by every operator-facing status surface.
+			this._modelLabel = formatModelLabel(this.subagentSession.model ?? this.execution.model ?? this.execution.snapshot.model);
+			this._effectiveThinkingLevel = this.subagentSession.thinkingLevel ?? this._effectiveThinkingLevel;
 
-		this.flushPendingSteers();
-		this.listeners.attachObserver(subscribeSubagentObserver(this.subagentSession, this.state, {
-			onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
-		}));
-		this.execution.observer?.onSessionCreated?.(this);
+			this.flushPendingSteers();
+			this.listeners.attachObserver(subscribeSubagentObserver(this.subagentSession, this.state, {
+				onCompact: (info) => runSafely(
+					"subagent onCompacted observer",
+					() => this.execution.observer?.onCompacted?.(this, info),
+				),
+			}));
+			runSafely("subagent onSessionCreated observer", () => this.execution.observer?.onSessionCreated?.(this));
 
-		const runConfig = this.execution.getRunConfig?.();
-		const lifecycle = this.createTurnLifecycle("initial");
-		try {
+			const runConfig = this.execution.getRunConfig?.();
+			const lifecycle = this.createTurnLifecycle("initial");
 			const result = await this.subagentSession.runTurnLoop(this.execution.prompt, {
 				maxTurns: this.execution.maxTurns,
 				defaultMaxTurns: runConfig?.defaultMaxTurns,
@@ -326,6 +319,8 @@ export class Subagent {
 			});
 			this.completeRun(result);
 		} catch (err) {
+			// One outer failure path guarantees terminal state, listener release,
+			// workspace cleanup, and the manager's completion funnel.
 			this.failRun(err);
 		}
 	}
@@ -389,12 +384,15 @@ export class Subagent {
 		const executionSignal = signal
 			? AbortSignal.any([this.abortController.signal, signal])
 			: this.abortController.signal;
-		this.listeners.attachObserver(subscribeSubagentObserver(subagentSession, this.state, {
-			onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
-		}));
-
-		const lifecycle = this.createTurnLifecycle("resume", executionSignal);
 		try {
+			this.listeners.attachObserver(subscribeSubagentObserver(subagentSession, this.state, {
+				onCompact: (info) => runSafely(
+					"subagent onCompacted observer",
+					() => this.execution.observer?.onCompacted?.(this, info),
+				),
+			}));
+
+			const lifecycle = this.createTurnLifecycle("resume", executionSignal);
 			if (lifecycle) {
 				const result = await subagentSession.resumeLifecycleTurnLoop(
 					prompt,
@@ -415,7 +413,7 @@ export class Subagent {
 			this.markError(err);
 		} finally {
 			this.listeners.release();
-			this.execution.observer?.onResumedFinished?.(this);
+			runSafely("subagent onResumedFinished observer", () => this.execution.observer?.onResumedFinished?.(this));
 		}
 	}
 
@@ -527,7 +525,7 @@ export class Subagent {
 	/** Stop a queued agent through the same terminal observer funnel as a run. */
 	stopQueued(): void {
 		this.state.stopQueued();
-		this.execution.observer?.onRunFinished?.(this);
+		runSafely("subagent onRunFinished observer", () => this.execution.observer?.onRunFinished?.(this));
 	}
 
 	/**
@@ -557,7 +555,7 @@ export class Subagent {
 	 */
 	private flushPendingSteers(): void {
 		for (const msg of this._pendingSteers) {
-			this.subagentSession?.steer(msg).catch(() => {});
+			runDetached("subagent buffered steer", () => this.subagentSession?.steer(msg));
 		}
 		this._pendingSteers = [];
 	}
@@ -580,16 +578,23 @@ export class Subagent {
 				: result.steered
 					? "steered"
 					: "completed";
-		const finalResult =
-			result.responseText +
-			this.workspaceBracket.dispose({ status: finalStatus, description: this.description });
+		let finalResult = result.responseText;
+		try {
+			finalResult += this.workspaceBracket.dispose({ status: finalStatus, description: this.description });
+		} catch (error) {
+			// Workspace teardown belongs to the run's terminal boundary. If it
+			// fails, report an error once rather than re-entering disposal from the
+			// outer catch path.
+			this.failRun(error);
+			return;
+		}
 
 		if (result.failure) this.markFailed(result.failure, finalResult);
 		else if (result.aborted) this.markAborted(finalResult);
 		else if (result.steered) this.markSteered(finalResult);
 		else this.markCompleted(finalResult);
 
-		this.execution.observer?.onRunFinished?.(this);
+		runSafely("subagent onRunFinished observer", () => this.execution.observer?.onRunFinished?.(this));
 	}
 
 	/** Dispose the wrapped session, firing the `disposed` lifecycle event. */
@@ -616,7 +621,7 @@ export class Subagent {
 			this.workspaceBracket.dispose({ status: "error", description: this.description });
 		} catch (cleanupErr) { debugLog("workspace dispose on agent error", cleanupErr); }
 
-		this.execution.observer?.onRunFinished?.(this);
+		runSafely("subagent onRunFinished observer", () => this.execution.observer?.onRunFinished?.(this));
 	}
 }
 

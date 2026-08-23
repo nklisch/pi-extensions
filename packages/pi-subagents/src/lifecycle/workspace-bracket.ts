@@ -53,7 +53,11 @@ export class WorkspaceBracket {
 	 * disposal is desired (e.g. failRun).
 	 */
 	dispose(outcome: WorkspaceDisposeOutcome): string {
-		if (!this.prepared) return "";
-		return this.prepared.dispose(outcome)?.resultAddendum ?? "";
+		const prepared = this.prepared;
+		// Clear the owned resource before calling user code. If disposal throws,
+		// an outer failure path must not invoke the provider a second time.
+		this.prepared = undefined;
+		if (!prepared) return "";
+		return prepared.dispose(outcome)?.resultAddendum ?? "";
 	}
 }

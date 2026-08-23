@@ -94,6 +94,26 @@ describe("background update coordinator", () => {
     expect(status.snapshot().update).toMatchObject({ unreadCount: 2, unresolvedCount: 3 });
   });
 
+  it("contains a scheduler that throws before returning its detached task", async () => {
+    const { schedulerStatus, status } = statusFixture();
+    const coordinator = createBackgroundUpdateCoordinator({
+      scheduler: {
+        run() { throw new Error("scheduler startup failed"); },
+        status: schedulerStatus.status.bind(schedulerStatus),
+        wake() {},
+      },
+      schedulerStatus,
+      status,
+    });
+
+    await expect(coordinator.start()).resolves.toBeUndefined();
+    expect(status.snapshot()).toMatchObject({
+      status: "degraded",
+      update: { state: "degraded" },
+    });
+    await expect(coordinator.close()).resolves.toBeUndefined();
+  });
+
   it("captures detached publisher failures in mutable host status", async () => {
     const { schedulerStatus, status } = statusFixture();
     const coordinator = createBackgroundUpdateCoordinator({

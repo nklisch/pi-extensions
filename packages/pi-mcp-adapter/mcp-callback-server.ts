@@ -6,6 +6,7 @@
  */
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "http"
+import { formatTerminalError, truncateAtWord } from "./utils.ts"
 import {
   DEFAULT_OAUTH_CALLBACK_PATH,
   getConfiguredOAuthCallbackPort,
@@ -124,8 +125,30 @@ let callbackServerHost = DEFAULT_OAUTH_CALLBACK_HOST
 
 /**
  * Handle incoming HTTP requests to the callback server.
+ *
+ * Node invokes this listener outside the caller's promise chain, so URL parsing,
+ * response generation, and provider callbacks all need a synchronous outer guard.
  */
 function handleRequest(req: IncomingMessage, res: ServerResponse): void {
+  try {
+    handleRequestUnsafe(req, res)
+  } catch (error) {
+    const message = truncateAtWord(formatTerminalError(error), 1_024) || "Invalid callback request"
+    console.error(`MCP OAuth callback request failed: ${message}`)
+    try {
+      if (res.headersSent) {
+        res.destroy()
+      } else {
+        res.writeHead(500, { "Content-Type": "text/html" })
+        res.end(HTML_ERROR(message))
+      }
+    } catch {
+      // A client may disconnect while the error response is being written.
+    }
+  }
+}
+
+function handleRequestUnsafe(req: IncomingMessage, res: ServerResponse): void {
   const url = new URL(req.url || "/", `http://${req.headers.host}`)
 
   // Only handle the callback path

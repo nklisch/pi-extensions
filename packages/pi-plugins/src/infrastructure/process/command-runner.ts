@@ -42,7 +42,7 @@ export class CommandRunnerError extends Error {
   }
 }
 
-type RunnerOptions = Readonly<{ killGraceMs?: number }>;
+type RunnerOptions = Readonly<{ killGraceMs?: number; platform?: NodeJS.Platform }>;
 const ABORT_ERROR = (): DOMException => new DOMException("The operation was aborted", "AbortError");
 
 function throwIfAborted(signal: AbortSignal): void {
@@ -151,6 +151,7 @@ function chunksToBytes(chunks: readonly Uint8Array[], length: number): Uint8Arra
 export function createNodeCommandRunner(options: RunnerOptions = {}): CommandRunner {
   const killGraceMs = options.killGraceMs ?? 5_000;
   if (!Number.isSafeInteger(killGraceMs) || killGraceMs < 0) throw new TypeError("killGraceMs must be a nonnegative safe integer");
+  const platform = options.platform ?? process.platform;
 
   return {
     async run(request, signal) {
@@ -165,7 +166,7 @@ export function createNodeCommandRunner(options: RunnerOptions = {}): CommandRun
           env: mergedEnvironment(request.environment),
           shell: false,
           stdio: ["pipe", "pipe", "pipe"],
-          detached: process.platform !== "win32",
+          detached: platform !== "win32",
           windowsHide: true,
         });
       } catch (error) {
@@ -216,20 +217,27 @@ export function createNodeCommandRunner(options: RunnerOptions = {}): CommandRun
 
       const killTree = (kind: "graceful" | "force"): void => {
         const signalName = kind === "graceful" ? "SIGTERM" : "SIGKILL";
+        const fallbackKill = (): void => {
+          try { child.kill(signalName); } catch { /* the close event still drains the pipes */ }
+        };
         try {
-          if (process.platform !== "win32" && child.pid !== undefined) {
+          if (platform !== "win32" && child.pid !== undefined) {
             process.kill(-child.pid, signalName);
-          } else if (process.platform === "win32" && child.pid !== undefined) {
-            spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+          } else if (platform === "win32" && child.pid !== undefined) {
+            // taskkill reports an unavailable executable or other launch
+            // failure asynchronously. Keep its error event contained and
+            // still try the direct child fallback so termination can finish.
+            const taskkill = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
               shell: false,
               stdio: "ignore",
               windowsHide: true,
             });
+            taskkill.once("error", fallbackKill);
           } else {
-            child.kill(signalName);
+            fallbackKill();
           }
         } catch {
-          try { child.kill(signalName); } catch { /* the close event still drains the pipes */ }
+          fallbackKill();
         }
       };
 
@@ -334,7 +342,7 @@ export function createNodeCommandRunner(options: RunnerOptions = {}): CommandRun
             void finish(
               (result) => resolve(result.exitCode),
               reject,
-            );
+            ).catch(reject);
           });
         });
         return {
@@ -350,7 +358,7 @@ export function createNodeCommandRunner(options: RunnerOptions = {}): CommandRun
         child.once("close", (code) => {
           closeCode = code;
           endStream();
-          void finish(resolve, reject);
+          void finish(resolve, reject).catch(reject);
         });
       });
     },

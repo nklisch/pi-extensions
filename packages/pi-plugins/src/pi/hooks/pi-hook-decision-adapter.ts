@@ -51,6 +51,31 @@ function firstDiagnosticSentence(value: AggregatedHookDecision): string {
   return `${plainHookWarning({ event: first.event, code: first.code, plugin: first.plugin })}${rest === 0 ? "" : ` (${rest} more in the hook log)`}`;
 }
 
+function presentationError(label: string, error: unknown): void {
+  let detail = "unknown failure";
+  try {
+    detail = error instanceof Error ? error.message : String(error);
+  } catch {
+    detail = "unreadable failure";
+  }
+  try {
+    console.error(`Pi Plugin Host ${label} failed: ${detail}`);
+  } catch {
+    // A broken diagnostic sink cannot be allowed to escape this boundary.
+  }
+}
+
+/** Presentation is advisory; a broken Pi sink must not erase the hook decision. */
+function presentSafely(label: string, action: () => unknown): void {
+  try {
+    void Promise.resolve(action()).catch((error) => presentationError(label, error));
+  } catch (error) {
+    // The decision continues through its behavioral path even when the UI
+    // surface is stale, unavailable, or rejects asynchronously.
+    presentationError(label, error);
+  }
+}
+
 export function createPiHookDecisionAdapter(input: Readonly<{
   pi: Pick<ExtensionAPI, "sendMessage" | "setSessionName"> & Partial<Pick<ExtensionAPI, "registerMessageRenderer">>;
   visibility: () => Promise<HookContextVisibility>;
@@ -62,7 +87,9 @@ export function createPiHookDecisionAdapter(input: Readonly<{
   }
   // Minimal non-TUI hosts may not implement message rendering; registration
   // is best-effort and never gates context delivery.
-  input.pi.registerMessageRenderer?.(CONTEXT_MESSAGE_TYPE, renderHookContextMessage);
+  if (input.pi.registerMessageRenderer !== undefined) {
+    presentSafely("hook context renderer registration", () => input.pi.registerMessageRenderer!(CONTEXT_MESSAGE_TYPE, renderHookContextMessage));
+  }
 
   async function sendContext(ctx: ExtensionContext, value: AggregatedHookDecision): Promise<void> {
     if (value.contexts.length > 0) {
@@ -71,18 +98,19 @@ export function createPiHookDecisionAdapter(input: Readonly<{
       // failure of the hook boundary itself.
       const visibility = await input.visibility().catch(() => DefaultHookContextVisibility);
       for (const contribution of value.contexts) {
-        input.pi.sendMessage({
+        presentSafely("hook context delivery", () => input.pi.sendMessage({
           customType: CONTEXT_MESSAGE_TYPE,
           content: contribution.text,
           display: visibility !== "hidden",
           details: { plugin: contribution.plugin, event: value.event, presentation: visibility === "full" ? "full" : "line" } satisfies HookContextMessageDetails,
-        }, { deliverAs: delivery(value.event) });
+        }, { deliverAs: delivery(value.event) }));
       }
     }
     if (ctx.hasUI) {
-      for (const message of value.systemMessages) ctx.ui.notify(message, "info");
+      for (const message of value.systemMessages) presentSafely("hook system-message notification", () => ctx.ui.notify(message, "info"));
     }
-    if (value.title !== undefined) input.pi.setSessionName(value.title);
+    const title = value.title;
+    if (title !== undefined) presentSafely("hook session title", () => input.pi.setSessionName(title));
   }
 
   async function ask(ctx: ExtensionContext): Promise<boolean> {
@@ -106,7 +134,7 @@ export function createPiHookDecisionAdapter(input: Readonly<{
   // behavior. Exact codes stay in the failure log.
   function warnFailures(ctx: ExtensionContext, value: AggregatedHookDecision): void {
     if (!hasFailure(value) || !ctx.hasUI) return;
-    ctx.ui.notify(firstDiagnosticSentence(value), "warning");
+    presentSafely("hook failure notification", () => ctx.ui.notify(firstDiagnosticSentence(value), "warning"));
   }
 
   async function applyInput(event: InputEvent, ctx: ExtensionContext, value: AggregatedHookDecision): Promise<InputEventResult | undefined> {

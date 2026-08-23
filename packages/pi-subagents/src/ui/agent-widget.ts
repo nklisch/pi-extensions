@@ -7,6 +7,7 @@
  */
 
 import { AgentTypeRegistry } from "#src/config/agent-types";
+import { debugLog, runSafely } from "#src/debug";
 import type { Subagent } from "#src/lifecycle/subagent";
 import type { SubagentManagerObserver } from "#src/lifecycle/subagent-manager";
 import type { CompactionInfo } from "#src/types";
@@ -121,7 +122,7 @@ export class AgentWidget implements SubagentManagerObserver {
     // Lifecycle events can arrive before the first tool gives us a UI context.
     // Refresh when that context becomes available, but let update() decide
     // whether any active record actually needs an animation timer.
-    if (contextChanged && this.uiCtx && this.backgroundAgents.size > 0) this.update();
+    if (contextChanged && this.uiCtx && this.backgroundAgents.size > 0) this.refresh();
   }
 
   /**
@@ -141,7 +142,7 @@ export class AgentWidget implements SubagentManagerObserver {
         this.finishedTurnAge.set(id, nextAge);
       }
     }
-    this.update();
+    this.refresh();
   }
 
   // ---- SubagentManagerObserver: react to lifecycle, self-drive the timer ----
@@ -164,7 +165,7 @@ export class AgentWidget implements SubagentManagerObserver {
   onSubagentCompleted(record: Subagent) {
     if (!this.trackBackground(record)) return;
     this.finishedTurnAge.set(record.id, 0);
-    this.update();
+    this.refresh();
   }
 
   /** A resumed subagent started — ensure the update loop is live and render. */
@@ -178,38 +179,38 @@ export class AgentWidget implements SubagentManagerObserver {
   onSubagentResumed(record: Subagent) {
     if (!this.trackBackground(record)) return;
     this.finishedTurnAge.set(record.id, 0);
-    this.update();
+    this.refresh();
   }
 
   /** A subagent's session compacted — render to refresh the compaction count. */
   onSubagentCompacted(record: Subagent, _info: CompactionInfo) {
-    if (this.trackBackground(record)) this.update();
+    if (this.trackBackground(record)) this.refresh();
   }
 
   /** Remove terminal state when the manager clears a parent session. */
   onSubagentCleared(record: Subagent) {
     if (!this.backgroundAgents.delete(record.id)) return;
     this.finishedTurnAge.delete(record.id);
-    this.update();
+    this.refresh();
   }
 
   /** Refresh immediately; update() owns the timer lifecycle. */
   private startLoop() {
     if (!this.uiCtx) return;
-    this.update();
+    this.refresh();
   }
 
   /** Ensure the widget update timer is running while active records animate. */
   private ensureTimer() {
     this.widgetInterval ??= setInterval(
-      () => this.update(),
+      () => this.refresh(),
       AgentWidget.STATUS_REFRESH_INTERVAL_MS,
     );
   }
 
   /** Stop animated refreshes while leaving any static finished widget intact. */
   private stopTimer() {
-    if (this.widgetInterval) {
+    if (this.widgetInterval !== undefined) {
       clearInterval(this.widgetInterval);
       this.widgetInterval = undefined;
     }
@@ -285,12 +286,12 @@ export class AgentWidget implements SubagentManagerObserver {
    */
   private clearWidget(): void {
     if (this.widgetRegistered) {
-      this.uiCtx!.setWidget("agents", undefined);
+      runSafely("agent widget clear widget", () => this.uiCtx!.setWidget("agents", undefined));
       this.widgetRegistered = false;
       this.tui = undefined;
     }
     if (this.lastStatusText !== undefined) {
-      this.uiCtx!.setStatus("subagents", undefined);
+      runSafely("agent widget clear status", () => this.uiCtx!.setStatus("subagents", undefined));
       this.lastStatusText = undefined;
     }
     this.stopTimer();
@@ -334,21 +335,45 @@ export class AgentWidget implements SubagentManagerObserver {
     // Register widget callback once; subsequent updates use requestRender()
     // which re-invokes render() without replacing the component (avoids layout thrashing).
     if (!this.widgetRegistered) {
-      this.uiCtx.setWidget("agents", (tui, theme) => {
-        this.tui = tui;
-        return {
-          render: () => this.renderWidget(tui, theme),
-          invalidate: () => {
-            // Theme changed — force re-registration so factory captures fresh theme.
-            this.widgetRegistered = false;
-            this.tui = undefined;
-          },
-        };
-      }, { placement: "aboveEditor" });
-      this.widgetRegistered = true;
+      try {
+        this.uiCtx!.setWidget("agents", (tui, theme) => {
+          this.tui = tui;
+          return {
+            // TUI render callbacks run after the lifecycle callback that
+            // registered them; contain SDK/theme failures at this boundary too.
+            render: () => {
+              try {
+                return this.renderWidget(tui, theme);
+              } catch (error) {
+                debugLog("agent widget render", error);
+                return [];
+              }
+            },
+            invalidate: () => {
+              // Theme changed — force re-registration so factory captures fresh theme.
+              this.widgetRegistered = false;
+              this.tui = undefined;
+            },
+          };
+        }, { placement: "aboveEditor" });
+        this.widgetRegistered = true;
+      } catch (error) {
+        debugLog("agent widget register", error);
+        this.stopTimer();
+      }
     } else {
       // Widget already registered — just request a re-render of existing components.
-      this.tui?.requestRender();
+      runSafely("agent widget request render", () => this.tui?.requestRender());
+    }
+  }
+
+  /** Contain UI refresh failures and stop a timer that can no longer make progress. */
+  private refresh(): void {
+    try {
+      this.update();
+    } catch (error) {
+      debugLog("agent widget update", error);
+      this.stopTimer();
     }
   }
 
@@ -356,8 +381,8 @@ export class AgentWidget implements SubagentManagerObserver {
   dispose() {
     this.stopTimer();
     if (this.uiCtx) {
-      this.uiCtx.setWidget("agents", undefined);
-      this.uiCtx.setStatus("subagents", undefined);
+      runSafely("agent widget dispose widget", () => this.uiCtx!.setWidget("agents", undefined));
+      runSafely("agent widget dispose status", () => this.uiCtx!.setStatus("subagents", undefined));
     }
     this.widgetRegistered = false;
     this.tui = undefined;

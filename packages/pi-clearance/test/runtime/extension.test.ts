@@ -354,6 +354,50 @@ describe("pi-clearance package registration collection wiring", () => {
     );
   });
 
+  it("contains each session_shutdown resource cleanup independently", async () => {
+    const base = createTestEventBus();
+    const events: TestEventBus = {
+      on(channel, handler) {
+        const unsubscribe = base.on(channel, handler);
+        return () => {
+          unsubscribe();
+          throw new Error(`unsubscribe failed for ${channel}`);
+        };
+      },
+      emit: base.emit,
+      handlerCount: base.handlerCount,
+    };
+    const api = fakeExtensionApi({ events });
+    await Promise.resolve(piAutoApprove(api));
+    const sessionShutdown = api.__handlers.session_shutdown;
+    if (sessionShutdown === undefined) {
+      throw new Error("extension did not register session_shutdown");
+    }
+
+    const diagnostics: string[] = [];
+    const priorConsoleError = console.error;
+    console.error = (...args: unknown[]) => {
+      diagnostics.push(args.map(String).join(" "));
+    };
+    try {
+      expect(() =>
+        sessionShutdown(
+          sessionShutdownEvent("reload"),
+          fakeContext({ cwd, sessionId: "shutdown-failure" }),
+        ),
+      ).not.toThrow();
+    } finally {
+      console.error = priorConsoleError;
+    }
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("package registration"),
+        expect.stringContaining("command transforms"),
+      ]),
+    );
+  });
+
   it("rebinds package collection cleanly across reload on a persistent event bus", async () => {
     const events = createTestEventBus();
     const firstApi = fakeExtensionApi({ events });

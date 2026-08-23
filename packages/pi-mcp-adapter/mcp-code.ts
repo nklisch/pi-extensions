@@ -9,6 +9,8 @@ import type { McpExtensionState } from "./state.ts";
 import { findToolByName, formatSchema } from "./tool-metadata.ts";
 import { renderTsShape } from "./ts-shape.ts";
 import type { ContentBlock } from "./types.ts";
+import { logger } from "./logger.ts";
+import { formatTerminalError, truncateAtWord } from "./utils.ts";
 
 export const DEFAULT_MCP_SCRIPT_TIMEOUT_MS = 30_000;
 
@@ -240,6 +242,12 @@ export async function runMcpScript(
   let removeAbortListener = () => {};
   let errorCode: "timeout" | "aborted" | "script_error" | undefined;
   let errorMessage: string | undefined;
+  const reportTerminationFailure = (phase: string, error: unknown): void => {
+    logger.error(`MCP script worker termination failed during ${phase}: ${truncateAtWord(formatTerminalError(error), 1_024) || "unknown error"}`);
+  };
+  const terminateDetached = (phase: string, activeWorker: Worker): void => {
+    void activeWorker.terminate().catch(error => reportTerminationFailure(phase, error));
+  };
 
   try {
     if (externalSignal?.aborted) {
@@ -295,7 +303,7 @@ export async function runMcpScript(
       timer = setTimeout(() => {
         callsSnapshot = snapshotCalls();
         timeoutController.abort(timeoutError);
-        void activeWorker.terminate();
+        terminateDetached("timeout", activeWorker);
         reject(timeoutError);
       }, resolvedTimeoutMs);
     });
@@ -303,7 +311,7 @@ export async function runMcpScript(
       ? new Promise<never>((_resolve, reject) => {
           const onAbort = () => {
             callsSnapshot = snapshotCalls();
-            void activeWorker.terminate();
+            terminateDetached("abort", activeWorker);
             reject(abortReasonError(externalSignal.reason));
           };
           externalSignal.addEventListener("abort", onAbort, { once: true });
@@ -333,7 +341,15 @@ export async function runMcpScript(
     // A script may finish without awaiting every call; abort leftovers so
     // parent-side dispatches do not outlive the script.
     timeoutController.abort(new Error("mcpScript finished"));
-    await worker?.terminate();
+    if (worker) {
+      try {
+        await worker.terminate();
+      } catch (error) {
+        // Preserve the script/timeout/abort outcome. Cleanup failures are
+        // diagnostics, never a replacement for the structured tool result.
+        reportTerminationFailure("final cleanup", error);
+      }
+    }
   }
 
   // Snapshot before the asynchronous output guard; the terminated worker can no longer emit.

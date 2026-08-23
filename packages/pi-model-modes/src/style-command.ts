@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { parseScalarDefaultArgs } from "./command-parse-utils.js";
+import { sendCommandMessageSafely } from "./command-message.js";
 import {
   DEFAULT_OFF,
   effectiveStyleDefaultSource,
@@ -166,11 +167,16 @@ export function registerStyleCommand(pi: ExtensionAPI): void {
         } catch (cause) {
           if (!("error" in effective)) effective = { error: (cause as Error).message };
         }
-        pi.sendMessage({
-          customType: STYLE_LISTING_MESSAGE_TYPE,
-          content: formatStyleListing(effective, styles),
-          display: true,
-        });
+        await sendCommandMessageSafely(
+          pi,
+          ctx,
+          {
+            customType: STYLE_LISTING_MESSAGE_TYPE,
+            content: formatStyleListing(effective, styles),
+            display: true,
+          },
+          "/style",
+        );
         return;
       }
 
@@ -182,15 +188,20 @@ export function registerStyleCommand(pi: ExtensionAPI): void {
         }
         if (parsed.kind === "display") {
           const sources = readStyleDefaultSources(ctx.cwd);
-          pi.sendMessage({
-            customType: STYLE_DEFAULT_MESSAGE_TYPE,
-            content: formatStyleDefaultListing(
-              sources.global,
-              sources.project,
-              effectiveStyleDefaultSource(ctx.cwd),
-            ),
-            display: true,
-          });
+          await sendCommandMessageSafely(
+            pi,
+            ctx,
+            {
+              customType: STYLE_DEFAULT_MESSAGE_TYPE,
+              content: formatStyleDefaultListing(
+                sources.global,
+                sources.project,
+                effectiveStyleDefaultSource(ctx.cwd),
+              ),
+              display: true,
+            },
+            "/style default",
+          );
           return;
         }
 

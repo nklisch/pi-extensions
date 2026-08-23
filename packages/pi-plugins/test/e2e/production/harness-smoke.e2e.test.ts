@@ -27,7 +27,7 @@ describe("production packed full-bundle harness", () => {
     expect(artifact.candidateIntegrity).toMatch(/^sha512-/u);
     expect(artifact.packageReceipts).toContainEqual(expect.objectContaining({
       name: "@nklisch/pi-mcp-adapter",
-      version: "2.21.0-nklisch.0",
+      version: "2.21.0-nklisch.1",
       integrity: expect.stringMatching(/^sha512-/u),
     }));
     expect(artifact.packageReceipts).not.toContainEqual(expect.objectContaining({ resolved: expect.stringMatching(/^file:/u) }));

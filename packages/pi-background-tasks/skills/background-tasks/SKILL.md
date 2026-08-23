@@ -129,10 +129,9 @@ manage waiting itself. This is intentional harness-specific surface — the
 portable knowledge is the when/why above; the executable ergonomics live in the
 extension.
 
-**Known limitation — session scoping.** The job registry, wake channel, and UI
-handles are process-global within a single pi process, not per-session. If you
-switch or fork sessions while a background job is still running, that job's
-completion can still fire and wake/notify the *current* session rather than the
-one that started it. For long jobs that may outlive a session switch, prefer
-starting them in the session you intend to receive the wake, or cancel before
-switching. (Per-session scoping is a future improvement.)
+**Session lifecycle.** Jobs belong to the extension instance that started them.
+Session replacement, fork, reload, and shutdown cancel its running processes and
+monitors before Pi revokes that instance. Detached callbacks retain only plain
+job data; they never reuse an old command context, and a late process event is
+contained without waking or notifying the replacement session. Start a new job
+in the replacement session when work should continue there.

@@ -10,6 +10,8 @@
  * Pi SDK imports — `index.ts` wires it to `pi.events.emit`.
  */
 
+import { debugLog } from "#src/debug";
+
 /** Emitted at the start of a child run, before the session is created. */
 export const SUBAGENT_CHILD_SPAWNING = "subagents:child:spawning";
 
@@ -75,16 +77,32 @@ export function createChildLifecyclePublisher(
 ): ChildLifecyclePublisher {
   return {
     spawning(event) {
-      emit(SUBAGENT_CHILD_SPAWNING, event);
+      publish(emit, "child lifecycle spawning", SUBAGENT_CHILD_SPAWNING, event);
     },
     sessionCreated(event) {
-      emit(SUBAGENT_CHILD_SESSION_CREATED, event);
+      publish(emit, "child lifecycle session-created", SUBAGENT_CHILD_SESSION_CREATED, event);
     },
     completed(event) {
-      emit(SUBAGENT_CHILD_COMPLETED, event);
+      publish(emit, "child lifecycle completed", SUBAGENT_CHILD_COMPLETED, event);
     },
     disposed(event) {
-      emit(SUBAGENT_CHILD_DISPOSED, event);
+      publish(emit, "child lifecycle disposed", SUBAGENT_CHILD_DISPOSED, event);
     },
   };
+}
+
+/** EventEmitter listeners are outside the extension runner; isolate their throws. */
+function publish(
+  emit: LifecycleEmit,
+  channelContext: string,
+  channel: string,
+  data: unknown,
+): void {
+  try {
+    // Pi's event bus is synchronous for child lifecycle hooks by design.
+    // Keep that ordering while preventing a subscriber from escaping into Pi.
+    emit(channel, data);
+  } catch (error) {
+    debugLog(channelContext, error);
+  }
 }

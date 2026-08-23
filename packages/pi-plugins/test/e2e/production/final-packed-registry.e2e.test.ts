@@ -59,11 +59,11 @@ describe("final from-empty packed registry acceptance", () => {
     });
     expect(installed.installedReceipts).toContainEqual(expect.objectContaining({
       name: "@nklisch/pi-mcp-adapter",
-      version: "2.21.0-nklisch.0",
+      version: "2.21.0-nklisch.1",
       integrity: expect.stringMatching(/^sha512-/u),
     }));
     const bundledSubagents = JSON.parse(await readFile(join(installed.packageRoot, "node_modules", "@nklisch", "pi-subagents", "package.json"), "utf8"));
-    expect(bundledSubagents).toMatchObject({ name: "@nklisch/pi-subagents", version: "18.1.0-nklisch.1" });
+    expect(bundledSubagents).toMatchObject({ name: "@nklisch/pi-subagents", version: "18.1.0-nklisch.2" });
     expect(installed.installedReceipts.every((receipt) => receipt.realpath.startsWith(destination))).toBe(true);
 
     const finalSandbox: CleanE2ESandbox = {

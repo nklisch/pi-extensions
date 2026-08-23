@@ -274,6 +274,28 @@ export function truncateAtWord(text: string, target: number): string {
   return truncated + "...";
 }
 
+/**
+ * Invoke an extension-owned callback from a detached boundary (timer,
+ * EventEmitter, transport listener). Synchronous throws and async rejections
+ * are routed to `report` instead of reaching Node's process-level error path.
+ * Callers keep their own labeled reporter so diagnostics stay channel-specific.
+ */
+export function invokeContainedCallback(
+  callback: ((...args: any[]) => unknown) | undefined,
+  args: readonly unknown[],
+  report: (error: unknown) => void,
+): void {
+  if (!callback) return;
+  try {
+    const result = callback(...args);
+    if (result && typeof (result as { then?: unknown }).then === "function") {
+      void Promise.resolve(result).catch(report);
+    }
+  } catch (error) {
+    report(error);
+  }
+}
+
 export function normalizeDirectToolInputSchema(schema: unknown): Record<string, unknown> {
   const inputSchema = schema && typeof schema === "object" && !Array.isArray(schema)
     ? schema as Record<string, unknown>

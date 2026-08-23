@@ -8,7 +8,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
-import { debugLog } from "#src/debug";
+import { debugLog, runSafely } from "#src/debug";
 import type { ConcurrencyLimiter } from "#src/lifecycle/concurrency-limiter";
 import type { CreateSubagentSessionParams } from "#src/lifecycle/create-subagent-session";
 import {
@@ -102,7 +102,15 @@ export class SubagentManager {
     this.observer = options.observer;
     this.getRunConfig = options.getRunConfig;
     // Periodically release heavy terminal sessions according to retention policy.
-    this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
+    // Timer callbacks sit outside Pi's extension runner, so a malformed setting
+    // or disposal failure must remain diagnostic rather than escape into Node.
+    this.cleanupInterval = setInterval(() => {
+      try {
+        this.cleanup();
+      } catch (error) {
+        debugLog("retention cleanup", error);
+      }
+    }, 60_000);
     this.cleanupInterval.unref();
   }
 
@@ -133,23 +141,29 @@ export class SubagentManager {
   /** Compose a per-agent lifecycle observer from manager and spawn-config concerns. */
   private buildObserver(options: AgentSpawnConfig): SubagentLifecycleObserver {
     return {
-      onStarted: (agent) => {
-        this.observer?.onSubagentStarted(agent);
-      },
+      onStarted: (agent) => runSafely(
+        "onSubagentStarted observer",
+        () => this.observer?.onSubagentStarted(agent),
+      ),
       onSessionCreated: options.observer?.onSessionCreated
-        ? (agent) => options.observer!.onSessionCreated!(agent)
+        ? (agent) => runSafely(
+          "onSessionCreated observer",
+          () => options.observer!.onSessionCreated!(agent),
+        )
         : undefined,
       onRunFinished: (agent) => {
         if (options.isBackground) {
-          try { this.observer?.onSubagentCompleted(agent); } catch (err) { debugLog("onSubagentCompleted observer", err); }
+          runSafely("onSubagentCompleted observer", () => this.observer?.onSubagentCompleted(agent));
         }
       },
-      onResumedFinished: (agent) => {
-        try { this.observer?.onSubagentResumed?.(agent); } catch (err) { debugLog("onSubagentResumed observer", err); }
-      },
-      onCompacted: (agent, info) => {
-        this.observer?.onSubagentCompacted(agent, info);
-      },
+      onResumedFinished: (agent) => runSafely(
+        "onSubagentResumed observer",
+        () => this.observer?.onSubagentResumed?.(agent),
+      ),
+      onCompacted: (agent, info) => runSafely(
+        "onSubagentCompacted observer",
+        () => this.observer?.onSubagentCompacted(agent, info),
+      ),
     };
   }
 
@@ -202,7 +216,7 @@ export class SubagentManager {
     this.agents.set(id, record);
 
     if (options.isBackground) {
-      this.observer?.onSubagentCreated(record);
+      runSafely("onSubagentCreated observer", () => this.observer?.onSubagentCreated(record));
     }
 
     if (options.isBackground && !options.bypassQueue) {
@@ -370,8 +384,9 @@ export class SubagentManager {
   dispose() {
     clearInterval(this.cleanupInterval);
     // Lifecycle callbacks observe the shutdown signal before their registration
-    // disposer runs. Existing no-provider teardown stays synchronous.
-    void this.lifecycleInterceptors.dispose();
+    // disposer runs. Existing no-provider teardown stays synchronous. Consume
+    // async disposer failures because manager disposal is intentionally sync.
+    void this.lifecycleInterceptors.dispose().catch((error) => debugLog("lifecycle interceptor shutdown", error));
     // Drop pending thunks
     this.limiter.clear();
     for (const record of this.agents.values()) {

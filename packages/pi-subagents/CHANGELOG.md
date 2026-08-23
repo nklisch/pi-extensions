@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [18.1.0-nklisch.2] - 2026-08-23
+
+### Fixed
+
+- Contain progress, widget, transcript, session-control, observer, lifecycle, cleanup, and interceptor failures at their detached boundaries. Background records still reach a terminal state, independent sinks continue, and failed timers stop without terminating Pi.
+- Skip malformed custom agent frontmatter without suppressing valid agents, make workspace and child-session cleanup idempotent when a provider or listener fails, and keep packed public-type verification compatible with pnpm 11.
+
 ## [18.1.0-nklisch.1] - 2026-08-17
 
 ### Added

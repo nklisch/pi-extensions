@@ -1,3 +1,9 @@
+## v0.4.1
+
+### Fixed
+
+- Contain detached update startup, subagent disposal, child-process completion, plugin-manager timers and install phases, hook presentation, and lifecycle cleanup. One failed reporting or cleanup sink no longer terminates Pi or suppresses later recovery work.
+
 ## v0.4.0
 
 ### Added

@@ -1,3 +1,4 @@
+import { runSafely } from "#src/debug";
 import type { SubagentManagerObserver } from "#src/lifecycle/subagent-manager";
 import { buildEventData, type NotificationSystem } from "#src/observation/notification";
 import type { CompactionInfo, Subagent } from "#src/types";
@@ -35,11 +36,11 @@ export class SubagentEventsObserver implements SubagentManagerObserver {
 
 	onSubagentStarted(record: Subagent): void {
 		// Emit started event when agent transitions to running (including from queue).
-		this.emit("subagents:started", {
+		runSafely("subagent event emission started", () => this.emit("subagents:started", {
 			id: record.id,
 			type: record.type,
 			description: record.description,
-		});
+		}));
 	}
 
 	onSubagentCompleted(record: Subagent): void {
@@ -47,13 +48,13 @@ export class SubagentEventsObserver implements SubagentManagerObserver {
 		const isError = record.status === "error" || record.status === "stopped" || record.status === "aborted";
 		const eventData = buildEventData(record);
 		if (isError) {
-			this.emit("subagents:failed", eventData);
+			runSafely("subagent event emission failed", () => this.emit("subagents:failed", eventData));
 		} else {
-			this.emit("subagents:completed", eventData);
+			runSafely("subagent event emission completed", () => this.emit("subagents:completed", eventData));
 		}
 
 		// Persist final record for cross-extension history reconstruction.
-		this.appendEntry("subagents:record", {
+		runSafely("subagent record append", () => this.appendEntry("subagents:record", {
 			id: record.id,
 			type: record.type,
 			description: record.description,
@@ -62,16 +63,16 @@ export class SubagentEventsObserver implements SubagentManagerObserver {
 			error: record.error,
 			startedAt: record.startedAt,
 			completedAt: record.completedAt,
-		});
+		}));
 
 		// The manager decides whether to nudge (it owns the consumed-result state).
-		this.notifications.sendCompletion(record);
+		runSafely("subagent completion notification", () => this.notifications.sendCompletion(record));
 	}
 
 	onSubagentResumed(record: Subagent): void {
 		const eventData = buildEventData(record);
-		this.emit("subagents:resumed", eventData);
-		this.appendEntry("subagents:record", {
+		runSafely("subagent event emission resumed", () => this.emit("subagents:resumed", eventData));
+		runSafely("subagent record append resumed", () => this.appendEntry("subagents:record", {
 			id: record.id,
 			type: record.type,
 			description: record.description,
@@ -80,28 +81,28 @@ export class SubagentEventsObserver implements SubagentManagerObserver {
 			error: record.error,
 			startedAt: record.startedAt,
 			completedAt: record.completedAt,
-		});
+		}));
 	}
 
 	onSubagentCompacted(record: Subagent, info: CompactionInfo): void {
 		// Emit compacted event when agent's session compacts (preserves count on record).
-		this.emit("subagents:compacted", {
+		runSafely("subagent event emission compacted", () => this.emit("subagents:compacted", {
 			id: record.id,
 			type: record.type,
 			description: record.description,
 			reason: info.reason,
 			tokensBefore: info.tokensBefore,
 			compactionCount: record.compactionCount,
-		});
+		}));
 	}
 
 	onSubagentCreated(record: Subagent): void {
 		// Emit created event for background agents (before limiter admission).
-		this.emit("subagents:created", {
+		runSafely("subagent event emission created", () => this.emit("subagents:created", {
 			id: record.id,
 			type: record.type,
 			description: record.description,
 			isBackground: true,
-		});
+		}));
 	}
 }

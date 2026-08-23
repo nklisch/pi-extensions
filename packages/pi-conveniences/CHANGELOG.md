@@ -1,0 +1,7 @@
+# Changelog
+
+## v0.1.2 — 2026-08-23
+
+### Fixed
+
+- Keep delayed context-footer installation and rendering failures inside the footer extension. A stale or failed UI context now degrades the cosmetic footer and stops retries instead of throwing from a timer or render callback.

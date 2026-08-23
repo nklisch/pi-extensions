@@ -43,6 +43,9 @@ import {
   resolveCommandSecretsRecord,
   resolveConfigPath,
   resolveServerUrl,
+  formatTerminalError,
+  invokeContainedCallback,
+  truncateAtWord,
 } from "./utils.ts";
 import { abortable, throwIfAborted } from "./abort.ts";
 import { combineAbortSignals } from "./runtime-owner.ts";
@@ -664,7 +667,7 @@ export class McpServerManager {
     const connection = this.connections.get(serverName);
     if (!connection || connection.client !== client || connection.status !== "connected") return;
     connection.tools = tools;
-    this.metadataListChangedListener?.(serverName, "tools-list-changed");
+    this.invokeDetachedCallback("metadata list change", this.metadataListChangedListener, [serverName, "tools-list-changed"]);
   }
 
   private handlePromptsListChanged(
@@ -682,7 +685,7 @@ export class McpServerManager {
     if (!connection || connection.client !== client || connection.status !== "connected") return;
     connection.prompts = prompts;
     connection.promptDiscoveryFailed = false;
-    this.metadataListChangedListener?.(serverName, "prompts-list-changed");
+    this.invokeDetachedCallback("metadata list change", this.metadataListChangedListener, [serverName, "prompts-list-changed"]);
   }
 
   private handleResourcesListChanged(
@@ -699,7 +702,7 @@ export class McpServerManager {
     const connection = this.connections.get(serverName);
     if (!connection || connection.client !== client || connection.status !== "connected") return;
     connection.resources = resources;
-    this.metadataListChangedListener?.(serverName, "resources-list-changed");
+    this.invokeDetachedCallback("metadata list change", this.metadataListChangedListener, [serverName, "resources-list-changed"]);
   }
 
   async handleUrlElicitationRequired(
@@ -929,6 +932,19 @@ export class McpServerManager {
     }
   }
 
+  private invokeDetachedCallback(
+    name: string,
+    callback: ((...args: any[]) => unknown) | undefined,
+    args: unknown[],
+  ): void {
+    invokeContainedCallback(callback, args, error => this.reportDetachedCallbackFailure(name, error));
+  }
+
+  private reportDetachedCallbackFailure(name: string, error: unknown): void {
+    const message = truncateAtWord(formatTerminalError(error), 1_024);
+    logger.error(`MCP ${name} callback failed: ${message || "unknown error"}`);
+  }
+
   private attachAdapterNotificationHandlers(serverName: string, client: Client): void {
     client.setNotificationHandler(
       SERVER_STREAM_RESULT_PATCH_METHOD,
@@ -936,7 +952,7 @@ export class McpServerManager {
       params => {
         const listener = this.uiStreamListeners.get(params.streamToken);
         if (!listener) return;
-        listener(serverName, params);
+        this.invokeDetachedCallback("UI stream notification", listener, [serverName, params]);
       },
     );
   }

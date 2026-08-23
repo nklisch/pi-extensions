@@ -168,6 +168,16 @@ describe("SubagentManager — completion callbacks", () => {
 
     expect(manager.getRecord(id)!.status).toBe("completed");
   });
+
+  it("contains creation observer errors without stranding the queued run", async () => {
+    ({ manager } = createManager({ observer: { onSubagentCreated: () => {
+      throw new Error("stale creation context");
+    } } }));
+
+    const id = spawnBg(manager);
+    await expect(manager.getRecord(id)!.promise).resolves.toBeUndefined();
+    expect(manager.getRecord(id)!.status).toBe("completed");
+  });
 });
 
 describe("SubagentManager — cleanup timer", () => {

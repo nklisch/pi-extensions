@@ -87,8 +87,20 @@ export function buildClearanceCommandOptions(
       return getClearanceArgumentCompletions(argumentPrefix, deps);
     },
     async handler(args, ctx) {
-      const report = await handleClearanceCommand(args, ctx, pi, deps);
-      notify(ctx, report.markdown, report.level ?? "info");
+      try {
+        const report = await handleClearanceCommand(args, ctx, pi, deps);
+        notify(ctx, report.markdown, report.level ?? "info");
+      } catch (error) {
+        // Pi catches registered command promises, but that host-level catch does
+        // not provide a useful slash-command recovery message. Do not convert
+        // this into a write result or attempt rollback: any completed durable
+        // write remains completed, and the user gets an observable diagnostic.
+        notify(
+          ctx,
+          `Pi Clearance command failed: ${errorMessage(error)}`,
+          "error",
+        );
+      }
     },
   };
 }
@@ -363,4 +375,12 @@ function splitCompletionPrefix(argumentPrefix: string): {
     completed: tokens.slice(0, -1),
     current: tokens.at(-1) ?? "",
   };
+}
+
+function errorMessage(error: unknown): string {
+  try {
+    return error instanceof Error ? error.message : String(error);
+  } catch {
+    return "unknown error";
+  }
 }

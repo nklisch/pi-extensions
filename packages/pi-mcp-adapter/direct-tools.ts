@@ -14,10 +14,11 @@ import { maybeStartUiSession, summarizeUiSessionResult, type UiSessionRuntime } 
 import { formatToolName, isServerDisabled, isToolAllowed, resolveToolPrefix } from "./types.ts";
 import { resourceNameToToolName } from "./resource-tools.ts";
 import { authenticate, supportsOAuth } from "./mcp-auth-flow.ts";
-import { formatAuthRequiredMessage, resolveServerUrl, truncateAtWord } from "./utils.ts";
+import { formatAuthRequiredMessage, formatTerminalError, invokeContainedCallback, resolveServerUrl, truncateAtWord } from "./utils.ts";
 import { SessionRecoveryAuthRequiredError, withSessionRecovery } from "./session-recovery.ts";
 import { combineAbortSignals, isAbortError } from "./runtime-owner.ts";
 import { ensureToolCallApproved } from "./tool-approval.ts";
+import { logger } from "./logger.ts";
 
 type ClientCallToolResult = Awaited<ReturnType<Client["callTool"]>>;
 
@@ -403,6 +404,13 @@ export function createDirectToolExecutor(
     }
 
     let uiSession: UiSessionRuntime | null = null;
+    const reportSecondaryFailure = (operation: string, error: unknown): void => {
+      logger.error(`MCP direct tool ${operation} failed: ${truncateAtWord(formatTerminalError(error), 1_024) || "unknown error"}`);
+    };
+    const sendToolCancelled = (reason: string): void => {
+      if (!uiSession) return;
+      invokeContainedCallback(uiSession.sendToolCancelled, [reason], error => reportSecondaryFailure("UI cancellation", error));
+    };
     const requestOptions = state.manager.getRequestOptions?.(spec.serverName, ownedSignal) ?? (ownedSignal ? { signal: ownedSignal } : undefined);
 
     const outputGuardOptions = resolveMcpOutputGuardOptions(state.config.settings);
@@ -523,37 +531,68 @@ export function createDirectToolExecutor(
     } catch (error) {
       if (error instanceof SessionRecoveryAuthRequiredError) {
         const message = error.authMessage ?? getDirectAuthRequiredMessage(state, spec.serverName);
-        uiSession?.sendToolCancelled(message);
+        sendToolCancelled(message);
         return {
           content: [{ type: "text" as const, text: message }],
           details: { error: "auth_required", server: spec.serverName, message, autoAuthAttempted },
         };
       }
       if (error instanceof UrlElicitationRequiredError) {
-        const action = await state.manager.handleUrlElicitationRequired(spec.serverName, error);
+        let action: "accept" | "decline" | "cancel";
+        try {
+          action = await state.manager.handleUrlElicitationRequired(spec.serverName, error);
+        } catch (followUpError) {
+          reportSecondaryFailure("URL elicitation handling", followUpError);
+          action = "cancel";
+        }
         const message = action === "accept"
           ? "The original MCP tool did not run. Complete the opened browser interaction, then retry the tool."
           : `The URL interaction was ${action === "decline" ? "declined" : "cancelled"}.`;
-        uiSession?.sendToolCancelled(message);
+        sendToolCancelled(message);
         return {
           content: [{ type: "text" as const, text: message }],
           details: { error: "url_elicitation_required", server: spec.serverName, action },
         };
       }
       const message = error instanceof Error ? error.message : String(error);
-      uiSession?.sendToolCancelled(message);
-      const schemaText = spec.inputSchema ? `\n\nExpected parameters:\n${formatSchema(spec.inputSchema)}` : "";
-      const guarded = await guardMcpOutput([{ type: "text" as const, text: message }], { ...outputGuardOptions, prefix: "Failed to call tool: ", suffix: schemaText });
-      return {
-        content: guarded.content,
-        details: { error: isAbortError(error, ownedSignal) ? "aborted" : "call_failed", server: spec.serverName, ...guardedMcpDetails(guarded) },
-      };
+      sendToolCancelled(message);
+      let schemaText = "";
+      try {
+        schemaText = spec.inputSchema ? `\n\nExpected parameters:\n${formatSchema(spec.inputSchema)}` : "";
+      } catch (schemaError) {
+        reportSecondaryFailure("error schema formatting", schemaError);
+      }
+      try {
+        const guarded = await guardMcpOutput([{ type: "text" as const, text: message }], { ...outputGuardOptions, prefix: "Failed to call tool: ", suffix: schemaText });
+        return {
+          content: guarded.content,
+          details: { error: isAbortError(error, ownedSignal) ? "aborted" : "call_failed", server: spec.serverName, ...guardedMcpDetails(guarded) },
+        };
+      } catch (guardError) {
+        reportSecondaryFailure("error output guarding", guardError);
+        return {
+          content: [{ type: "text" as const, text: `Failed to call tool: ${message}` }],
+          details: { error: isAbortError(error, ownedSignal) ? "aborted" : "call_failed", server: spec.serverName },
+        };
+      }
     } finally {
       if (uiSession?.reused) {
-        uiSession.close();
+        try {
+          uiSession.close();
+        } catch (error) {
+          reportSecondaryFailure("UI session close", error);
+        }
       }
-      state.manager.decrementInFlight(spec.serverName);
-      state.manager.touch(spec.serverName);
+      try {
+        state.manager.decrementInFlight(spec.serverName);
+      } catch (error) {
+        reportSecondaryFailure("in-flight cleanup", error);
+      }
+      try {
+        state.manager.touch(spec.serverName);
+      } catch (error) {
+        reportSecondaryFailure("activity cleanup", error);
+      }
     }
   };
 }

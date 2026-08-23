@@ -114,6 +114,10 @@ interface AtomicConfigWriteInput {
   ) => Promise<ConfigCommandPostWriteValidationResult>;
   readonly writeFailureReason: string;
   readonly postWriteFailureReason: string;
+  /** Test seam for deterministic failure coverage; production uses fs rename. */
+  readonly renameTempFile?: (sourcePath: string, targetPath: string) => Promise<void>;
+  /** Test seam for deterministic cleanup failure coverage. */
+  readonly cleanupTempFile?: (tempPath: string) => Promise<void>;
 }
 
 /**
@@ -208,22 +212,25 @@ export async function writeConfigTargetAndValidate(
   let tempPresent = false;
   let renamed = false;
   let backupCreated = false;
+  let result: ConfigCommandApplyResult;
 
   try {
     await mkdir(path.dirname(input.targetPath), { recursive: true });
+    // Mark the path before writing: if the write rejects after creating a
+    // partial file, the same best-effort cleanup still runs.
+    tempPresent = true;
     await writeFile(
       tempPath,
       serializeSparseConfigText(input.configKind, input.value),
       "utf8",
     );
-    tempPresent = true;
 
     if (input.hadExistingFile) {
       await copyFile(input.targetPath, backupPath);
       backupCreated = true;
     }
 
-    await rename(tempPath, input.targetPath);
+    await (input.renameTempFile ?? rename)(tempPath, input.targetPath);
     tempPresent = false;
     renamed = true;
 
@@ -235,7 +242,7 @@ export async function writeConfigTargetAndValidate(
         backupPath,
         input.hadExistingFile,
       );
-      return {
+      result = {
         ok: false,
         planId: input.planId,
         targetPath: input.targetPath,
@@ -244,17 +251,17 @@ export async function writeConfigTargetAndValidate(
         restored,
         errors: policyValidation.errors,
       };
+    } else {
+      result = {
+        ok: true,
+        planId: input.planId,
+        changed: true,
+        targetPath: input.targetPath,
+        ...(backupCreated ? { backupPath } : {}),
+        resolvedConfig,
+        warnings: policyValidation.warnings ?? [],
+      };
     }
-
-    return {
-      ok: true,
-      planId: input.planId,
-      changed: true,
-      targetPath: input.targetPath,
-      ...(backupCreated ? { backupPath } : {}),
-      resolvedConfig,
-      warnings: policyValidation.warnings ?? [],
-    };
   } catch (error) {
     const restored = renamed
       ? await restoreAfterFailedValidation(
@@ -263,7 +270,7 @@ export async function writeConfigTargetAndValidate(
           input.hadExistingFile,
         )
       : false;
-    return {
+    result = {
       ok: false,
       planId: input.planId,
       targetPath: input.targetPath,
@@ -272,11 +279,21 @@ export async function writeConfigTargetAndValidate(
       restored,
       errors: [errorMessage(error)],
     };
-  } finally {
-    if (tempPresent) {
-      await unlinkIfExists(tempPath);
+  }
+
+  if (tempPresent) {
+    try {
+      await (input.cleanupTempFile ?? unlinkIfExists)(tempPath);
+    } catch (error) {
+      const diagnostic = `temporary config file cleanup failed: ${errorMessage(error)}`;
+      console.error(`Pi Clearance ${diagnostic}`);
+      result = result.ok
+        ? { ...result, warnings: [...result.warnings, diagnostic] }
+        : { ...result, errors: [...result.errors, diagnostic] };
     }
   }
+
+  return result;
 }
 
 export function applyJsonPatchDocument(

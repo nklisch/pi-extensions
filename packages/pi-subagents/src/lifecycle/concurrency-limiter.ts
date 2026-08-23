@@ -9,6 +9,8 @@
  * task runs, or resolves early if clear() drops it before it starts.
  */
 
+import { debugLog } from "#src/debug";
+
 export class ConcurrencyLimiter {
 	private active = 0;
 	private readonly pending: Array<{ start: () => void; settle: () => void }> = [];
@@ -17,7 +19,12 @@ export class ConcurrencyLimiter {
 
 	/** Whether a newly scheduled task will wait behind work already admitted. */
 	isSaturated(): boolean {
-		return this.active >= this.getLimit();
+		try {
+			return this.active >= this.getLimit();
+		} catch (error) {
+			debugLog("concurrency limiter limit", error);
+			return false;
+		}
 	}
 
 	/**
@@ -30,12 +37,25 @@ export class ConcurrencyLimiter {
 		this.pending.push({
 			start: () => {
 				this.active++;
-				task()
+				let taskPromise: Promise<void>;
+				try {
+					taskPromise = Promise.resolve(task());
+				} catch (error) {
+					taskPromise = Promise.reject(error);
+				}
+				taskPromise
 					.then(resolve, reject)
 					.finally(() => {
 						this.active--;
-						this.recheck();
-					});
+						try {
+							this.recheck();
+						} catch (error) {
+							// A failing dynamic limit must not strand the slot or
+							// reject the detached cleanup promise.
+							debugLog("concurrency limiter recheck", error);
+						}
+					})
+					.catch((error: unknown) => debugLog("concurrency limiter cleanup", error));
 			},
 			settle: resolve,
 		});
@@ -45,10 +65,14 @@ export class ConcurrencyLimiter {
 
 	/** Start pending tasks until the limit is reached. Call when the limit may have grown. */
 	recheck(): void {
-		while (this.active < this.getLimit()) {
-			const next = this.pending.shift();
-			if (!next) break;
-			next.start();
+		try {
+			while (this.active < this.getLimit()) {
+				const next = this.pending.shift();
+				if (!next) break;
+				next.start();
+			}
+		} catch (error) {
+			debugLog("concurrency limiter recheck", error);
 		}
 	}
 

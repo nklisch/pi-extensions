@@ -7,6 +7,8 @@
  * continuation bound; it does not expose sessions, records, models, or queues.
  */
 
+import { debugLog } from "#src/debug";
+
 /** The fixed bound prevents a provider from turning completion into an unbounded loop. */
 export const MAX_LIFECYCLE_CONTINUATION_ROUNDS = 3;
 
@@ -137,7 +139,7 @@ export class LifecycleInterceptorRegistry {
     if (this.shutdownController.signal.aborted) {
       throw new Error("Subagent lifecycle registry is disposed");
     }
-    if (typeof interceptor !== "object") {
+    if (interceptor === null || typeof interceptor !== "object") {
       throw new TypeError("A lifecycle interceptor object is required");
     }
 
@@ -193,10 +195,7 @@ export class LifecycleInterceptorRegistry {
   private async shutdown(): Promise<void> {
     this.shutdownController.abort(new DOMException("Subagent lifecycle registry disposed", "AbortError"));
     for (const record of this.registrations) this.unregister(record);
-    const finalizers = this.registrations.flatMap((record) =>
-      record.finalizer === undefined ? [] : [record.finalizer],
-    );
-    await Promise.all(finalizers);
+    await Promise.all(this.registrations.map((record) => this.consumeFinalizer(record)));
   }
 
   /**
@@ -206,8 +205,18 @@ export class LifecycleInterceptorRegistry {
    * unregister another interceptor while the same ordered snapshot is running.
    */
   private disposeRegistration(record: RegistrationRecord): Promise<void> {
+    const wasInFlight = record.inFlight > 0;
     this.unregister(record);
-    return Promise.resolve();
+    // A callback may unregister another provider from inside the same ordered
+    // snapshot. Do not await its idle finalizer there; consume it independently
+    // while preserving the synchronous interceptor ordering contract. External
+    // disposal still gets a completion promise once the provider is idle.
+    const finalizer = this.consumeFinalizer(record);
+    if (wasInFlight) {
+      void finalizer;
+      return Promise.resolve();
+    }
+    return finalizer;
   }
 
   private unregister(record: RegistrationRecord): void {
@@ -216,6 +225,16 @@ export class LifecycleInterceptorRegistry {
       await this.waitForIdle(record);
       await record.interceptor.dispose?.();
     })();
+  }
+
+  /** Consume disposer failures so detached manager shutdown cannot become an unhandled rejection. */
+  private async consumeFinalizer(record: RegistrationRecord): Promise<void> {
+    if (!record.finalizer) return;
+    try {
+      await record.finalizer;
+    } catch (error) {
+      debugLog("lifecycle interceptor dispose", error);
+    }
   }
 
   private async waitForIdle(record: RegistrationRecord): Promise<void> {

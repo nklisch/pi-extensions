@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { truncate, assertSafeFetchUrl, fetchBounded, parseJsonBody, fetchOneJson, fetchOneArticle, clampMaxChars } from "./index";
 import { extractArticle, ARTICLE_FALLBACK_MARKER } from "./article";
-import zaiResearchExtension from "./index";
+import zaiResearchExtension, { createZaiResearchExtension } from "./index";
 import { looksLikePdfUrl } from "./pdf";
 
 const FIXTURES_DIR = join(import.meta.dir, "test", "fixtures");
@@ -914,5 +914,62 @@ describe("fetch_content windowing (JSON + batch ignore window)", () => {
         expect(result.content[0].text).toContain("## https://example.com/b.json");
       },
     );
+  });
+});
+
+describe("session shutdown cleanup", () => {
+  test("clears the hub and registry even when MCP close rejects", async () => {
+    const tools: Array<{ name: string; execute: (...args: any[]) => Promise<any> }> = [];
+    const handlers = new Map<string, (...args: any[]) => Promise<void>>();
+    const resolvers: Array<() => Promise<string | null>> = [];
+    let hubCreations = 0;
+    let closeCalls = 0;
+    const api = {
+      registerTool: (definition: { name: string; execute: (...args: any[]) => Promise<any> }) => tools.push(definition),
+      on: (event: string, handler: (...args: any[]) => Promise<void>) => handlers.set(event, handler),
+    };
+
+    createZaiResearchExtension(api as any, {
+      createHub: (options) => {
+        hubCreations++;
+        resolvers.push(options.resolveKey);
+        return {
+          call: async () => ({ text: "ok", isError: false }),
+          close: async () => {
+            closeCalls++;
+            throw new Error("transport already closed");
+          },
+        };
+      },
+    });
+
+    const search = tools.find((tool) => tool.name === "zai_web_search")!;
+    const registry = {
+      find: () => ({ id: "glm-5.2" }),
+      getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "old-key" }),
+    };
+    await search.execute("id", { query: "first" }, undefined, undefined, { modelRegistry: registry });
+
+    const shutdown = handlers.get("session_shutdown")!;
+    const originalWarn = console.warn;
+    const warnings: string[] = [];
+    console.warn = (message: string) => warnings.push(message);
+    try {
+      await expect(shutdown()).resolves.toBeUndefined();
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(closeCalls).toBe(1);
+    expect(hubCreations).toBe(1);
+    expect(await resolvers[0]()).toBeNull();
+    expect(warnings[0]).toContain("MCP cleanup failed: transport already closed");
+
+    const nextRegistry = {
+      find: () => ({ id: "glm-4.6" }),
+      getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "new-key" }),
+    };
+    await search.execute("id", { query: "second" }, undefined, undefined, { modelRegistry: nextRegistry });
+    expect(hubCreations).toBe(2);
   });
 });

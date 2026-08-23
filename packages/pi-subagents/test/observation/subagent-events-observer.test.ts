@@ -122,6 +122,19 @@ describe("SubagentEventsObserver", () => {
 			expect(emit).toHaveBeenCalledTimes(1);
 			expect(appendEntry).toHaveBeenCalledTimes(1);
 		});
+
+		it("isolates event, persistence, and notification sink failures", () => {
+			const notifications = makeNotifications();
+			const { observer, emit, appendEntry } = makeObserver({ notifications });
+			emit.mockImplementation(() => { throw new Error("event failed"); });
+			appendEntry.mockImplementation(() => { throw new Error("append failed"); });
+			vi.mocked(notifications.sendCompletion).mockImplementation(() => { throw new Error("notify failed"); });
+
+			expect(() => observer.onSubagentCompleted(createTestSubagent({ status: "completed" }))).not.toThrow();
+			expect(emit).toHaveBeenCalledOnce();
+			expect(appendEntry).toHaveBeenCalledOnce();
+			expect(notifications.sendCompletion).toHaveBeenCalledOnce();
+		});
 	});
 
 	describe("onSubagentResumed", () => {

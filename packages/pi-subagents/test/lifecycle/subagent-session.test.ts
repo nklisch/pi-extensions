@@ -173,6 +173,35 @@ describe("SubagentSession — runTurnLoop turn limits", () => {
     expect(result.steered).toBe(true);
   });
 
+  it("contains rejected detached steer and abort controls", async () => {
+    const { session, listeners } = createSession("done");
+    session.steer = vi.fn().mockRejectedValue(new Error("steer transport failed"));
+    session.abort = vi.fn().mockRejectedValue(new Error("abort transport failed"));
+    programTurns(session, listeners, 2);
+    const { sub } = makeSubagentSession(session);
+    const priorDebug = process.env.PI_SUBAGENTS_DEBUG;
+    process.env.PI_SUBAGENTS_DEBUG = "1";
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const result = await sub.runTurnLoop("go", { maxTurns: 1, graceTurns: 1 });
+      await Promise.resolve();
+      expect(result).toMatchObject({ aborted: true, steered: true });
+      expect(warnings).toHaveBeenCalledWith(
+        expect.stringContaining("turn-limit steer"),
+        expect.any(Error),
+      );
+      expect(warnings).toHaveBeenCalledWith(
+        expect.stringContaining("turn-limit abort"),
+        expect.any(Error),
+      );
+    } finally {
+      warnings.mockRestore();
+      if (priorDebug === undefined) delete process.env.PI_SUBAGENTS_DEBUG;
+      else process.env.PI_SUBAGENTS_DEBUG = priorDebug;
+    }
+  });
+
   it("graceTurns extends the window so a finishing agent is not aborted", async () => {
     const { session, listeners } = createSession("done");
     programTurns(session, listeners, 3);
@@ -365,6 +394,37 @@ describe("SubagentSession — delegate methods", () => {
   });
 });
 
+describe("SubagentSession — turn-loop cleanup containment", () => {
+  it("runs every cleanup handle even when an unsubscribe throws", async () => {
+    const { session } = createSession("done");
+    const released: string[] = [];
+    let subCount = 0;
+    session.subscribe = vi.fn(() => {
+      subCount++;
+      const label = subCount === 1 ? "turns" : "collector";
+      return () => {
+        released.push(label);
+        if (label === "turns") throw new Error("stale listener");
+      };
+    });
+    const { sub } = makeSubagentSession(session);
+
+    const result = await sub.runTurnLoop("go", {});
+
+    expect(result.responseText).toBe("done");
+    expect(released).toEqual(["turns", "collector"]);
+  });
+
+  it("does not mask the primary turn-loop error when cleanup throws", async () => {
+    const { session } = createSession("done");
+    session.subscribe = vi.fn(() => () => { throw new Error("stale listener"); });
+    session.prompt = vi.fn().mockRejectedValue(new Error("provider exploded"));
+    const { sub } = makeSubagentSession(session);
+
+    await expect(sub.runTurnLoop("go", {})).rejects.toThrow("provider exploded");
+  });
+});
+
 describe("SubagentSession — dispose", () => {
   it("disposes the session and emits disposed with the child session id", () => {
     const { session } = createSession("X");
@@ -373,5 +433,16 @@ describe("SubagentSession — dispose", () => {
     expect(session.dispose).toHaveBeenCalledOnce();
     expect(lifecycle.disposed).toHaveBeenCalledOnce();
     expect(lifecycle.disposed).toHaveBeenCalledWith({ sessionId: "child-session-abc" });
+  });
+
+  it("contains subscriber failure and makes disposal idempotent", () => {
+    const { session } = createSession("X");
+    lifecycle.disposed.mockImplementation(() => { throw new Error("listener failed"); });
+    const { sub } = makeSubagentSession(session, { sessionId: "child-session-abc", lifecycle });
+
+    expect(() => sub.dispose()).not.toThrow();
+    expect(() => sub.dispose()).not.toThrow();
+    expect(session.dispose).toHaveBeenCalledOnce();
+    expect(lifecycle.disposed).toHaveBeenCalledOnce();
   });
 });

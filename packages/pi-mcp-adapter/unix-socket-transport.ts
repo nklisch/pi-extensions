@@ -2,6 +2,8 @@ import { createConnection, type Socket } from "node:net";
 import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/client";
 import type { Transport } from "@modelcontextprotocol/client";
 import type { JSONRPCMessage } from "@modelcontextprotocol/client";
+import { logger } from "./logger.ts";
+import { formatTerminalError, invokeContainedCallback, truncateAtWord } from "./utils.ts";
 
 /** MCP JSONL transport for an explicitly configured Unix-domain socket. */
 export class UnixSocketClientTransport implements Transport {
@@ -13,6 +15,19 @@ export class UnixSocketClientTransport implements Transport {
   onmessage?: (message: JSONRPCMessage) => void;
 
   constructor(private readonly socketPath: string) {}
+
+  private invokeCallback(
+    callback: ((...args: any[]) => unknown) | undefined,
+    args: unknown[],
+    name: "onmessage" | "onerror" | "onclose",
+  ): void {
+    invokeContainedCallback(callback, args, error => this.reportCallbackFailure(name, error));
+  }
+
+  private reportCallbackFailure(name: string, error: unknown): void {
+    const message = truncateAtWord(formatTerminalError(error), 1_024);
+    logger.error(`MCP Unix socket ${name} callback failed: ${message || "unknown error"}`);
+  }
 
   async start(): Promise<void> {
     if (this.socket) {
@@ -34,22 +49,22 @@ export class UnixSocketClientTransport implements Transport {
           while (true) {
             const message = this.readBuffer.readMessage();
             if (message === null) break;
-            this.onmessage?.(message);
+            this.invokeCallback(this.onmessage, [message], "onmessage");
           }
         } catch (error) {
           const cause = error instanceof Error ? error : new Error(String(error));
-          this.onerror?.(cause);
-          void this.close();
+          this.invokeCallback(this.onerror, [cause], "onerror");
+          void this.close().catch(closeError => this.reportCallbackFailure("close", closeError));
         }
       });
       socket.on("error", error => {
         if (!connected) reject(error);
-        this.onerror?.(error);
+        this.invokeCallback(this.onerror, [error], "onerror");
       });
       socket.on("close", () => {
         if (this.socket === socket) this.socket = undefined;
         this.readBuffer.clear();
-        this.onclose?.();
+        this.invokeCallback(this.onclose, [], "onclose");
       });
     });
   }

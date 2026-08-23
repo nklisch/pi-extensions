@@ -152,51 +152,72 @@ export function createPackageRegistrationStore(
   }
 
   function notify(): void {
-    onChange?.();
+    try {
+      onChange?.();
+    } catch (error) {
+      // The change hook invalidates another in-memory subsystem. It is part of
+      // this callback's recovery path, so a broken hook must remain observable
+      // without escaping into the host event bus.
+      recordListenerIssue("change-notification-error", error);
+    }
+  }
+
+  function recordListenerIssue(code: string, error: unknown): void {
+    const message = `package registration event handler failed: ${errorMessage(error)}`;
+    issues.push({ severity: "error", code, path: "event", message });
+    console.error(`Pi Clearance ${message}`);
   }
 
   // Register-event listener. Classifies each incoming payload by request id:
   // accept unsolicited (no requestId) and current-request responses; warn and
-  // ignore stale responses for older request ids. The normalizer is total, so
-  // this handler never throws on payload shape. The unsubscribe handle is kept
-  // so `session_shutdown` can detach this store from Pi's persistent event bus.
+  // ignore stale responses for older request ids. The event bus is an
+  // out-of-band callback boundary: payload property getters and normalizers
+  // operate inside the containment block so hostile contributor input cannot
+  // escape through Pi's shared event bus.
   const unsubscribeRegister = bus.on(
     AUTO_REVIEWER_PACKS_REGISTER_EVENT,
     (data: unknown) => {
-      if (disposed) {
-        return;
-      }
+      try {
+        if (disposed) {
+          return;
+        }
 
-      const rawRequestId = readRequestId(data);
+        const rawRequestId = readRequestId(data);
 
-      if (rawRequestId !== undefined && rawRequestId !== currentRequestId) {
-        // Stale: a response for a request we are no longer servicing (e.g. an
-        // older request id after reload). Record a warning and contribute
-        // nothing, so stale data can never widen available packs.
-        issues.push({
-          severity: "warning",
-          code: "stale-registration",
-          path: "event",
-          message: buildStaleMessage(rawRequestId, currentRequestId),
-        });
+        if (rawRequestId !== undefined && rawRequestId !== currentRequestId) {
+          // Stale: a response for a request we are no longer servicing (e.g. an
+          // older request id after reload). Record a warning and contribute
+          // nothing, so stale data can never widen available packs.
+          issues.push({
+            severity: "warning",
+            code: "stale-registration",
+            path: "event",
+            message: buildStaleMessage(rawRequestId, currentRequestId),
+          });
+          if (!isCollecting) {
+            notify();
+          }
+          return;
+        }
+
+        // Accept: matches the current request id, or unsolicited (no request
+        // id). Unsolicited registrations support manual tests and contributors
+        // that emit during their own session_start.
+        const result = normalizePackagePackRegistration(data);
+        for (const pack of result.packs) {
+          packs.push(pack);
+        }
+        for (const issue of result.issues) {
+          issues.push(issue);
+        }
         if (!isCollecting) {
           notify();
         }
-        return;
-      }
-
-      // Accept: matches the current request id, or unsolicited (no request id).
-      // Unsolicited registrations support manual tests and contributors that
-      // emit during their own session_start.
-      const result = normalizePackagePackRegistration(data);
-      for (const pack of result.packs) {
-        packs.push(pack);
-      }
-      for (const issue of result.issues) {
-        issues.push(issue);
-      }
-      if (!isCollecting) {
-        notify();
+      } catch (error) {
+        recordListenerIssue("listener-error", error);
+        if (!isCollecting) {
+          notify();
+        }
       }
     },
   );
@@ -233,9 +254,7 @@ export function createPackageRegistrationStore(
         severity: "error",
         code: "collection-error",
         path: "event",
-        message: `package registration request failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        message: `package registration request failed: ${errorMessage(error)}`,
       });
     } finally {
       isCollecting = false;
@@ -296,4 +315,12 @@ function buildStaleMessage(
   return currentRequestId === null
     ? `Ignoring package registration for request id "${rawRequestId}" (no active collection).`
     : `Ignoring package registration for stale request id "${rawRequestId}" (current "${currentRequestId}").`;
+}
+
+function errorMessage(error: unknown): string {
+  try {
+    return error instanceof Error ? error.message : String(error);
+  } catch {
+    return "unknown error";
+  }
 }

@@ -947,7 +947,7 @@
       "relationships": [
         {
           "type": "informs",
-          "target": ".work/active/epic-independent-mcp-modernization.md"
+          "target": ".work/releases/prepared-packages-2026-08-06.md"
         },
         {
           "type": "informs",
@@ -989,58 +989,69 @@
       "relationships": []
     },
     {
-      "path": ".work/active/epic-independent-mcp-modernization.md",
+      "path": ".work/completed/epic-plugin-lifecycle-simplification.md",
       "namespace": "work",
       "kind": "epic",
-      "id": "epic-independent-mcp-modernization",
-      "title": "Modernize the independent MCP adapter",
+      "id": "epic-plugin-lifecycle-simplification",
+      "title": "Replace the transactional plugin lifecycle with files-and-pointer convergence (completed)",
       "summary": null,
-      "updated": "2026-08-06",
+      "updated": "2026-08-22",
+      "status": "completed",
+      "relationships": []
+    },
+    {
+      "path": ".work/active/feature-extension-error-containment.md",
+      "namespace": "work",
+      "kind": "feature",
+      "id": "feature-extension-error-containment",
+      "title": "Contain extension-originated failures",
+      "summary": null,
+      "updated": "2026-08-23",
       "status": "active",
       "relationships": []
     },
     {
-      "path": ".work/active/feature-mcp-agent-surface.md",
+      "path": ".work/completed/feature-agent-plugin-orientation.md",
       "namespace": "work",
       "kind": "feature",
-      "id": "feature-mcp-agent-surface",
-      "title": "Improve the MCP agent surface",
+      "id": "feature-agent-plugin-orientation",
+      "title": "Agent orientation to the installed plugin set",
       "summary": null,
-      "updated": "2026-08-06",
-      "status": "blocked",
+      "updated": "2026-08-22",
+      "status": "completed",
       "relationships": []
     },
     {
-      "path": ".work/active/feature-mcp-apps-modernization.md",
+      "path": ".work/completed/feature-convergent-lifecycle-core.md",
       "namespace": "work",
       "kind": "feature",
-      "id": "feature-mcp-apps-modernization",
-      "title": "Modernize MCP Apps",
+      "id": "feature-convergent-lifecycle-core",
+      "title": "Convergent lifecycle core and state migration (completed)",
       "summary": null,
-      "updated": "2026-08-06",
-      "status": "blocked",
+      "updated": "2026-08-22",
+      "status": "completed",
       "relationships": []
     },
     {
-      "path": ".work/active/feature-mcp-core-modernization.md",
+      "path": ".work/completed/feature-degraded-runtime-repair.md",
       "namespace": "work",
       "kind": "feature",
-      "id": "feature-mcp-core-modernization",
-      "title": "Modernize the MCP runtime core",
+      "id": "feature-degraded-runtime-repair",
+      "title": "Degraded-state semantics and repair UX (completed)",
       "summary": null,
-      "updated": "2026-08-06",
-      "status": "blocked",
+      "updated": "2026-08-22",
+      "status": "completed",
       "relationships": []
     },
     {
-      "path": ".work/active/feature-mcp-programmatic-parity.md",
+      "path": ".work/completed/feature-host-hardening-followups.md",
       "namespace": "work",
       "kind": "feature",
-      "id": "feature-mcp-programmatic-parity",
-      "title": "Extend useful MCP surfaces to programmatic sources",
+      "id": "feature-host-hardening-followups",
+      "title": "Host hardening follow-ups from the lifecycle epic",
       "summary": null,
-      "updated": "2026-08-06",
-      "status": "blocked",
+      "updated": "2026-08-22",
+      "status": "completed",
       "relationships": []
     },
     {
@@ -1198,6 +1209,17 @@
       "relationships": []
     },
     {
+      "path": ".work/backlog/backlog-fs-capability-probe.md",
+      "namespace": "work",
+      "kind": "story",
+      "id": "backlog-fs-capability-probe",
+      "title": "Replace the filesystem magic-number capability gate with a lock behavior probe",
+      "summary": null,
+      "updated": "2026-08-23",
+      "status": "active",
+      "relationships": []
+    },
+    {
       "path": ".work/backlog/backlog-npm-sha1-integrity-fallback.md",
       "namespace": "work",
       "kind": "story",
@@ -1209,14 +1231,14 @@
       "relationships": []
     },
     {
-      "path": ".work/backlog/backlog-recovery-owner-observability.md",
+      "path": ".work/completed/story-mcp-candidate-visibility.md",
       "namespace": "work",
       "kind": "story",
-      "id": "backlog-recovery-owner-observability",
-      "title": "Surface why a pending transition is fenced (live owner identity) in Updates/Health",
+      "id": "story-mcp-candidate-visibility",
+      "title": "Surface MCP candidate-attach failure instead of silent undefined (completed)",
       "summary": null,
-      "updated": "2026-08-16",
-      "status": "active",
+      "updated": "2026-08-22",
+      "status": "completed",
       "relationships": []
     }
   ]

@@ -1,4 +1,5 @@
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
+import { runSafely } from "#src/debug";
 import type { ParentSnapshot } from "#src/lifecycle/parent-snapshot";
 import type { AgentSpawnConfig } from "#src/lifecycle/subagent-manager";
 import {
@@ -50,27 +51,29 @@ export async function runForeground(
 
   let recordRef: Subagent | undefined;
 
-  const streamUpdate = () => {
-    const toolUses = recordRef?.toolUses ?? 0;
-    const details: AgentDetails = {
-      ...presentation.detailBase,
-      toolUses,
-      tokens: recordRef ? formatLifetimeTokens(recordRef) : "",
-      // Read activity off the record; fall back to safe defaults before onSessionCreated fires
-      turnCount: recordRef?.turnCount ?? 1,
-      maxTurns: recordRef?.maxTurns ?? execution.effectiveMaxTurns,
-      durationMs: Date.now() - startedAt,
-      status: "running",
-      activity: describeActivity(
-        recordRef?.activeTools ?? new Map(),
-        recordRef?.responseText ?? "",
-      ),
-      spinnerFrame: spinnerFrame % SPINNER.length,
-    };
-    onUpdate?.({
-      content: [{ type: "text", text: `${toolUses} tool uses...` }],
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Pi SDK ToolCallUpdate details type is not exported
-      details: details as any,
+  const streamUpdate = (): void => {
+    runSafely("foreground progress update", () => {
+      const toolUses = recordRef?.toolUses ?? 0;
+      const details: AgentDetails = {
+        ...presentation.detailBase,
+        toolUses,
+        tokens: recordRef ? formatLifetimeTokens(recordRef) : "",
+        // Read activity off the record; fall back to safe defaults before onSessionCreated fires
+        turnCount: recordRef?.turnCount ?? 1,
+        maxTurns: recordRef?.maxTurns ?? execution.effectiveMaxTurns,
+        durationMs: Date.now() - startedAt,
+        status: "running",
+        activity: describeActivity(
+          recordRef?.activeTools ?? new Map(),
+          recordRef?.responseText ?? "",
+        ),
+        spinnerFrame: spinnerFrame % SPINNER.length,
+      };
+      onUpdate?.({
+        content: [{ type: "text", text: `${toolUses} tool uses...` }],
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Pi SDK ToolCallUpdate details type is not exported
+        details: details as any,
+      });
     });
   };
 
@@ -81,10 +84,10 @@ export async function runForeground(
     streamUpdate();
   }, 500);
 
-  streamUpdate();
-
   let record: Subagent;
   try {
+    streamUpdate();
+
     record = await manager.spawnAndWait(
       params.snapshot,
       identity.subagentType,
@@ -107,11 +110,13 @@ export async function runForeground(
       },
     );
   } catch (err) {
-    clearInterval(spinnerInterval);
+    // Only the spawn boundary converts to an error-text result. Post-spawn
+    // formatting is internal code; its defects stay thrown tool errors so Pi
+    // reports isError rather than a success-shaped result.
     return textResult(err instanceof Error ? err.message : String(err));
+  } finally {
+    clearInterval(spinnerInterval);
   }
-
-  clearInterval(spinnerInterval);
 
   // Foreground delivery returns the complete outcome inline, so retention can
   // use the shorter consumed-session window.

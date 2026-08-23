@@ -173,3 +173,44 @@ prebuild does not).
 Genuine capability gaps — "this platform has no SQLite," "this filesystem
 doesn't support POSIX modes" — are still allowed to throw. The principle is
 about guards whose "capability" is a guess or an allowlist, not a fact.
+
+## Extension failures stay inside the extension boundary
+
+An extension may fail a tool call or report degraded capability, but it must not
+terminate Pi through an uncaught callback exception or unhandled rejection.
+Recovery and observability are both part of the contract.
+
+### Why
+
+Pi already contains errors from registered tools, commands, and awaited
+lifecycle handlers. Extension-owned work can outlive those host boundaries:
+timers, child-process listeners, event-bus subscribers, UI component callbacks,
+and deliberately detached promises run later and can otherwise reach Node's
+process-level error path. Session replacement and reload also deliberately make
+old Pi and command-context objects throw when reused.
+
+### Implications
+
+- Keep direct tool failures as thrown tool errors when Pi owns the awaited call.
+  That is how the agent receives an `isError` result. Do not hide them behind a
+  success-shaped value.
+- Every extension-owned detached boundary catches synchronous throws and promise
+  rejections at its outermost callback. One failing cleanup or notification does
+  not prevent the remaining cleanup or the primary operation from settling.
+- Detached work retains plain immutable operation inputs, not a live
+  `ExtensionContext` or command context. Any session reporting handle is
+  lifecycle-owned and revocable. Shutdown revokes it before cleanup. Late
+  callbacks may update plain state but cannot use stale session-bound APIs.
+- Report through the strongest channel still available: a structured tool
+  failure, job output/status, operator health state, user notification, or a
+  bounded diagnostic log. Containment must not silently turn failure into
+  success.
+- Tests drive the boundary itself: rejecting promises, throwing timer and
+  process callbacks, stale contexts, and failing cleanup/reporting sinks.
+
+### Boundaries
+
+This principle does not require catching programmer defects in pure internal
+functions at every call site. Containment belongs where control leaves the
+extension or becomes detached, so failures remain debuggable without redundant
+catch layers throughout domain code.

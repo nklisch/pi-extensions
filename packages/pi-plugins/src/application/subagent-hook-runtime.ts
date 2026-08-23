@@ -99,7 +99,10 @@ export async function registerSubagentHookRuntime(input: Readonly<{
     return disposePromise;
   };
   const onRuntimeAbort = (): void => {
-    void dispose();
+    // Abort dispatch is synchronous and detached from the caller. The explicit
+    // dispose() API still reports this failure, while shutdown must consume the
+    // rejection here so a provider cleanup error cannot become unhandled.
+    void dispose().catch(() => undefined);
   };
   input.runtimeSignal.addEventListener("abort", onRuntimeAbort, { once: true });
 

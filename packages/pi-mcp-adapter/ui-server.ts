@@ -10,7 +10,7 @@ import {
 import { ContentBlockSchema } from "@modelcontextprotocol/core";
 import type { ConsentManager } from "./consent-manager.ts";
 import { ServerError, wrapError } from "./errors.ts";
-import { formatAuthRequiredMessage } from "./utils.ts";
+import { formatAuthRequiredMessage, formatTerminalError, invokeContainedCallback, truncateAtWord } from "./utils.ts";
 import { buildHostHtmlTemplate, buildCspMetaContent } from "./host-html-template.ts";
 import { logger } from "./logger.ts";
 import type { McpServerManager } from "./server-manager.ts";
@@ -102,6 +102,19 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServerH
     tool: options.toolName,
     session: sessionToken.slice(0, 8),
   });
+
+  const reportCallbackFailure = (name: string, error: unknown): void => {
+    const message = truncateAtWord(formatTerminalError(error), 1_024);
+    log.error(`${name} callback failed: ${message || "unknown error"}`);
+  };
+
+  const invokeCallback = (
+    name: string,
+    callback: ((...args: any[]) => unknown) | undefined,
+    args: unknown[],
+  ): void => {
+    invokeContainedCallback(callback, args, error => reportCallbackFailure(name, error));
+  };
 
   log.debug("Starting UI server");
 
@@ -254,7 +267,7 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServerH
     pushEvent("session-complete", { reason });
     completed = true;
     stopWatchdog();
-    options.onComplete?.(reason);
+    invokeCallback("onComplete", options.onComplete, [reason]);
   };
 
   const server = http.createServer(async (req, res) => {
@@ -591,41 +604,65 @@ export async function startUiServer(options: UiServerOptions): Promise<UiServerH
 
       sendJson(res, 404, { ok: false, error: "Not found" });
     } catch (error) {
-      if (error instanceof SessionRecoveryAuthRequiredError) {
-        const fallback = `Server "${options.serverName}" requires OAuth authentication. Run mcp({ action: "auth-start", server: "${options.serverName}" }) to get a browser URL, or /mcp-auth ${options.serverName} in an interactive local session.`;
-        const message = error.authMessage ?? (options.config
-          ? formatAuthRequiredMessage(options.config, options.serverName, fallback)
-          : fallback);
-        sendJson(res, 401, { ok: false, error: message });
-        return;
+      // The request listener is a detached EventEmitter boundary: a secondary
+      // failure while writing the error response itself (typically a dead
+      // socket) must not become an unhandled rejection in the async handler.
+      try {
+        if (error instanceof SessionRecoveryAuthRequiredError) {
+          const fallback = `Server "${options.serverName}" requires OAuth authentication. Run mcp({ action: "auth-start", server: "${options.serverName}" }) to get a browser URL, or /mcp-auth ${options.serverName} in an interactive local session.`;
+          const message = error.authMessage ?? (options.config
+            ? formatAuthRequiredMessage(options.config, options.serverName, fallback)
+            : fallback);
+          sendJson(res, 401, { ok: false, error: message });
+          return;
+        }
+        const wrapped = wrapError(error, { server: options.serverName, tool: options.toolName });
+        const status = /approval required|denied/i.test(wrapped.message) ? 403 : 500;
+        if (status === 500) {
+          log.error("Request handler error", error instanceof Error ? error : undefined);
+        }
+        sendJson(res, status, { ok: false, error: wrapped.message });
+      } catch (secondaryError) {
+        reportCallbackFailure("error response", secondaryError);
+        try {
+          res.destroy();
+        } catch {
+          // Response stream may already be destroyed.
+        }
       }
-      const wrapped = wrapError(error, { server: options.serverName, tool: options.toolName });
-      const status = /approval required|denied/i.test(wrapped.message) ? 403 : 500;
-      if (status === 500) {
-        log.error("Request handler error", error instanceof Error ? error : undefined);
-      }
-      sendJson(res, status, { ok: false, error: wrapped.message });
     }
   });
 
   if (options.initialResultPromise) {
-    options.initialResultPromise.then(
+    void options.initialResultPromise.then(
       (result) => pushEvent("tool-result", result),
       (error) => {
         const reason = error instanceof Error ? error.message : String(error);
         pushEvent("tool-cancelled", { reason });
       }
-    );
+    ).catch(error => {
+      // The promise rejection handler above can itself fail while serializing
+      // an extension result. Consume that secondary rejection here.
+      reportCallbackFailure("initial result", error);
+    });
   }
 
   watchdog = setInterval(() => {
-    if (completed) return;
-    if (Date.now() - lastHeartbeatAt <= ABANDONED_GRACE_MS) return;
-    markCompleted("stale");
     try {
-      server.close();
-    } catch {}
-    closeSse();
+      if (completed) return;
+      if (Date.now() - lastHeartbeatAt <= ABANDONED_GRACE_MS) return;
+      markCompleted("stale");
+      try {
+        server.close();
+      } catch (error) {
+        reportCallbackFailure("watchdog server close", error);
+      }
+      closeSse();
+    } catch (error) {
+      // A timer callback is detached from the request promise; never let a
+      // malformed extension-owned event terminate the host process.
+      reportCallbackFailure("watchdog", error);
+    }
   }, WATCHDOG_INTERVAL_MS);
   watchdog.unref();
 

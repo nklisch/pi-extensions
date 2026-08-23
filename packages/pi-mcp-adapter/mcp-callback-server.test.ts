@@ -4,7 +4,7 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test"
 import assert from "node:assert"
-import { createServer } from "node:http"
+import { createServer, request } from "node:http"
 import {
   ensureCallbackServer,
   waitForCallback,
@@ -435,6 +435,38 @@ describe("mcp-callback-server", () => {
       await assert.rejects(promise1, /Authorization cancelled/)
       await assert.rejects(promise2, /Authorization cancelled/)
       await assert.rejects(promise3, /Authorization cancelled/)
+    })
+  })
+
+  describe("malformed requests", () => {
+    it("responds 500 instead of crashing on an unparseable Host header", async () => {
+      await ensureCallbackServer()
+      const port = getOAuthCallbackPort()
+
+      const response = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = request({
+          host: "localhost",
+          port,
+          path: "/callback",
+          // "bad host[" makes `new URL(..., "http://<host>")` throw inside the
+          // request listener — the boundary this regression test pins.
+          headers: { Host: "bad host[" },
+        }, (res) => {
+          let body = ""
+          res.on("data", chunk => { body += chunk })
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, body }))
+        })
+        req.on("error", reject)
+        req.end()
+      })
+
+      assert.strictEqual(response.status, 500)
+      assert.match(response.body, /Authorization Failed/)
+
+      // The server survived the throwing request and still serves valid ones.
+      assert.strictEqual(isCallbackServerRunning(), true)
+      const healthy = await fetch(`http://localhost:${port}/not-the-callback`)
+      assert.strictEqual(healthy.status, 404)
     })
   })
 })

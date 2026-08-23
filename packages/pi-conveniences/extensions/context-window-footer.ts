@@ -268,9 +268,10 @@ function installFooter(ctx: ExtensionContext, pi: ExtensionAPI): void {
       dispose: unsubscribe,
       invalidate() {},
       render(width: number): string[] {
-        if (width <= 0) return [""];
+        try {
+          if (width <= 0) return [""];
 
-        const model = formatModelName(ctx.model?.id);
+          const model = formatModelName(ctx.model?.id);
         const modelLabel = formatModelLabel(theme, model, pi.getThinkingLevel());
         const branch = footerData.getGitBranch();
         const branchLabel = branch ? `git ${branch}` : "no git";
@@ -331,13 +332,21 @@ function installFooter(ctx: ExtensionContext, pi: ExtensionAPI): void {
           return [formatFooterLine(width, leftCompact, rightCompact)];
         }
 
-        return [
-          truncateToWidth(
-            [theme.fg("accent", "◆"), modelLabel, rightCompact].join(" "),
-            width,
-            "",
-          ),
-        ];
+          return [
+            truncateToWidth(
+              [theme.fg("accent", "◆"), modelLabel, rightCompact].join(" "),
+              width,
+              "",
+            ),
+          ];
+        } catch (error) {
+          // Pi may request one final render while a replaced session tears its
+          // footer down. A rendering failure degrades this cosmetic surface.
+          logOperationalError(
+            `[context-window-footer] render failed: ${describeError(error)}`,
+          );
+          return [truncateToWidth("context footer unavailable", Math.max(0, width), "")];
+        }
       },
     };
   });
@@ -350,6 +359,22 @@ function clearFooter(ctx: ExtensionContext): void {
   if (!footerInstalled) return;
   ctx.ui.setFooter(undefined);
   footerInstalled = false;
+}
+
+function describeError(error: unknown): string {
+  try {
+    return error instanceof Error ? error.message : String(error);
+  } catch {
+    return "unprintable error";
+  }
+}
+
+function logOperationalError(message: string): void {
+  try {
+    console.error(message);
+  } catch {
+    // stderr can be unavailable during process teardown.
+  }
 }
 
 function scheduleInstallFooter(ctx: ExtensionContext, pi: ExtensionAPI): void {
@@ -366,10 +391,20 @@ function scheduleInstallFooter(ctx: ExtensionContext, pi: ExtensionAPI): void {
       try {
         installFooter(ctx, pi);
       } catch (error) {
-        // A reload/session switch can stale the captured context between scheduling
-        // and execution. Ignore that narrow race; the next session_start reapplies.
-        if (!(error instanceof Error && error.message.includes("stale after session replacement"))) {
-          throw error;
+        // Timer callbacks run outside Pi's awaited extension boundary. A stale
+        // context is expected during replacement; every other operational
+        // failure is diagnostic, but none may escape and terminate Pi.
+        const message = describeError(error);
+        if (!message.includes("stale after session replacement")) {
+          clearPendingTimers();
+          logOperationalError(`[context-window-footer] install failed: ${message}`);
+          try {
+            ctx.ui.notify(`Context footer could not be installed: ${message}`, "error");
+          } catch (notifyError) {
+            logOperationalError(
+              `[context-window-footer] error notification failed: ${describeError(notifyError)}`,
+            );
+          }
         }
       }
     }, delayMs);

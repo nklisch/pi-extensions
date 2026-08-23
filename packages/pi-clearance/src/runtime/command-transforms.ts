@@ -170,36 +170,51 @@ export function createCommandTransformStore(
     currentRequestId = null;
   }
 
+  function recordListenerIssue(code: string, error: unknown): void {
+    const message = `command transform registration event handler failed: ${errorMessage(error)}`;
+    issues.push({ severity: "error", code, path: "event", message });
+    console.error(`Pi Clearance ${message}`);
+  }
+
   const unsubscribeRegister = on(
     AUTO_REVIEWER_TRANSFORMS_REGISTER_EVENT,
     (data: unknown) => {
-      if (disposed) {
-        return;
-      }
+      try {
+        if (disposed) {
+          return;
+        }
 
-      const rawRequestId = readRequestId(data);
-      if (rawRequestId !== undefined && rawRequestId !== currentRequestId) {
-        // Stale response for a request we are no longer servicing. Ignore it so
-        // stale data can never widen the transform set.
-        issues.push({
-          severity: "warning",
-          code: "stale-registration",
-          path: "event",
-          message: buildStaleMessage(rawRequestId, currentRequestId),
-        });
-        return;
-      }
+        // This is a raw event-bus callback. Keep request-id getters,
+        // normalization, and array updates in one containment block: a
+        // contributor can supply a Proxy/getter rather than a plain object.
+        const rawRequestId = readRequestId(data);
+        if (rawRequestId !== undefined && rawRequestId !== currentRequestId) {
+          // Stale response for a request we are no longer servicing. Ignore it
+          // so stale data can never widen the transform set.
+          issues.push({
+            severity: "warning",
+            code: "stale-registration",
+            path: "event",
+            message: buildStaleMessage(rawRequestId, currentRequestId),
+          });
+          return;
+        }
 
-      const result = normalizeCommandTransformRegistration(data);
-      if (result.transform !== null) {
-        transforms.push({
-          id: result.transform.id,
-          description: result.transform.description,
-          run: result.transform.transform,
-        });
-      }
-      for (const issue of result.issues) {
-        issues.push(issue);
+        const result = normalizeCommandTransformRegistration(data);
+        if (result.transform !== null) {
+          transforms.push({
+            id: result.transform.id,
+            description: result.transform.description,
+            run: result.transform.transform,
+          });
+        }
+        for (const issue of result.issues) {
+          issues.push(issue);
+        }
+      } catch (error) {
+        // Do not rely on Pi's event bus swallowing errors. This listener is an
+        // extension-owned out-of-band boundary and must be total on its own.
+        recordListenerIssue("listener-error", error);
       }
     },
   );
@@ -227,9 +242,7 @@ export function createCommandTransformStore(
         severity: "error",
         code: "collection-error",
         path: "event",
-        message: `transform registration request failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        message: `transform registration request failed: ${errorMessage(error)}`,
       });
     }
 
@@ -310,7 +323,7 @@ export function createCommandTransformStore(
         lastNote = {
           id: transform.id,
           kind: "error",
-          message: error instanceof Error ? error.message : String(error),
+          message: errorMessage(error),
         };
         // fail open: keep current command
       }
@@ -370,4 +383,12 @@ function buildStaleMessage(
   return currentRequestId === null
     ? `Ignoring transform registration for request id "${rawRequestId}" (no active collection).`
     : `Ignoring transform registration for stale request id "${rawRequestId}" (current "${currentRequestId}").`;
+}
+
+function errorMessage(error: unknown): string {
+  try {
+    return error instanceof Error ? error.message : String(error);
+  } catch {
+    return "unknown error";
+  }
 }

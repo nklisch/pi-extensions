@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.4 — 2026-08-23
+
+### Fixed
+
+- Await display-only mode and style messages. A rejected host message call now produces a best-effort command notification instead of an unhandled promise rejection.
+
 ## v0.3.3 — 2026-08-08
 
 ### Features

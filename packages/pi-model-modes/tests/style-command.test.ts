@@ -56,6 +56,7 @@ function command() {
   );
   if (!registration) throw new Error("style command was not registered");
   return {
+    pi,
     calls,
     handler: (registration.args[1] as {
       handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
@@ -217,6 +218,20 @@ describe("/style command", () => {
     expect(result.systemPrompt).toContain("# Clear");
     expect(result.systemPrompt.endsWith(base)).toBe(true);
     expect(getChangeSignal().lastEntry?.reason).toBe("style-switched");
+  });
+
+  it("consumes a rejected panel send and reports it without rejecting the command", async () => {
+    const { cwd } = fixture();
+    const { pi, handler } = command();
+    const { ctx, ui } = context(cwd);
+    (pi as unknown as { sendMessage: () => Promise<void> }).sendMessage = () =>
+      Promise.reject(new Error("session replaced"));
+
+    await expect(handler("", ctx)).resolves.toBeUndefined();
+    expect(ui.notifyCalls).toEqual([{
+      message: "/style: status panel unavailable (session replaced)",
+      type: "error",
+    }]);
   });
 
   it("unknown or malformed input preserves the prior override", async () => {

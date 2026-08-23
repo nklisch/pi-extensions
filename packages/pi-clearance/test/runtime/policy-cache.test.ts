@@ -142,6 +142,24 @@ describe("createCachingPolicyResolver", () => {
     expect(calls).toBe(1);
   });
 
+  it("contains throwing getters while reading registered-tool snapshots", async () => {
+    const names = new Proxy(["bash"], {
+      get(target, property, receiver) {
+        if (property === "0") throw new Error("tool snapshot getter failed");
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const resolver = createCachingPolicyResolver({
+      audit,
+      registeredToolNames: () => names,
+      loadAndCompose: async (ctx) => okResult(ctx.cwd),
+    });
+
+    await expect(resolver.resolve(contextFor("/repo"))).resolves.toMatchObject({
+      ok: true,
+    });
+  });
+
   it("invalidates one cwd or the whole cache", async () => {
     const calls: string[] = [];
     const resolver = createCachingPolicyResolver({
@@ -169,6 +187,33 @@ describe("createCachingPolicyResolver", () => {
       "/repo-a",
       "/repo-b",
     ]);
+  });
+
+  it("contains native cleanup failures from detached cache invalidation", async () => {
+    const result = okResult("/repo");
+    if (!result.ok) throw new Error(result.reason);
+    Object.defineProperty(result.policy, "nativePolicy", {
+      value: { free: () => { throw new Error("native finalizer failed"); } },
+    });
+    const resolver = createCachingPolicyResolver({
+      audit,
+      loadAndCompose: async () => result,
+    });
+    const diagnostics: string[] = [];
+    const priorConsoleError = console.error;
+    console.error = (...args: unknown[]) => diagnostics.push(args.map(String).join(" "));
+
+    try {
+      await resolver.resolve(contextFor("/repo"));
+      resolver.invalidate("/repo");
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(diagnostics).toEqual([
+        "Pi Clearance native policy cleanup failed: native finalizer failed",
+      ]);
+    } finally {
+      console.error = priorConsoleError;
+    }
   });
 
   it("adds package registrations to the registry without changing effective policy", async () => {

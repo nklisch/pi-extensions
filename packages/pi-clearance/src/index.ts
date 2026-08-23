@@ -170,9 +170,17 @@ const piAutoApprove: ExtensionFactory = (pi: ExtensionAPI) => {
   });
   pi.on("session_start", handleSessionStart);
   pi.on("session_shutdown", (_event, ctx) => {
-    operatorStatus.clear(ctx);
-    packageRegistration.dispose();
-    transformStore.dispose();
+    // These resources are independent. A failed unsubscribe or status cleanup
+    // must not strand the remaining listener on a persistent Pi event bus.
+    containSessionShutdownCleanup("operator status", () => {
+      operatorStatus.clear(ctx);
+    });
+    containSessionShutdownCleanup("package registration", () => {
+      packageRegistration.dispose();
+    });
+    containSessionShutdownCleanup("command transforms", () => {
+      transformStore.dispose();
+    });
   });
 
   pi.on(
@@ -220,6 +228,29 @@ function toolMetadata(pi: ExtensionAPI): {
     };
   } catch {
     return { activeToolNames: [], allToolNames: [] };
+  }
+}
+
+function containSessionShutdownCleanup(
+  resource: string,
+  cleanup: () => void,
+): void {
+  try {
+    cleanup();
+  } catch (error) {
+    // Shutdown is an out-of-band lifecycle callback. Keep the failure visible,
+    // but continue independently through every owned resource cleanup.
+    console.error(
+      `Pi Clearance session shutdown cleanup failed for ${resource}: ${errorMessage(error)}`,
+    );
+  }
+}
+
+function errorMessage(error: unknown): string {
+  try {
+    return error instanceof Error ? error.message : String(error);
+  } catch {
+    return "unknown error";
   }
 }
 

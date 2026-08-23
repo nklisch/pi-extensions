@@ -287,4 +287,19 @@ describe("plugin manager component", () => {
     h.component.handleInput("r");
     expect(h.controller.close).not.toHaveBeenCalled();
   });
+
+  it("stops the detached spinner when a render callback throws", () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      h.setState(pluginManagerReducer(createPluginManagerState(), { type: "operation-started", action: "update-all" }));
+      h.component.render(70);
+      h.tui.requestRender.mockImplementation(() => { throw new Error("stale TUI"); });
+      expect(() => vi.advanceTimersByTime(100)).not.toThrow();
+      expect(() => vi.advanceTimersByTime(500)).not.toThrow();
+      h.component.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -515,6 +515,18 @@ describe("Subagent.run() — happy path", () => {
 		expect(callOrder).toEqual(["started", "sessionCreated", "runFinished"]);
 	});
 
+	it("contains throwing lifecycle observers without leaking a running record", async () => {
+		const observer: SubagentLifecycleObserver = {
+			onStarted: () => { throw new Error("stale start observer"); },
+			onSessionCreated: () => { throw new Error("stale session observer"); },
+			onRunFinished: () => { throw new Error("stale finish observer"); },
+		};
+		const agent = createRunnableAgent({ observer });
+
+		await expect(agent.run()).resolves.toBeUndefined();
+		expect(agent.status).toBe("completed");
+	});
+
 	it("sets the subagentSession with a session", async () => {
 		const agent = createRunnableAgent();
 		await agent.run();

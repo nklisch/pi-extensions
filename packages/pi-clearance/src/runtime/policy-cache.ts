@@ -61,8 +61,9 @@ export function createCachingPolicyResolver(
 
   return {
     resolve: (ctx) => {
-      const registeredToolNames = stableToolNames(
-        safeRegisteredToolNames(options.registeredToolNames, ctx),
+      const registeredToolNames = safeRegisteredToolNames(
+        options.registeredToolNames,
+        ctx,
       );
       const cacheKey = cacheKeyFor(ctx.cwd, registeredToolNames);
       const cached = cache.get(cacheKey);
@@ -185,7 +186,17 @@ async function attachNativePolicy(
 }
 
 function freeResolvedNativePolicy(result: PolicyResolverResult): void {
-  if (result.ok) result.policy.nativePolicy?.free();
+  if (!result.ok) return;
+  try {
+    result.policy.nativePolicy?.free();
+  } catch (error) {
+    // Invalidation retires cached policies on a detached promise continuation.
+    // A native finalizer failure is operationally important but must not become
+    // an unhandled rejection that terminates Pi.
+    console.error(
+      `Pi Clearance native policy cleanup failed: ${errorMessage(error)}`,
+    );
+  }
 }
 
 function composerResultToPolicyResult(
@@ -245,15 +256,18 @@ function packageRegistrationIssueWarning(
 function safeRegisteredToolNames(
   provider: ((ctx: ExtensionContext) => readonly string[]) | undefined,
   ctx: ExtensionContext,
-): readonly unknown[] {
+): readonly string[] {
   if (provider === undefined) {
     return [];
   }
 
   try {
     const toolNames = provider(ctx) as readonly unknown[];
-    return Array.isArray(toolNames) ? toolNames : [];
+    return Array.isArray(toolNames) ? stableToolNames(toolNames) : [];
   } catch {
+    // The host tool catalog is an extension-owned snapshot boundary. A
+    // malformed array or throwing getter must degrade to no conditional tools,
+    // not escape before the resolver's structured failure path is attached.
     return [];
   }
 }

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -6,6 +6,7 @@ import { planModeCommandChange } from "../../src/config/config-command-plans.ts"
 import {
   applyConfigCommandPlan,
   type ConfigCommandPlan,
+  writeConfigTargetAndValidate,
 } from "../../src/config/config-command-writer.ts";
 import { loadConfig, type ResolvedConfig } from "../../src/config/loader.ts";
 import { resolveConfigPaths } from "../../src/config/paths.ts";
@@ -171,5 +172,58 @@ describe("mode config command plan", () => {
       mode: "auto",
       reviewer: { model: "openai/example" },
     });
+  });
+
+  it("preserves the primary write result when temp cleanup also fails", async () => {
+    const normalized = normalizeConfig(GlobalConfigSchema, {
+      version: 1,
+      mode: "auto",
+    });
+    if (!normalized.ok) throw new Error("fixture config failed normalization");
+
+    const paths = resolveConfigPaths(cwd);
+    let tempPath: string | undefined;
+    const diagnostics: string[] = [];
+    const priorConsoleError = console.error;
+    console.error = (...args: unknown[]) => {
+      diagnostics.push(args.map(String).join(" "));
+    };
+    let result: Awaited<ReturnType<typeof writeConfigTargetAndValidate>>;
+    try {
+      result = await writeConfigTargetAndValidate({
+        planId: "config-command:cleanup-failure",
+        targetPath: paths.globalConfigFile,
+        configKind: "global",
+        value: normalized.value,
+        hadExistingFile: false,
+        reloadConfig: async () => config(),
+        validatePostWrite: async () => ({ ok: true }),
+        writeFailureReason: "config command write failed",
+        postWriteFailureReason: "post-write validation failed",
+        renameTempFile: async (sourcePath) => {
+          tempPath = sourcePath;
+          throw new Error("rename failed");
+        },
+        cleanupTempFile: async () => {
+          throw new Error("cleanup failed");
+        },
+      });
+    } finally {
+      console.error = priorConsoleError;
+    }
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "config command write failed",
+      errors: [
+        "rename failed",
+        "temporary config file cleanup failed: cleanup failed",
+      ],
+    });
+    expect(diagnostics).toEqual([
+      "Pi Clearance temporary config file cleanup failed: cleanup failed",
+    ]);
+    expect(tempPath).toBeDefined();
+    if (tempPath !== undefined) await rm(tempPath, { force: true });
   });
 });

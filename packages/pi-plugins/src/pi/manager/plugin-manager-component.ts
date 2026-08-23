@@ -121,9 +121,19 @@ export class PluginManagerComponent implements Component, Focusable {
   private syncSpinner(active: boolean): void {
     if (active && this.spinTimer === undefined) {
       this.spinTimer = setInterval(() => {
-        this.spinIndex += 1;
-        this.invalidate();
-        this.tui.requestRender();
+        try {
+          this.spinIndex += 1;
+          this.invalidate();
+          this.tui.requestRender();
+        } catch {
+          // Rendering is advisory. Stop the detached timer after a stale or
+          // failing UI callback so the manager remains usable and the timer
+          // cannot repeatedly escape into Node's uncaught-error path.
+          if (this.spinTimer !== undefined) {
+            clearInterval(this.spinTimer);
+            this.spinTimer = undefined;
+          }
+        }
       }, 100);
       this.spinTimer.unref?.();
     } else if (!active && this.spinTimer !== undefined) {

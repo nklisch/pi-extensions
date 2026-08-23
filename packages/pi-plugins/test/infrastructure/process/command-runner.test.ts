@@ -98,6 +98,23 @@ describe("argument-array command runner", () => {
     setTimeout(() => controller.abort(reason), 30).unref();
     await expect(running.completion).rejects.toBe(reason);
   });
+
+  it("contains Windows taskkill launch failure and falls back to the child", async () => {
+    const controller = new AbortController();
+    const reason = new Error("cancelled on Windows");
+    const running = await createNodeCommandRunner({ killGraceMs: 0, platform: "win32" }).run({
+      executable: execPath,
+      args: ["-e", "setInterval(() => {}, 1000)"],
+      cwd: process.cwd(),
+      environment: { inherit: "host", values: {} },
+      capture: {
+        stdout: { mode: "stream", maxBytes: 1024, overflow: "error" },
+        stderr: { maxBytes: 1024, overflow: "truncate" },
+      },
+    }, controller.signal);
+    controller.abort(reason);
+    await expect(running.completion).rejects.toBe(reason);
+  });
 });
 
 describe("structured redaction", () => {

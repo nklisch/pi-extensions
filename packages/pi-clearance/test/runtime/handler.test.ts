@@ -1722,6 +1722,30 @@ describe("createHandleToolCall command transforms", () => {
     expect((event.input as { command: string }).command).toBe("ls -la");
   });
 
+  it("contains hostile transform registration getters in the event listener", () => {
+    const bus = fakeEventBus();
+    const store = createCommandTransformStore({ events: bus });
+    const payload = {};
+    Object.defineProperty(payload, "requestId", {
+      get() {
+        throw new Error("transform request id getter failed");
+      },
+    });
+
+    expect(() =>
+      bus.emit(AUTO_REVIEWER_TRANSFORMS_REGISTER_EVENT, payload),
+    ).not.toThrow();
+    expect(store.snapshot()).toMatchObject({
+      transforms: [],
+      issues: [
+        expect.objectContaining({
+          code: "listener-error",
+          message: expect.stringContaining("transform request id getter failed"),
+        }),
+      ],
+    });
+  });
+
   it("applies transforms in registration order, each seeing the prior result (v1 chaining)", async () => {
     const bus = fakeEventBus();
     // v1 composition: transforms run in registration order and each sees the

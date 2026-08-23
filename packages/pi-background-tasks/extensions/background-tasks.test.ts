@@ -233,6 +233,52 @@ describe("background tool", () => {
     expect(n).toBeTruthy();
     expect(n!.level).toBe("success");
   });
+
+  test("REGRESSION: stale Pi and UI contexts cannot escape a detached process callback", async () => {
+    // Session replacement invalidates both the extension API and prior tool
+    // contexts. The Criterion completion crash escaped from child.on("exit")
+    // when appendEntry threw on exactly this stale-context path.
+    const { pi, tools } = makeFakePi();
+    const bg = tools.get("background")!;
+    const jobs = tools.get("jobs")!;
+    const ctx = makeContext();
+    pi.appendEntry = () => { throw new Error("stale appendEntry"); };
+    pi.sendMessage = () => { throw new Error("stale sendMessage"); };
+    ctx.ui!.notify = () => { throw new Error("stale notify"); };
+    ctx.ui!.setStatus = () => { throw new Error("stale setStatus"); };
+
+    const diagnostics: string[] = [];
+    const priorConsoleError = console.error;
+    console.error = (...args: unknown[]) => diagnostics.push(args.map(String).join(" "));
+    try {
+      const started = (await bg.execute(
+        "c1",
+        { command: "echo completes-after-context-invalidates" },
+        undefined,
+        undefined,
+        ctx,
+      )) as { details: { jobId: number } };
+
+      // Do not poll through the jobs tool yet: every tool call intentionally
+      // refreshes lastUi, which would replace the simulated stale context.
+      await waitFor(() => diagnostics.some((line) => line.includes("waking the agent failed")) || undefined);
+      expect(await jobStatus(tools, makeContext(), started.details.jobId)).toBe("completed");
+      const tail = (await jobs.execute(
+        "c2",
+        { action: "tail", jobId: started.details.jobId, lines: 100 },
+        undefined,
+        undefined,
+        makeContext(),
+      )) as { content: Array<{ text: string }> };
+
+      expect(tail.content[0].text).toContain("persisting job registry failed: stale appendEntry");
+      expect(tail.content[0].text).toContain("refreshing background status failed: stale setStatus");
+      expect(tail.content[0].text).toContain("notifying the user failed: stale notify");
+      expect(tail.content[0].text).toContain("waking the agent failed: stale sendMessage");
+    } finally {
+      console.error = priorConsoleError;
+    }
+  });
 });
 
 describe("monitor tool", () => {
@@ -300,6 +346,65 @@ describe("monitor tool", () => {
     } finally {
       require("node:fs").unlinkSync(tmp);
     }
+  });
+
+  test("turns an unexpected detached poll exception into a failed job", async () => {
+    const hostile = {
+      [Symbol.toPrimitive]() { throw new Error("hostile poll output"); },
+    };
+    const { tools, wakes } = makeFakePi(async () => ({
+      stdout: hostile as unknown as string,
+      code: 0,
+    }));
+    const mon = tools.get("monitor")!;
+    const jobs = tools.get("jobs")!;
+    const ctx = makeContext();
+    const started = (await mon.execute(
+      "c1",
+      { command: "check", satisfy_on: "exit_zero", interval_seconds: 1, timeout_seconds: 5 },
+      undefined,
+      undefined,
+      ctx,
+    )) as { details: { jobId: number } };
+
+    const wake = await waitFor(() => wakes[0]);
+    expect(wake.content).toContain("internal running monitor poll failure");
+    expect(await jobStatus(tools, ctx, started.details.jobId)).toBe("failed");
+    const tail = (await jobs.execute(
+      "c2",
+      { action: "tail", jobId: started.details.jobId, lines: 100 },
+      undefined,
+      undefined,
+      ctx,
+    )) as { content: Array<{ text: string }> };
+    expect(tail.content[0].text).toContain("running monitor poll failed: hostile poll output");
+  });
+
+  test("captures cwd before delayed polls so a replaced context is never reused", async () => {
+    let calls = 0;
+    const { tools, wakes } = makeFakePi(async () => {
+      calls += 1;
+      return calls === 1
+        ? { stdout: "pending", code: 1 }
+        : { stdout: "READY", code: 0 };
+    });
+    const mon = tools.get("monitor")!;
+    const ctx = makeContext();
+    await mon.execute(
+      "c1",
+      { command: "check", satisfy_on: "stdout_matches", pattern: "READY", interval_seconds: 1, timeout_seconds: 5 },
+      undefined,
+      undefined,
+      ctx,
+    );
+    Object.defineProperty(ctx, "cwd", {
+      configurable: true,
+      get: () => { throw new Error("stale tool context"); },
+    });
+
+    const wake = await waitFor(() => wakes[0], { timeoutMs: 5000 });
+    expect(wake.content).toContain("satisfied");
+    expect(calls).toBe(2);
   });
 
   test("times out when the condition never holds", async () => {

@@ -115,6 +115,33 @@ describe("Pi hook decision adapter", () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
+  it("keeps applying behavioral decisions and records presentation sink failures", async () => {
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { adapter, sendMessage, setSessionName } = harness();
+    sendMessage.mockRejectedValue(new Error("stale message sink"));
+    setSessionName.mockImplementation(() => { throw new Error("stale title sink"); });
+    const input = { stale: true, value: "old" };
+    const notify = vi.fn(() => { throw new Error("stale UI"); });
+    const event = { type: "tool_call", toolName: "write", toolCallId: "tool", input } as ToolCallEvent;
+    await expect(adapter.applyToolCall(event, context({ ui: { notify, confirm: vi.fn(async () => true) } as never }), value("PreToolUse", {
+      contexts: [contribution("context")],
+      systemMessages: ["system message"],
+      title: "Session title",
+      updatedInput: { value: "new" },
+      diagnostics: [{ code: "HOOK_TIMEOUT", severity: "error", event: "PreToolUse", plugin: "demo@catalog", componentId: "component-v1:hook:1111111111111111111111111111111111111111111111111111111111111111", sourceOrder: { snapshotOrdinal: 0, hookOrdinal: 0 }, message: "safe" }],
+    }))).resolves.toBeUndefined();
+    await Promise.resolve();
+    expect(input).toEqual({ value: "new" });
+    expect(notify).toHaveBeenCalled();
+    expect(diagnostic.mock.calls.map(([message]) => message)).toEqual(expect.arrayContaining([
+      expect.stringContaining("hook context delivery failed: stale message sink"),
+      expect.stringContaining("hook session title failed: stale title sink"),
+      expect.stringContaining("hook system-message notification failed: stale UI"),
+      expect.stringContaining("hook failure notification failed: stale UI"),
+    ]));
+    diagnostic.mockRestore();
+  });
+
   it("asks once with fixed safe text and denies unavailable UI", async () => {
     const confirm = vi.fn(async () => false);
     const { adapter } = harness();

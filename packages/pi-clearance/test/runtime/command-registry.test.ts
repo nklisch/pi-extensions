@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "../../src/config/loader.ts";
 import { createPackRegistry } from "../../src/packs/registry.ts";
 import {
+  buildClearanceCommandOptions,
   handleClearanceCommand,
   type AutoReviewerCommandDependencies,
 } from "../../src/runtime/command-registry.ts";
@@ -75,5 +79,39 @@ describe("/clearance command routing", () => {
 
     const mode = await handleClearanceCommand("mode", ctx, pi, deps);
     expect(mode.title).toBe("Pi Clearance settings unavailable");
+  });
+
+  it("shows an unexpected slash-command failure without changing completed writes", async () => {
+    const notifications: string[] = [];
+    const ctx = {
+      hasUI: true,
+      ui: {
+        notify(message: string) {
+          notifications.push(message);
+        },
+      },
+    } as unknown as ExtensionCommandContext;
+    const deps = {
+      manager: {
+        isRatchetActive: () => {
+          throw new Error("tune state unavailable");
+        },
+      },
+    } as unknown as AutoReviewerCommandDependencies;
+    const pi = {
+      getActiveTools: () => [],
+      getAllTools: () => [],
+      sendMessage() {},
+    } as unknown as CommandPi;
+
+    const options = buildClearanceCommandOptions(
+      pi as unknown as ExtensionAPI,
+      deps,
+      { namespace: "clearance" },
+    );
+    await expect(options.handler("tune", ctx)).resolves.toBeUndefined();
+    expect(notifications).toEqual([
+      "Pi Clearance command failed: tune state unavailable",
+    ]);
   });
 });

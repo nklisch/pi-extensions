@@ -16,6 +16,7 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
+import { debugLog, runDetached, runSafely } from "#src/debug";
 import type { ChildLifecyclePublisher } from "#src/lifecycle/child-lifecycle";
 import {
   type SubagentLifecycleOutcome,
@@ -73,6 +74,8 @@ export interface SubagentSessionMeta {
  * One child AgentSession plus its turn-driving and teardown — born complete.
  */
 export class SubagentSession {
+  private disposed = false;
+
   constructor(
     private readonly _session: AgentSession,
     private readonly meta: SubagentSessionMeta,
@@ -118,20 +121,24 @@ export class SubagentSession {
     let aborted = false;
 
     const unsubTurns = session.subscribe((event: AgentSessionEvent) => {
-      if (event.type === "turn_end") {
-        turnCount++;
-        if (maxTurns != null) {
-          if (!softLimitReached && turnCount >= maxTurns) {
-            softLimitReached = true;
-            void session.steer(
-              "You have reached your turn limit. Wrap up immediately - provide your final answer now.",
-            );
-          } else if (softLimitReached && turnCount >= maxTurns + (opts.graceTurns ?? 5)) {
-            aborted = true;
-            void session.abort();
+      runSafely("subagent turn-limit observer", () => {
+        if (event.type === "turn_end") {
+          turnCount++;
+          if (maxTurns != null) {
+            if (!softLimitReached && turnCount >= maxTurns) {
+              softLimitReached = true;
+              runDetached("turn-limit steer", () =>
+                session.steer(
+                  "You have reached your turn limit. Wrap up immediately - provide your final answer now.",
+                ),
+              );
+            } else if (softLimitReached && turnCount >= maxTurns + (opts.graceTurns ?? 5)) {
+              aborted = true;
+              runDetached("turn-limit abort", () => session.abort());
+            }
           }
         }
-      }
+      });
     });
 
     const startIndex = session.messages.length;
@@ -165,9 +172,11 @@ export class SubagentSession {
         () => ({ aborted, steered: softLimitReached }),
       );
     } finally {
-      unsubTurns();
-      collector.unsubscribe();
-      cleanupAbort();
+      releaseTurnLoopHandles([
+        ["subagent turn-limit unsubscribe", unsubTurns],
+        ["subagent response collector unsubscribe", collector.unsubscribe],
+        ["subagent abort forwarder detach", cleanupAbort],
+      ]);
     }
   }
 
@@ -188,8 +197,10 @@ export class SubagentSession {
         failure: finalTurnError(session, startIndex),
       };
     } finally {
-      collector.unsubscribe();
-      cleanupAbort();
+      releaseTurnLoopHandles([
+        ["subagent response collector unsubscribe", collector.unsubscribe],
+        ["subagent abort forwarder detach", cleanupAbort],
+      ]);
     }
   }
 
@@ -214,8 +225,10 @@ export class SubagentSession {
         () => ({ aborted: false, steered: false }),
       );
     } finally {
-      collector.unsubscribe();
-      cleanupAbort();
+      releaseTurnLoopHandles([
+        ["subagent response collector unsubscribe", collector.unsubscribe],
+        ["subagent abort forwarder detach", cleanupAbort],
+      ]);
     }
   }
 
@@ -338,9 +351,21 @@ export class SubagentSession {
 
   /** Tear down: session.dispose() + emit `disposed` (registry unregister). */
   dispose(): void {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- dispose may not exist on all session implementations
-    this._session.dispose?.();
-    this.meta.lifecycle.disposed({ sessionId: this.meta.sessionId });
+    if (this.disposed) return;
+    this.disposed = true;
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- dispose may not exist on all session implementations
+      this._session.dispose?.();
+    } catch (error) {
+      debugLog("child session dispose", error);
+    }
+
+    try {
+      this.meta.lifecycle.disposed({ sessionId: this.meta.sessionId });
+    } catch (error) {
+      debugLog("child lifecycle disposed", error);
+    }
   }
 }
 
@@ -361,15 +386,17 @@ function toLifecycleOutcome(
 function collectResponseText(session: AgentSession) {
   let text = "";
   const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-    if (event.type === "message_start" && event.message?.role === "assistant") {
-      text = "";
-    }
-    if (
-      event.type === "message_update" &&
-      event.assistantMessageEvent.type === "text_delta"
-    ) {
-      text += event.assistantMessageEvent.delta;
-    }
+    runSafely("subagent response observer", () => {
+      if (event.type === "message_start" && event.message?.role === "assistant") {
+        text = "";
+      }
+      if (
+        event.type === "message_update" &&
+        event.assistantMessageEvent.type === "text_delta"
+      ) {
+        text += event.assistantMessageEvent.delta;
+      }
+    });
   });
   return { getText: () => text, unsubscribe };
 }
@@ -402,6 +429,17 @@ function finalTurnError(session: AgentSession, startIndex = 0): string | undefin
 }
 
 /**
+ * Release the turn loop's SDK-owned cleanup handles one by one. Each handle is
+ * code outside this extension, so a throwing unsubscribe must neither skip the
+ * remaining handles nor mask the primary turn-loop outcome settling above.
+ */
+function releaseTurnLoopHandles(handles: ReadonlyArray<readonly [string, () => void]>): void {
+  for (const [context, release] of handles) {
+    runSafely(context, release);
+  }
+}
+
+/**
  * Wire an AbortSignal to abort a session.
  * Returns a cleanup function to remove the listener.
  */
@@ -411,7 +449,7 @@ function forwardAbortSignal(
 ): () => void {
   if (!signal) return () => {};
   const onAbort = (): void => {
-    void session.abort();
+    runDetached("parent-signal abort", () => session.abort());
   };
   signal.addEventListener("abort", onAbort, { once: true });
   return () => signal.removeEventListener("abort", onAbort);

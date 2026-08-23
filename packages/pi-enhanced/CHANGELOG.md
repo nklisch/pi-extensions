@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.1
+
+### Fixed
+
+- Rebundle the extension reliability releases that contain stale contexts, detached promises, timers, process callbacks, UI callbacks, and cleanup failures instead of allowing them to terminate Pi.
+
 ## v0.2.0
 
 ### Changed

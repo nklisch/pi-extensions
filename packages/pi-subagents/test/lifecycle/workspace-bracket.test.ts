@@ -108,7 +108,7 @@ describe("WorkspaceBracket — dispose", () => {
 		expect(workspace.dispose).toHaveBeenCalledWith(outcome);
 	});
 
-	it("propagates a throwing dispose (does not swallow)", async () => {
+	it("propagates a throwing dispose once and is idempotent afterward", async () => {
 		const workspace: Workspace = {
 			cwd: "/ws/dir",
 			dispose: vi.fn(() => { throw new Error("dispose failed"); }),
@@ -116,5 +116,7 @@ describe("WorkspaceBracket — dispose", () => {
 		const bracket = new WorkspaceBracket(() => makeProvider(workspace));
 		await bracket.prepare(ctx);
 		expect(() => bracket.dispose(outcome)).toThrow("dispose failed");
+		expect(bracket.dispose(outcome)).toBe("");
+		expect(workspace.dispose).toHaveBeenCalledOnce();
 	});
 });

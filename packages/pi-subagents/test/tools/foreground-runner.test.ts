@@ -105,4 +105,28 @@ describe("runForeground", () => {
 		// Interval must have been cleared — no further onUpdate calls
 		expect(onUpdate).not.toHaveBeenCalled();
 	});
+
+	it("contains a throwing progress callback and still cleans up on success", async () => {
+		const { manager } = createToolDeps();
+		const onUpdate = vi.fn(() => { throw new Error("stale TUI context"); });
+
+		await expect(runForeground(manager, makeParams(), undefined, onUpdate)).resolves.toMatchObject({
+			content: [{ type: "text" }],
+		});
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it("keeps post-spawn internal defects as thrown tool errors and still clears the timer", async () => {
+		const record = createTestSubagent({ result: "done" });
+		vi.spyOn(record, "markConsumed").mockImplementation(() => { throw new Error("internal defect"); });
+		const deps = createToolDeps({
+			manager: {
+				...createToolDeps().manager,
+				spawnAndWait: vi.fn().mockResolvedValue(record),
+			},
+		});
+
+		await expect(runForeground(deps.manager, makeParams(), undefined, undefined)).rejects.toThrow("internal defect");
+		expect(vi.getTimerCount()).toBe(0);
+	});
 });

@@ -58,23 +58,28 @@ function loadFromDir(
       continue;
     }
 
-    const { frontmatter: fm, body } = parseFrontmatter(content);
-
-    agents.set(name, {
-      name,
-      displayName: str(fm.display_name),
-      description: str(fm.description) ?? name,
-      builtinToolNames: csvList(fm.tools, BUILTIN_TOOL_NAMES),
-      model: str(fm.model),
-      thinking: str(fm.thinking) as ThinkingLevel | undefined,
-      maxTurns: nonNegativeInt(fm.max_turns),
-      systemPrompt: body.trim(),
-      promptMode: fm.prompt_mode === "replace" ? "replace" : "append",
-      inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
-      runInBackground: fm.run_in_background != null ? fm.run_in_background === true : undefined,
-      enabled: fm.enabled !== false,  // default true; explicitly false disables
-      source,
-    });
+    try {
+      const { frontmatter: fm, body } = parseFrontmatter(content);
+      agents.set(name, {
+        name,
+        displayName: str(fm.display_name),
+        description: str(fm.description) ?? name,
+        builtinToolNames: csvList(fm.tools, BUILTIN_TOOL_NAMES),
+        model: str(fm.model),
+        thinking: str(fm.thinking) as ThinkingLevel | undefined,
+        maxTurns: nonNegativeInt(fm.max_turns),
+        systemPrompt: body.trim(),
+        promptMode: fm.prompt_mode === "replace" ? "replace" : "append",
+        inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
+        runInBackground: fm.run_in_background != null ? fm.run_in_background === true : undefined,
+        enabled: fm.enabled !== false,  // default true; explicitly false disables
+        source,
+      });
+    } catch (err) {
+      // One malformed user file must not hide valid agents from the same tier
+      // or lower-priority discovery locations.
+      debugLog("parse custom agent frontmatter", err);
+    }
   }
 }
 

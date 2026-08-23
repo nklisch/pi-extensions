@@ -69,10 +69,19 @@ export function createBackgroundUpdateCoordinator(dependencies: Readonly<{
       const ownedController = controller;
       // Deliberately do not await this task: local startup is complete before
       // any notification publisher, marketplace adapter, or timer participates.
-      task = dependencies.scheduler.run(ownedController.signal, maintain).catch((error) => {
+      // Scheduler adapters are foreign operational boundaries and may throw
+      // before returning a promise; normalize both sync throws and rejections
+      // into degraded status so detached startup can never reject into Node.
+      try {
+        task = Promise.resolve(
+          dependencies.scheduler.run(ownedController.signal, maintain),
+        ).catch(() => {
+          if (!ownedController.signal.aborted) dependencies.schedulerStatus?.degrade();
+        });
+      } catch {
         if (!ownedController.signal.aborted) dependencies.schedulerStatus?.degrade();
-        void error;
-      });
+        task = Promise.resolve();
+      }
     },
     wake() {
       if (closePromise === undefined) dependencies.scheduler.wake();

@@ -146,10 +146,14 @@ interface MinimalTui {
 const DOSSIER_VISIBLE_LINES = 12;
 
 export function canOpenSettingsNativeUi(ctx: ExtensionCommandContext): boolean {
-  const custom = (
-    ctx as unknown as { readonly ui?: { readonly custom?: unknown } }
-  ).ui?.custom;
-  return ctx.hasUI === true && typeof custom === "function";
+  try {
+    const custom = (
+      ctx as unknown as { readonly ui?: { readonly custom?: unknown } }
+    ).ui?.custom;
+    return ctx.hasUI === true && typeof custom === "function";
+  } catch {
+    return false;
+  }
 }
 
 export async function openSettingsNativeUi(
@@ -179,15 +183,27 @@ export async function openSettingsNativeUi(
   const handled: SettingsNativeUiHandledAction[] = [];
 
   while (true) {
-    const interaction = await presentSettingsNativeUi({
-      ctx: options.ctx,
-      model,
-      screen,
-      selected,
-      dossierScroll,
-      dossierOrigin,
-      ...(message === undefined ? {} : { message }),
-    });
+    let interaction: NativeSettingsUiInteraction;
+    try {
+      interaction = await presentSettingsNativeUi({
+        ctx: options.ctx,
+        model,
+        screen,
+        selected,
+        dossierScroll,
+        dossierOrigin,
+        ...(message === undefined ? {} : { message }),
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        report: nativeSettingsFailureReport(
+          "presentation",
+          error,
+          handled.length,
+        ),
+      };
+    }
     const selection = interaction.selection;
     if (selection.kind === "close") {
       return {
@@ -201,11 +217,16 @@ export async function openSettingsNativeUi(
       };
     }
 
-    const report = await dispatchNativeSettingsSelection(
-      selection,
-      options.ctx,
-      options.deps,
-    );
+    let report: CommandReport;
+    try {
+      report = await dispatchNativeSettingsSelection(
+        selection,
+        options.ctx,
+        options.deps,
+      );
+    } catch (error) {
+      report = nativeSettingsFailureReport("action", error, handled.length);
+    }
     const handledAction: SettingsNativeUiHandledAction = {
       label: selection.label,
       reportTitle: report.title,
@@ -232,7 +253,15 @@ export async function openSettingsNativeUi(
     selected = dossier === undefined ? interaction.selected : 0;
     dossierScroll = dossier === undefined ? interaction.dossierScroll : 0;
 
-    const reloaded = await options.reload();
+    let reloaded: Awaited<ReturnType<SettingsNativeUiReload>>;
+    try {
+      reloaded = await options.reload();
+    } catch (error) {
+      return {
+        ok: false,
+        report: nativeSettingsFailureReport("reload", error, handled.length),
+      };
+    }
     if (!reloaded.ok) {
       return { ok: false, report: reloaded.report };
     }
@@ -252,25 +281,86 @@ async function presentSettingsNativeUi(input: {
   const custom = input.ctx.ui.custom.bind(input.ctx.ui);
   return await custom<NativeSettingsUiInteraction>(
     (tui, theme, _keybindings, done) => {
-      let component!: SettingsNativeUiComponent;
-      component = new SettingsNativeUiComponent({
-        model: input.model,
-        theme: theme as MinimalTheme,
-        done: (selection) =>
-          done({ selection, ...component.getNavigationState() }),
-        initialScreen: input.screen,
-        initialSelected: input.selected,
-        initialDossierScroll: input.dossierScroll,
-        dossierOrigin: input.dossierOrigin,
-        ...(input.message === undefined ? {} : { message: input.message }),
-      });
+      let component: SettingsNativeUiComponent | undefined;
+      let lastFailure: string | undefined;
+      const fallbackNavigation = {
+        screen: input.screen,
+        selected: input.selected,
+        dossierScroll: input.dossierScroll,
+      } satisfies Omit<NativeSettingsUiInteraction, "selection">;
+
+      const reportFailure = (phase: string, error: unknown): void => {
+        const diagnostic = `Pi Clearance native settings ${phase} failed: ${errorMessage(error)}`;
+        if (diagnostic === lastFailure) return;
+        lastFailure = diagnostic;
+        console.error(diagnostic);
+      };
+
+      const safeDone = (selection: SettingsNativeUiSelection): void => {
+        try {
+          done({
+            selection,
+            ...(component?.getNavigationState() ?? fallbackNavigation),
+          });
+        } catch (error) {
+          reportFailure("completion", error);
+        }
+      };
+
+      try {
+        component = new SettingsNativeUiComponent({
+          model: input.model,
+          theme: theme as MinimalTheme,
+          done: safeDone,
+          initialScreen: input.screen,
+          initialSelected: input.selected,
+          initialDossierScroll: input.dossierScroll,
+          dossierOrigin: input.dossierOrigin,
+          ...(input.message === undefined ? {} : { message: input.message }),
+        });
+      } catch (error) {
+        reportFailure("component construction", error);
+      }
+
       const minimalTui = tui as MinimalTui;
       return {
-        render: (width: number) => component.render(width),
-        invalidate: () => component.invalidate(),
+        render: (width: number) => {
+          try {
+            if (component === undefined) {
+              return renderNativeSettingsFallback(width, lastFailure);
+            }
+            return component.render(width);
+          } catch (error) {
+            reportFailure("render", error);
+            return renderNativeSettingsFallback(width, lastFailure);
+          }
+        },
+        invalidate: () => {
+          try {
+            component?.invalidate();
+          } catch (error) {
+            reportFailure("invalidation", error);
+          }
+        },
         handleInput: (data: string) => {
-          component.handleInput(data);
-          minimalTui.requestRender?.();
+          try {
+            if (component === undefined) {
+              if (isClose(data)) safeDone({ kind: "close" });
+            } else {
+              component.handleInput(data);
+            }
+          } catch (error) {
+            reportFailure("input", error);
+          }
+
+          // requestRender is a host callback too; a broken TUI refresh must
+          // not prevent the component from accepting a later close/recovery
+          // input or turn a completed settings write into a failed command.
+          try {
+            minimalTui.requestRender?.call(tui);
+          } catch (error) {
+            reportFailure("input refresh", error);
+          }
         },
       };
     },
@@ -320,16 +410,29 @@ async function readNativeSettingsInput(
   | { readonly ok: true; readonly value: string | null }
   | { readonly ok: false; readonly report: CommandReport }
 > {
-  const input = (
-    ctx as unknown as {
-      readonly ui?: {
-        readonly input?: (
-          title: string,
-          placeholder?: string,
-        ) => Promise<string | undefined> | string | undefined;
-      };
-    }
-  ).ui?.input;
+  let input:
+    | ((
+        title: string,
+        placeholder?: string,
+      ) => Promise<string | undefined> | string | undefined)
+    | undefined;
+  try {
+    input = (
+      ctx as unknown as {
+        readonly ui?: {
+          readonly input?: (
+            title: string,
+            placeholder?: string,
+          ) => Promise<string | undefined> | string | undefined;
+        };
+      }
+    ).ui?.input;
+  } catch (error) {
+    return {
+      ok: false,
+      report: nativeInputRefusedReport(selection, "failed", error),
+    };
+  }
 
   if (typeof input !== "function") {
     return {
@@ -338,7 +441,29 @@ async function readNativeSettingsInput(
     };
   }
 
-  const value = await input(selection.prompt, selection.placeholder ?? "");
+  let value: string | undefined;
+  try {
+    const rawValue = await input(
+      selection.prompt,
+      selection.placeholder ?? "",
+    );
+    if (rawValue !== undefined && typeof rawValue !== "string") {
+      return {
+        ok: false,
+        report: nativeInputRefusedReport(
+          selection,
+          "failed",
+          new Error("Pi UI input returned a non-string value"),
+        ),
+      };
+    }
+    value = rawValue;
+  } catch (error) {
+    return {
+      ok: false,
+      report: nativeInputRefusedReport(selection, "failed", error),
+    };
+  }
   if (value === undefined) {
     return {
       ok: false,
@@ -346,7 +471,15 @@ async function readNativeSettingsInput(
     };
   }
 
-  const trimmed = value.trim();
+  let trimmed: string;
+  try {
+    trimmed = value.trim();
+  } catch (error) {
+    return {
+      ok: false,
+      report: nativeInputRefusedReport(selection, "failed", error),
+    };
+  }
   if (trimmed.length === 0) {
     if (selection.empty === "null") {
       return { ok: true, value: null };
@@ -365,7 +498,8 @@ function nativeInputRefusedReport(
     SettingsNativeUiSelection,
     { readonly kind: "input-action" }
   >,
-  reason: "unavailable" | "cancelled" | "empty",
+  reason: "unavailable" | "cancelled" | "empty" | "failed",
+  error?: unknown,
 ): CommandReport {
   const summary = (() => {
     switch (reason) {
@@ -375,6 +509,8 @@ function nativeInputRefusedReport(
         return "Text input was cancelled; no config changes were written.";
       case "empty":
         return "Text input was empty; no config changes were written.";
+      case "failed":
+        return `Text input failed: ${errorMessage(error)}; no config changes were written.`;
     }
   })();
 
@@ -390,8 +526,48 @@ function nativeInputRefusedReport(
       "- No config changes were written.",
     ].join("\n"),
     details: { reason: `native-input-${reason}`, selection },
-    level: reason === "unavailable" ? "error" : "warning",
+    level: reason === "unavailable" || reason === "failed" ? "error" : "warning",
   };
+}
+
+function nativeSettingsFailureReport(
+  phase: string,
+  error: unknown,
+  actionsHandled: number,
+): CommandReport {
+  const message = errorMessage(error);
+  const summary = `Pi Clearance settings ${phase} failed: ${message}. Previously confirmed actions, if any, remain applied; no rollback was attempted.`;
+  return {
+    title: "Pi Clearance settings failed",
+    summary,
+    markdown: [
+      "# Pi Clearance settings failed",
+      "",
+      `- Phase: ${phase}`,
+      `- Error: ${message}`,
+      `- Actions already handled: ${actionsHandled}`,
+      "- Reopen status to verify any previously confirmed writes.",
+    ].join("\n"),
+    details: { reason: `native-ui-${phase}-failed`, actionsHandled, error: message },
+    level: "error",
+  };
+}
+
+function renderNativeSettingsFallback(
+  width: number,
+  diagnostic: string | undefined,
+): string[] {
+  const lines = [
+    "Pi Clearance settings UI encountered an error.",
+    diagnostic ?? "The settings component could not be rendered.",
+    "Previously confirmed actions, if any, remain applied.",
+    "Press q or Esc to close.",
+  ];
+  try {
+    return lines.map((line) => truncateAnsi(line, Math.max(1, width)));
+  } catch {
+    return ["Pi Clearance settings UI unavailable.", "Press q or Esc to close."];
+  }
 }
 
 interface NativeSettingsMessage {
@@ -1044,4 +1220,12 @@ function isClose(data: string): boolean {
 
 export function truncateAnsi(input: string, width: number): string {
   return truncateToWidth(input, width, width >= 2 ? "…" : "");
+}
+
+function errorMessage(error: unknown): string {
+  try {
+    return error instanceof Error ? error.message : String(error);
+  } catch {
+    return "unknown error";
+  }
 }

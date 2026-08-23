@@ -560,6 +560,30 @@ describe("createPackageRegistrationStore malformed payloads", () => {
     expect(() => store.collect("startup")).not.toThrow();
     expect(store.snapshot().packs).toEqual([]);
   });
+
+  it("contains hostile registration getters inside the event listener", () => {
+    const bus = createTestEventBus();
+    const payload = {};
+    Object.defineProperty(payload, "requestId", {
+      get() {
+        throw new Error("request id getter failed");
+      },
+    });
+    const store = createPackageRegistrationStore({ events: bus });
+
+    expect(() =>
+      bus.emit(AUTO_REVIEWER_PACKS_REGISTER_EVENT, payload),
+    ).not.toThrow();
+    expect(store.snapshot()).toMatchObject({
+      packs: [],
+      issues: [
+        expect.objectContaining({
+          code: "listener-error",
+          message: expect.stringContaining("request id getter failed"),
+        }),
+      ],
+    });
+  });
 });
 
 describe("createPackageRegistrationStore throwing handlers", () => {

@@ -228,4 +228,34 @@ describe("AgentWidget lifecycle read model", () => {
 
     expect(setWidget).toHaveBeenLastCalledWith("agents", undefined);
   });
+
+  it("contains UI refresh failures and stops the failing timer", async () => {
+    const { ui } = attachUI();
+    vi.mocked(ui.setStatus).mockImplementation(() => { throw new Error("stale UI"); });
+    const active = createTestSubagent({
+      status: "running",
+      invocation: { runInBackground: true },
+    });
+
+    expect(() => widget.onSubagentStarted(active)).not.toThrow();
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+  });
+
+  it("contains render and disposal failures independently", () => {
+    const { ui, component } = attachUI();
+    const active = createTestSubagent({
+      status: "running",
+      invocation: { runInBackground: true },
+    });
+    widget.onSubagentStarted(active);
+    const rendered = component();
+    expect(rendered).toBeDefined();
+    vi.spyOn(active, "getContextPercent").mockImplementation(() => { throw new Error("render failed"); });
+    expect(rendered?.render()).toEqual([]);
+
+    vi.mocked(ui.setWidget).mockImplementation(() => { throw new Error("TUI disposal failed"); });
+    vi.mocked(ui.setStatus).mockImplementation(() => { throw new Error("status disposal failed"); });
+    expect(() => widget.dispose()).not.toThrow();
+  });
 });

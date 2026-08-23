@@ -476,7 +476,15 @@ async function resolveZaiKey(registry?: ModelRegistryLike): Promise<string | nul
 
 // --- Extension ------------------------------------------------------------
 
-export default function zaiResearchExtension(pi: PiApi): void {
+type ZaiResearchDependencies = {
+  /** Test seam for exercising session cleanup without opening a network client. */
+  createHub?: typeof createMcpHub;
+};
+
+export function createZaiResearchExtension(
+  pi: PiApi,
+  dependencies: ZaiResearchDependencies = {},
+): void {
   let hub: McpHub | null = null;
   // Mutable: refreshed on every tool call so a registry/key change mid-session
   // is picked up (don't pin the first call's context forever).
@@ -491,7 +499,7 @@ export default function zaiResearchExtension(pi: PiApi): void {
   function getHub(ctx: ToolContext): McpHub {
     currentRegistry = ctx.modelRegistry ?? currentRegistry;
     if (!hub) {
-      hub = createMcpHub({ resolveKey: () => resolveZaiKey(currentRegistry) });
+      hub = (dependencies.createHub ?? createMcpHub)({ resolveKey: () => resolveZaiKey(currentRegistry) });
     }
     return hub;
   }
@@ -925,15 +933,27 @@ export default function zaiResearchExtension(pi: PiApi): void {
     execute: readRepoFileExecute,
   });
 
-  // Clean up MCP clients on shutdown so no transport lingers.
+  // Clean up MCP clients on shutdown so no transport lingers. Cleanup is
+  // deliberately transactional: a close failure must not retain the old hub,
+  // registry, or page cache for a replacement session. The warning preserves
+  // observability without allowing a stale transport error to reject shutdown.
   pi.on?.("session_shutdown", async () => {
-    if (hub) {
-      await hub.close();
+    try {
+      await hub?.close();
+    } catch (error) {
+      console.warn(
+        `[pi-zai-research] MCP cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
       hub = null;
+      currentRegistry = undefined;
+      // Reassign (PageCache has no clear()) so any in-flight reference style
+      // stays valid while the closure starts fresh.
+      pageCache = new PageCache();
     }
-    // Drop the windowing cache too — a new session must not serve stale blobs
-    // from the previous one. Reassign (PageCache has no clear()) so any
-    // in-flight reference style stays valid while the closure starts fresh.
-    pageCache = new PageCache();
   });
+}
+
+export default function zaiResearchExtension(pi: PiApi): void {
+  createZaiResearchExtension(pi);
 }

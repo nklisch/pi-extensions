@@ -26,6 +26,7 @@ import {
 } from "./autocomplete.js";
 import { assembleForInspect, getLastBaseSystemPrompt } from "./handler.js";
 import { parseScalarDefaultArgs } from "./command-parse-utils.js";
+import { sendCommandMessageSafely } from "./command-message.js";
 import {
   writeDefaultToConfig,
   readDefaultSources,
@@ -427,11 +428,16 @@ export function registerModeCommand(pi: ExtensionAPI): void {
           modeError = (err as Error).message;
         }
         const presets = listPresetNames();
-        pi.sendMessage({
-          customType: MODE_LISTING_MESSAGE_TYPE,
-          content: formatModeListing(source, specName, mode, modeError, presets),
-          display: true,
-        });
+        await sendCommandMessageSafely(
+          pi,
+          ctx,
+          {
+            customType: MODE_LISTING_MESSAGE_TYPE,
+            content: formatModeListing(source, specName, mode, modeError, presets),
+            display: true,
+          },
+          "/mode",
+        );
         return;
       }
 
@@ -446,11 +452,16 @@ export function registerModeCommand(pi: ExtensionAPI): void {
         if (parsed.kind === "display") {
           const sources = readDefaultSources(ctx.cwd);
           const effective = effectiveDefaultSource(ctx.cwd);
-          pi.sendMessage({
-            customType: MODE_DEFAULT_MESSAGE_TYPE,
-            content: formatDefaultListing(sources.global, sources.project, effective),
-            display: true,
-          });
+          await sendCommandMessageSafely(
+            pi,
+            ctx,
+            {
+              customType: MODE_DEFAULT_MESSAGE_TYPE,
+              content: formatDefaultListing(sources.global, sources.project, effective),
+              display: true,
+            },
+            "/mode default",
+          );
           return;
         }
 
@@ -622,11 +633,16 @@ export function registerModeInspectCommand(pi: ExtensionAPI): void {
         styleInfo,
         assembledPrompt,
       );
-      pi.sendMessage({
-        customType: MODE_INSPECT_MESSAGE_TYPE,
-        content,
-        display: true,
-      });
+      await sendCommandMessageSafely(
+        pi,
+        ctx,
+        {
+          customType: MODE_INSPECT_MESSAGE_TYPE,
+          content,
+          display: true,
+        },
+        "/mode:inspect",
+      );
     },
   });
 }

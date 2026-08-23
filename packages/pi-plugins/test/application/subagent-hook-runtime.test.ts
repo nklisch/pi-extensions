@@ -120,4 +120,48 @@ describe("portable subagent hook runtime registration", () => {
     expect(fake.registrationDisposeCounts()).toEqual([1]);
     await fake.shutdown();
   });
+
+  it("consumes a rejected detached abort disposal while preserving the explicit failure", async () => {
+    const fake = createFakeSubagentLifecycle();
+    const runtimeAbort = new AbortController();
+    const qualification = await fake.lifecycle.capabilities(runtimeAbort.signal);
+    const failure = new Error("provider cleanup failed");
+    const dispose = vi.fn(async () => { throw failure; });
+    const lifecycle: SubagentLifecyclePort = {
+      capabilities: fake.lifecycle.capabilities,
+      register: async () => ({
+        evidence: SubagentLifecycleRegistrationEvidenceSchemaV1.parse({
+          schemaVersion: 1,
+          contractVersion: qualification.contractVersion,
+          capabilityId: SUBAGENT_LIFECYCLE_CAPABILITY_ID,
+          qualificationDigest: qualification.qualificationDigest,
+          orderedAsync: true,
+          maxContinuationRounds: 3,
+          state: "registered",
+        }),
+        dispose,
+      }),
+    };
+    const runtime = await registerSubagentHookRuntime({
+      lifecycle,
+      qualification,
+      coordinator: {
+        beforeStart: async (request) => ({ action: "continue", prompt: request.prompt }),
+        beforeComplete: async (request) => ({ action: "complete", result: request.proposedResult }),
+      },
+      runtimeSignal: runtimeAbort.signal,
+    });
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      runtimeAbort.abort(new Error("shutdown"));
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).not.toHaveBeenCalled();
+      await expect(runtime.dispose()).rejects.toBe(failure);
+      expect(dispose).toHaveBeenCalledOnce();
+    } finally {
+      process.removeListener("unhandledRejection", unhandled);
+      await fake.shutdown();
+    }
+  });
 });

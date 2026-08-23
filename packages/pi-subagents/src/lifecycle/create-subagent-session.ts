@@ -227,14 +227,15 @@ export async function createSubagentSession(
     lifecycle: deps.lifecycle,
   });
 
-  // Publish session-created before bindExtensions() so observers (e.g. the
-  // permission system) can register the child synchronously and have their
-  // entry in place for the first permission check during child extension
-  // initialization. The event bus dispatches synchronously, so a synchronous
-  // subscriber completes before this returns.
-  deps.lifecycle.sessionCreated({ sessionId, parentSessionId });
-
   try {
+    // Publish session-created before bindExtensions() so observers (e.g. the
+    // permission system) can register the child synchronously and have their
+    // entry in place for the first permission check during child extension
+    // initialization. The event bus dispatches synchronously, so a synchronous
+    // subscriber completes before this returns. Keep publication in the same
+    // cleanup boundary as binding: a failing subscriber must not leak the
+    // already-created child session.
+    deps.lifecycle.sessionCreated({ sessionId, parentSessionId });
     // Bind extensions so that session_start fires and extensions can initialize.
     await session.bindExtensions({});
     // Apply recursion guard after bindExtensions so extension-registered tools

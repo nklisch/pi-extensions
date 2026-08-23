@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.21.0-nklisch.1] - 2026-08-23
+
+### Fixed
+
+- Contain Unix-socket callbacks, MCP Apps completion and watchdog callbacks, OAuth callback requests, metadata listeners, worker termination, and delayed status publication. Detached failures now degrade through bounded diagnostics instead of reaching Node as uncaught exceptions or unhandled rejections.
+- Preserve structured direct and proxy tool failures when cancellation, output guarding, UI cleanup, or in-flight accounting also fails.
+
 ## [2.21.0-nklisch.0] - 2026-08-23
 
 ### Fixed

@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-model-modes",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "A pi extension that adapts the system prompt per model/mode.",
   "type": "module",
   "keywords": [

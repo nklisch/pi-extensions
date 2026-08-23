@@ -75,6 +75,13 @@ describe("createChildLifecyclePublisher", () => {
     });
   });
 
+  it("contains a throwing synchronous subscriber", () => {
+    const emit = vi.fn(() => { throw new Error("stale child listener"); });
+    const publisher = createChildLifecyclePublisher(emit);
+
+    expect(() => publisher.sessionCreated({ sessionId: "child-session-abc" })).not.toThrow();
+  });
+
   it("passes an undefined parentSessionId through unchanged", () => {
     const { emit, publisher } = setup();
 

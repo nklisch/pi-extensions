@@ -57,4 +57,46 @@ describe("TranscriptOverlay runtime metadata", () => {
     vi.advanceTimersByTime(200);
     expect(requestRender).toHaveBeenCalledTimes(2);
   });
+
+  it("contains live subscription, timer, input, and disposal failures", () => {
+    vi.useFakeTimers();
+    const requestRender = vi.fn(() => { throw new Error("stale TUI"); });
+    let notify!: () => void;
+    const unsubscribe = vi.fn(() => { throw new Error("unsubscribe failed"); });
+    const source: TranscriptSource = {
+      getMessages: () => [],
+      subscribe: (onChange) => {
+        notify = onChange;
+        return unsubscribe;
+      },
+      streaming: () => ({ activeTools: new Map(), responseText: "" }),
+      getToolDefinition: () => undefined,
+    };
+    const done = vi.fn(() => { throw new Error("overlay closed"); });
+    const tui = {
+      terminal: { columns: 120, rows: 40 },
+      requestRender,
+    } as unknown as TUI;
+    const overlay = new TranscriptOverlay({
+      tui,
+      theme,
+      source,
+      run: {
+        modelLabel: "model",
+        thinkingLevel: "medium",
+        startedAt: 1_000,
+        completedAt: () => undefined,
+      },
+      done,
+      cwd: "/repo",
+      markdownTheme: {} as MarkdownTheme,
+    });
+
+    expect(() => notify()).not.toThrow();
+    expect(() => vi.advanceTimersByTime(100)).not.toThrow();
+    expect(() => overlay.handleInput("q")).not.toThrow();
+    expect(() => overlay.dispose()).not.toThrow();
+    expect(() => overlay.dispose()).not.toThrow();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
 });

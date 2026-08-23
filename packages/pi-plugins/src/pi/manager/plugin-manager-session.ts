@@ -67,6 +67,33 @@ function selectedRow(state: PluginManagerState): PluginManagerRow | undefined {
 
 const automaticRunResult = (envelope: NativeControlEnvelope) => NativeAutomaticUpdateRunResultSchema.safeParse(envelope.data);
 
+function reportOperationalFailure(label: string, error: unknown): void {
+  let detail = "unknown failure";
+  try { detail = error instanceof Error ? error.message : String(error); }
+  catch { detail = "unreadable failure"; }
+  try { console.error(`Pi Plugin Host ${label} failed: ${detail}`); }
+  catch { /* a broken diagnostic sink cannot escape detached cleanup */ }
+}
+
+function safeNotify(
+  context: Readonly<{ ui: Readonly<{ notify(message: string, level: "info" | "warning" | "error"): unknown }> }>,
+  message: string,
+  level: "info" | "warning" | "error",
+): void {
+  try { context.ui.notify(message, level); } catch { /* a stale UI must not reject detached work */ }
+}
+
+async function cleanupSequentially(
+  steps: readonly (() => void | Promise<void>)[],
+  message: string,
+): Promise<void> {
+  const failures: unknown[] = [];
+  for (const step of steps) {
+    try { await step(); } catch (error) { failures.push(error); }
+  }
+  if (failures.length > 0) throw new AggregateError(failures, message);
+}
+
 /**
  * Sync-now defers activation. When anything is live on the next start,
  * offer exactly one reload so the user can use the new versions immediately;
@@ -175,18 +202,30 @@ export function createPluginManagerSession(input: Readonly<{
   }
 
   async function replaceActive(reason: SessionShutdownEvent["reason"] = "new"): Promise<void> {
-    activeClose?.();
+    const close = activeClose;
+    const controller = activeController;
+    const runner = activeRunner;
+    const operationAbort = activeOperationAbort;
+    const operationReloadSafe = activeOperationReloadSafe;
+    // Revoke all session-bound handles before awaiting any cleanup. A failing
+    // predecessor must not leave a second callback reachable during teardown.
     activeClose = undefined;
-    if (activeController !== undefined) {
-      completions = activeController.dynamicCompletions();
-      await activeController.close(reason);
-      activeController = undefined;
-    }
-    activeRunner?.close(reason);
+    activeController = undefined;
     activeRunner = undefined;
-    if (activeOperationAbort !== undefined && !(reason === "reload" && activeOperationReloadSafe)) {
-      activeOperationAbort.abort(new DOMException("plugin presentation replaced", "AbortError"));
-    }
+    activeOperationAbort = undefined;
+    await cleanupSequentially([
+      () => close?.(),
+      () => {
+        if (controller !== undefined) completions = controller.dynamicCompletions();
+      },
+      () => controller?.close(reason),
+      () => runner?.close(reason),
+      () => {
+        if (operationAbort !== undefined && !(reason === "reload" && operationReloadSafe)) {
+          operationAbort.abort(new DOMException("plugin presentation replaced", "AbortError"));
+        }
+      },
+    ], "plugin presentation replacement cleanup failed");
   }
 
   // Pi's own ui.select/ui.input cannot receive keystrokes while a custom
@@ -391,20 +430,35 @@ export function createPluginManagerSession(input: Readonly<{
         tui.requestRender();
       };
 
+      const phaseFailure = (error: unknown): void => {
+        if (closingReason === "reload" || closed) return;
+        try { apply({ type: "busy", value: false }); } catch { /* stale component state is already detached */ }
+        safeNotify(
+          context,
+          error instanceof DOMException && error.name === "AbortError"
+            ? "Install cancellation is waiting for owner truth."
+            : "Install flow could not complete.",
+          "warning",
+        );
+      };
+
       const runPhase = async (phase: "open" | "apply"): Promise<void> => {
         if (state.busy) return;
-        apply({ type: "busy", value: true });
-        const port = phase === "open"
-          ? undefined
-          : createPiControlInputPort({ context, mode: "tui", preset: { nonSensitive: state.values, ...(state.consentId === undefined ? {} : { consentId: state.consentId }) }, present: currentPresenter });
-        const runner = freshRunner(context, {
-          ...(port === undefined ? {} : { input: port }),
-          onFrame: (frame) => {
-            if (!presentationDetached) apply({ type: "frame", frame });
-          },
-        });
-        currentRunner = runner;
+        let port: ReturnType<typeof createPiControlInputPort> | undefined;
+        let runner: PluginManagerActionRunner | undefined;
         try {
+          apply({ type: "busy", value: true });
+          port = phase === "open"
+            ? undefined
+            : createPiControlInputPort({ context, mode: "tui", preset: { nonSensitive: state.values, ...(state.consentId === undefined ? {} : { consentId: state.consentId }) }, present: currentPresenter });
+          runner = freshRunner(context, {
+            ...(port === undefined ? {} : { input: port }),
+            onFrame: (frame) => {
+              if (presentationDetached) return;
+              try { apply({ type: "frame", frame }); } catch (error) { phaseFailure(error); }
+            },
+          });
+          currentRunner = runner;
           if (phase === "open") {
             const phaseResult = await runner.run({
               action: "install-open",
@@ -418,7 +472,7 @@ export function createPluginManagerSession(input: Readonly<{
             }
             const opened = TrustedInstallOpenResultSchema.safeParse(phaseResult.envelope.data);
             if (!opened.success || opened.data.kind !== "opened") {
-              context.ui.notify("Install candidate evidence changed; review the refreshed candidate before continuing.", "warning");
+              safeNotify(context, "Install candidate evidence changed; review the refreshed candidate before continuing.", "warning");
               // Leave the flow so the manager can refresh authority behind it;
               // retrying with the same stale evidence would loop.
               result = Object.freeze({ kind: "handled", presentation: "local" });
@@ -449,12 +503,12 @@ export function createPluginManagerSession(input: Readonly<{
           if (!activation.success) {
             apply({ type: "busy", value: false });
             const diagnostic = phaseResult.envelope.diagnostics[0]?.code;
-            context.ui.notify(`Install result did not match the public facade contract (${phaseResult.envelope.status}${diagnostic === undefined ? "" : ` · ${diagnostic}`}).`, "error");
+            safeNotify(context, `Install result did not match the public facade contract (${phaseResult.envelope.status}${diagnostic === undefined ? "" : ` · ${diagnostic}`}).`, "error");
             return;
           }
           if (activation.data.kind === "needs-input") {
             apply({ type: "session-opened", session: activation.data.session, submission: "apply" });
-            context.ui.notify("Configuration or exact consent needs renewed input.", "warning");
+            safeNotify(context, "Configuration or exact consent needs renewed input.", "warning");
             return;
           }
           result = Object.freeze({ kind: "handled", presentation: "local" });
@@ -465,30 +519,33 @@ export function createPluginManagerSession(input: Readonly<{
               `${components.hooks} hook${components.hooks === 1 ? "" : "s"}`,
               `${components.mcpServers} MCP server${components.mcpServers === 1 ? "" : "s"}`,
             ].join(", ");
-            context.ui.notify(`Added ${activation.data.plugin} — ${inventory} ready to use`, "info");
+            safeNotify(context, `Added ${activation.data.plugin} — ${inventory} ready to use`, "info");
             if (candidateDetail.compatibility.components.foreign.some((component) => component.nativeKind.text === "pi-extension")) {
-              context.ui.notify(`Heads up: ${activation.data.plugin} also ships a Pi extension (tools/commands), which this host doesn't run — those won't register. Install it pi-natively to use them.`, "warning");
+              safeNotify(context, `Heads up: ${activation.data.plugin} also ships a Pi extension (tools/commands), which this host doesn't run — those won't register. Install it pi-natively to use them.`, "warning");
             }
           } else if (activation.data.kind === "current-state") {
-            context.ui.notify(`${activation.data.plugin} is already added`, "info");
+            safeNotify(context, `${activation.data.plugin} is already added`, "info");
           } else if (activation.data.kind === "degraded") {
-            context.ui.notify(`Added ${activation.data.plugin}, but it is degraded — repair or rollback it from /plugins → Health.`, "warning");
+            safeNotify(context, `Added ${activation.data.plugin}, but it is degraded — repair or rollback it from /plugins → Health.`, "warning");
           } else if (activation.data.kind === "cancelled") {
-            context.ui.notify("Add cancelled — nothing was installed.", "warning");
+            safeNotify(context, "Add cancelled — nothing was installed.", "warning");
           } else if (activation.data.kind === "rejected") {
-            context.ui.notify(`Adding was rejected — ${plainLifecycleFailure(activation.data.code)}.`, "error");
+            safeNotify(context, `Adding was rejected — ${plainLifecycleFailure(activation.data.code)}.`, "error");
           } else {
-            context.ui.notify("Things changed while installing — press a to try again.", "warning");
+            safeNotify(context, "Things changed while installing — press a to try again.", "warning");
           }
           done();
-          return;
         } catch (error) {
-          if (closingReason === "reload" || closed) return;
-          apply({ type: "busy", value: false });
-          context.ui.notify(error instanceof DOMException && error.name === "AbortError" ? "Install cancellation is waiting for owner truth." : "Install flow could not complete.", "warning");
+          phaseFailure(error);
         } finally {
-          port?.dispose();
-          runner.close(closingReason ?? "quit");
+          try { port?.dispose(); } catch (error) {
+            reportOperationalFailure("install input cleanup", error);
+            phaseFailure(error);
+          }
+          try { runner?.close(closingReason ?? "quit"); } catch (error) {
+            reportOperationalFailure("install runner cleanup", error);
+            phaseFailure(error);
+          }
           if (currentRunner === runner) currentRunner = undefined;
           if (activeRunner === runner) activeRunner = undefined;
         }
@@ -523,18 +580,25 @@ export function createPluginManagerSession(input: Readonly<{
           const activation = state.result;
           result = Object.freeze({ kind: "handled", presentation: "local" });
           done();
-        } else void runPhase(state.step === "choose-inspect" ? "open" : state.submission);
+        } else void runPhase(state.step === "choose-inspect" ? "open" : state.submission).catch(phaseFailure);
       };
 
       component = new PluginInstallComponent({ state, theme, keybindings, height: () => manager === undefined ? tui.terminal.rows : Math.max(4, tui.terminal.rows - 3), onEvent: apply, onAction: action });
       if (manager === undefined) activeClose = () => done();
       // The candidate was already reviewed in the manager detail pane; open
       // the install session immediately instead of staging a review screen.
-      queueMicrotask(() => action({ type: "continue" }));
+      queueMicrotask(() => {
+        try { action({ type: "continue" }); }
+        catch (error) { phaseFailure(error); }
+      });
       return component;
     });
     if (manager === undefined) activeClose = undefined;
-    currentRunner?.close(closingReason ?? "quit");
+    try { currentRunner?.close(closingReason ?? "quit"); }
+    catch (error) {
+      reportOperationalFailure("install flow cleanup", error);
+      safeNotify(context, "Install flow cleanup could not complete.", "warning");
+    }
     return result;
   }
 
@@ -725,24 +789,37 @@ export function createPluginManagerSession(input: Readonly<{
       return currentPresenter();
     },
     async close(reason: SessionShutdownEvent["reason"]): Promise<void> {
-      if (closed && activeController === undefined && activeClose === undefined) return;
+      if (closed && activeController === undefined && activeClose === undefined && activeRunner === undefined && activeOperationAbort === undefined) return;
       closed = true;
       closingReason = reason;
       presentationDetached = true;
-      activeClose?.();
-      activeRunner?.close(reason);
-      if (activeOperationAbort !== undefined && !(reason === "reload" && activeOperationReloadSafe)) {
-        activeOperationAbort.abort(new DOMException("plugin presentation closed", "AbortError"));
-      }
-      if (activeController !== undefined) {
-        completions = reason === "reload" ? activeController.dynamicCompletions() : Object.freeze([]);
-        await activeController.close(reason);
-      }
-      activeController = undefined;
-      activeRunner = undefined;
+      const close = activeClose;
+      const runner = activeRunner;
+      const operationAbort = activeOperationAbort;
+      const operationReloadSafe = activeOperationReloadSafe;
+      const controller = activeController;
+      // Revoke stale presentation handles before any await. Cleanup is
+      // best-effort per resource, but every failure remains observable in the
+      // aggregate returned to Pi's host-owned shutdown boundary.
       activeClose = undefined;
+      activeRunner = undefined;
+      activeOperationAbort = undefined;
+      activeController = undefined;
       bound = undefined;
       if (reason !== "reload") completions = Object.freeze([]);
+      await cleanupSequentially([
+        () => close?.(),
+        () => runner?.close(reason),
+        () => {
+          if (operationAbort !== undefined && !(reason === "reload" && operationReloadSafe)) {
+            operationAbort.abort(new DOMException("plugin presentation closed", "AbortError"));
+          }
+        },
+        () => {
+          if (controller !== undefined && reason === "reload") completions = controller.dynamicCompletions();
+        },
+        () => controller?.close(reason),
+      ], "plugin presentation cleanup failed");
     },
   };
   return Object.freeze(session);

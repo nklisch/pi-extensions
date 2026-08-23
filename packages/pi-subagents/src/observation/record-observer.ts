@@ -7,6 +7,7 @@
  * the caller forwards itself to its own lifecycle observer via onCompact.
  */
 
+import { runSafely } from "#src/debug";
 import type { SubagentState } from "#src/lifecycle/subagent-state";
 import type { CompactionInfo, SubscribableSession } from "#src/types";
 
@@ -34,45 +35,47 @@ export function subscribeSubagentObserver(
   options?: SubagentObserverOptions,
 ): () => void {
   return session.subscribe((event) => {
-    if (event.type === "tool_execution_start") {
-      state.addActiveTool(event.toolName);
-    }
+    runSafely("subagent session observer", () => {
+      if (event.type === "tool_execution_start") {
+        state.addActiveTool(event.toolName);
+      }
 
-    if (event.type === "tool_execution_end") {
-      state.removeActiveTool(event.toolName);
-      state.incrementToolUses();
-    }
+      if (event.type === "tool_execution_end") {
+        state.removeActiveTool(event.toolName);
+        state.incrementToolUses();
+      }
 
-    if (event.type === "message_start") {
-      state.resetResponseText();
-    }
+      if (event.type === "message_start") {
+        state.resetResponseText();
+      }
 
-    if (
-      event.type === "message_update" &&
-      event.assistantMessageEvent.type === "text_delta"
-    ) {
-      state.appendResponseText(event.assistantMessageEvent.delta);
-    }
+      if (
+        event.type === "message_update" &&
+        event.assistantMessageEvent.type === "text_delta"
+      ) {
+        state.appendResponseText(event.assistantMessageEvent.delta);
+      }
 
-    if (event.type === "turn_end") {
-      state.incrementTurnCount();
-    }
+      if (event.type === "turn_end") {
+        state.incrementTurnCount();
+      }
 
-    if (event.type === "message_end" && event.message.role === "assistant") {
-      const u = event.message.usage;
-      state.addUsage({
-        input: u.input,
-        output: u.output,
-        cacheWrite: u.cacheWrite,
-      });
-    }
+      if (event.type === "message_end" && event.message.role === "assistant") {
+        const u = event.message.usage;
+        state.addUsage({
+          input: u.input,
+          output: u.output,
+          cacheWrite: u.cacheWrite,
+        });
+      }
 
-    if (event.type === "compaction_end" && !event.aborted && event.result) {
-      state.incrementCompactions();
-      options?.onCompact?.({
-        reason: event.reason,
-        tokensBefore: event.result.tokensBefore,
-      });
-    }
+      if (event.type === "compaction_end" && !event.aborted && event.result) {
+        state.incrementCompactions();
+        options?.onCompact?.({
+          reason: event.reason,
+          tokensBefore: event.result.tokensBefore,
+        });
+      }
+    });
   });
 }

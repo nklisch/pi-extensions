@@ -99,7 +99,7 @@ export default function extension(pi: ExtensionAPI): void {
     const blockIndexes = textBlockIndexes(message.content);
     if (blockIndexes.length === 0) return;
 
-    ctx.ui.setStatus("legible", "✍ legible: rewriting…");
+    setStatusSafely(ctx, "✍ legible: rewriting…");
     try {
       // One rewrite call per text block, concurrently — keeps each block in
       // its original position relative to interleaved tool calls.
@@ -136,7 +136,11 @@ export default function extension(pi: ExtensionAPI): void {
       stashOriginals(state, message.timestamp, originals);
       return { message: { ...message, content: newContent } };
     } finally {
-      ctx.ui.setStatus("legible", undefined);
+      // The rewrite result is the primary event outcome. A session replacement
+      // can invalidate the captured UI context while the model call is in
+      // flight; stale status cleanup must not turn a successful rewrite into a
+      // rejected event.
+      setStatusSafely(ctx, undefined);
     }
   });
 
@@ -293,4 +297,13 @@ function notifyFailureOnce(ctx: ExtensionContext, state: LegibleState, reason: s
   if (state.failureNotified) return;
   state.failureNotified = true;
   ctx.ui.notify(`legible: rewrite failed, showing original (${reason}). Further failures this session will be silent.`, "warning");
+}
+
+function setStatusSafely(ctx: ExtensionContext, text: string | undefined): void {
+  try {
+    ctx.ui.setStatus("legible", text);
+  } catch {
+    // Status is auxiliary UI state. A stale context has no safe notification
+    // channel, and must not replace the rewrite or cleanup outcome.
+  }
 }

@@ -182,6 +182,20 @@ describe("/mode (no arg) — listing", () => {
     expect(msg.content).toContain("safe (default)");
     expect(msg.content).toContain("agency:collaborative");
   });
+
+  it("consumes a rejected panel send and reports it without rejecting the command", async () => {
+    buildFixture();
+    const { pi, handler } = getModeHandler();
+    const { ctx, notifies } = makeNotifyCtx();
+    (pi as unknown as { sendMessage: () => Promise<void> }).sendMessage = () =>
+      Promise.reject(new Error("session replaced"));
+
+    await expect(handler("", ctx)).resolves.toBeUndefined();
+    expect(notifies).toEqual([{
+      message: "/mode: status panel unavailable (session replaced)",
+      type: "error",
+    }]);
+  });
 });
 
 describe("/mode <preset> — set override", () => {

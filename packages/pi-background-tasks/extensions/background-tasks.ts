@@ -318,15 +318,73 @@ export default function backgroundTasksExtension(pi: PiApi): void {
   let nextId = 1;
   let shuttingDown = false;
 
-  function snapshot(): void {
-    pi.appendEntry?.("background-tasks", {
-      jobs: Array.from(jobs.values()).map((j) => ({
-        id: j.id,
-        kind: j.kind,
-        label: j.label,
-        command: j.command,
-        status: j.status,
-      })),
+  function errorText(error: unknown): string {
+    try {
+      return error instanceof Error ? error.message : String(error);
+    } catch {
+      return "unprintable error";
+    }
+  }
+
+  /**
+   * Detached callbacks have no host-owned tool/event promise boundary. Record
+   * their failures in the job output (where the agent can retrieve them) and
+   * stderr, but never let them escape into Node's EventEmitter/timer machinery.
+   */
+  function recordOperationalError(job: Job | undefined, operation: string, error: unknown): void {
+    const diagnostic = `[background-tasks] ${operation} failed: ${errorText(error)}`;
+    try {
+      if (job) appendBuffer(job, `\n${diagnostic}\n`);
+    } catch {
+      // The final containment boundary must remain total even under memory
+      // pressure or a damaged record.
+    }
+    try {
+      console.error(diagnostic);
+    } catch {
+      // stderr can itself be unavailable during process teardown.
+    }
+  }
+
+  function guarded(job: Job | undefined, operation: string, callback: () => void): void {
+    try {
+      callback();
+    } catch (error) {
+      recordOperationalError(job, operation, error);
+    }
+  }
+
+  function runDetached(job: Job | undefined, operation: string, callback: () => Promise<void>): void {
+    const fail = (error: unknown): void => {
+      recordOperationalError(job, operation, error);
+      if (!job || job.status !== "running") return;
+      job.polling = false;
+      job.status = "failed";
+      wake(
+        `[${job.kind} #${job.id} "${job.label}" stopped after an internal ${operation} failure]. Read the diagnostic with the jobs tool (action=tail, jobId=${job.id}).`,
+        {},
+        job,
+      );
+      finalize(job);
+    };
+    try {
+      void callback().catch(fail);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  function snapshot(job?: Job): void {
+    guarded(job, "persisting job registry", () => {
+      pi.appendEntry?.("background-tasks", {
+        jobs: Array.from(jobs.values()).map((j) => ({
+          id: j.id,
+          kind: j.kind,
+          label: j.label,
+          command: j.command,
+          status: j.status,
+        })),
+      });
     });
   }
 
@@ -354,8 +412,8 @@ export default function backgroundTasksExtension(pi: PiApi): void {
   /** The last ctx.ui seen by any tool call — used to refresh visuals from async callbacks. */
   let lastUi: UiContext | undefined;
 
-  function refreshVisuals(): void {
-    updateStatus(lastUi);
+  function refreshVisuals(job?: Job): void {
+    guarded(job, "refreshing background status", () => updateStatus(lastUi));
   }
 
   /**
@@ -364,7 +422,7 @@ export default function backgroundTasksExtension(pi: PiApi): void {
    * which is attacker-controlled. The agent reads the actual output on demand
    * via the jobs tool (tail/view). Returns void; the wake is best-effort.
    */
-  function wake(message: string, details: Record<string, unknown> = {}): void {
+  function wake(message: string, details: Record<string, unknown> = {}, job?: Job): void {
     if (shuttingDown) return; // don't trigger turns during/after shutdown
     const tail = message.split("\n")[0];
     const wakeDetails = { source: "background-tasks", trusted: true, ...details };
@@ -386,28 +444,30 @@ export default function backgroundTasksExtension(pi: PiApi): void {
             },
             { triggerTurn: true, deliverAs: "steer" },
           ),
-        ).catch((err) => {
-          console.error(`[background-tasks] wake failed: ${(err as Error).message}`);
+        ).catch((error) => {
+          recordOperationalError(job, "waking the agent", error);
         });
       } else if (lastUi?.notify) {
         lastUi.notify(`${tail} (auto-wake unavailable: pi.sendMessage missing)`, "info");
       } else {
         console.error(`[background-tasks] wake (no channel): ${tail}`);
       }
-    } catch (err) {
-      console.error(`[background-tasks] wake threw: ${(err as Error).message}`);
+    } catch (error) {
+      recordOperationalError(job, "waking the agent", error);
     }
   }
 
-  function notify(level: "info" | "success" | "warning" | "error", message: string): void {
-    lastUi?.notify?.(message, level);
+  function notify(level: "info" | "success" | "warning" | "error", message: string, job?: Job): void {
+    guarded(job, "notifying the user", () => lastUi?.notify?.(message, level));
   }
 
   function finalize(job: Job): void {
     job.endedAt = Date.now();
-    snapshot();
+    // Session-bound Pi/UI objects are revoked at shutdown. Late process events
+    // may still complete plain in-memory state, but must not touch those APIs.
+    if (!shuttingDown) snapshot(job);
     pruneTerminal();
-    refreshVisuals();
+    if (!shuttingDown) refreshVisuals(job);
   }
 
   /**
@@ -546,13 +606,15 @@ export default function backgroundTasksExtension(pi: PiApi): void {
         // Trusted wake: no command output, just id + the matched fact.
         wake(
           `[background job #${job.id} "${label}" matched its wake_on_pattern — still running]. Read output with the jobs tool (action=tail, jobId=${job.id}).`,
+          {},
+          job,
         );
       }
     };
-    child.stdout?.on("data", handleChunk);
-    child.stderr?.on("data", handleChunk);
+    child.stdout?.on("data", (data) => guarded(job, "capturing stdout", () => handleChunk(data)));
+    child.stderr?.on("data", (data) => guarded(job, "capturing stderr", () => handleChunk(data)));
 
-    child.on("exit", (code, signal) => {
+    child.on("exit", (code, signal) => guarded(job, "handling process exit", () => {
       if (job.status === "cancelled" || job.status === "kill_failed") return; // cancellation owns terminal state
       if (job.status === "cancelling") {
         // Reaped during cancellation (SIGTERM or SIGKILL worked) — mark cancelled.
@@ -566,26 +628,30 @@ export default function backgroundTasksExtension(pi: PiApi): void {
       const ok = code === 0;
       job.status = ok ? "completed" : "failed";
       const reason = signal ? `signal ${signal}` : `exit ${code ?? "?"}`;
-      notify(ok ? "success" : "error", `background job #${job.id} "${label}" finished: ${reason}`);
+      notify(ok ? "success" : "error", `background job #${job.id} "${label}" finished: ${reason}`, job);
       // Trusted wake: only id, label, and the status word. NO command output.
       wake(
         `[background job #${job.id} "${label}" finished: ${reason}]. Read its output with the jobs tool (action=tail, jobId=${job.id}).`,
+        {},
+        job,
       );
       finalize(job);
-    });
-    child.on("error", (err) => {
+    }));
+    child.on("error", (error) => guarded(job, "handling process error", () => {
       if (job.status !== "running" && job.status !== "cancelling") return;
       job.status = "failed";
-      notify("error", `background job #${job.id} "${label}" failed to spawn: ${err.message}`);
+      notify("error", `background job #${job.id} "${label}" failed to spawn: ${error.message}`, job);
       wake(
-        `[background job #${job.id} "${label}" failed to spawn: ${err.message}]. No command output was produced.`,
+        `[background job #${job.id} "${label}" failed to spawn: ${error.message}]. No command output was produced.`,
+        {},
+        job,
       );
       finalize(job);
-    });
+    }));
 
     jobs.set(job.id, job);
-    snapshot();
-    refreshVisuals();
+    snapshot(job);
+    refreshVisuals(job);
 
     const patternNote = wakeOnPattern
       ? `, or earlier the first time output matches /${wakePatternRaw}/`
@@ -616,6 +682,9 @@ export default function backgroundTasksExtension(pi: PiApi): void {
       };
     }
     const label = params.label ? String(params.label) : slugify(command);
+    // Capture plain data while the tool context is current. Delayed polls must
+    // never dereference a session-bound context after replacement or reload.
+    const cwd = ctx.cwd ?? process.cwd();
     const rawInterval = Number(params.interval_seconds ?? DEFAULT_MONITOR_INTERVAL_S);
     const intervalSeconds = Number.isFinite(rawInterval) && rawInterval >= MIN_MONITOR_INTERVAL_S
       ? rawInterval
@@ -659,8 +728,8 @@ export default function backgroundTasksExtension(pi: PiApi): void {
       pattern: patternRaw,
     };
     jobs.set(job.id, job);
-    snapshot();
-    refreshVisuals();
+    snapshot(job);
+    refreshVisuals(job);
 
     const evaluate = (out: string, code: number | null | undefined): boolean => {
       switch (satisfyOn) {
@@ -693,7 +762,7 @@ export default function backgroundTasksExtension(pi: PiApi): void {
         // tool's `spawn(command, { shell: "/bin/sh" })`.
         result = await pi.exec!("/bin/sh", ["-c", command], {
           timeout: Math.max(5, intervalSeconds) * 1000,
-          cwd: ctx.cwd ?? process.cwd(),
+          cwd,
         });
       } catch (err) {
         result = { stderr: (err as Error).message, code: null };
@@ -724,9 +793,11 @@ export default function backgroundTasksExtension(pi: PiApi): void {
         job.exitCode = result.code ?? undefined;
         job.status = "timeout";
         const hint = `every poll failed to run its command (command not found in stderr). The poll command likely references a missing/typo'd binary or tool`;
-        notify("error", `monitor #${job.id} "${label}" aborting: ${hint}. Check the poll command.`);
+        notify("error", `monitor #${job.id} "${label}" aborting: ${hint}. Check the poll command.`, job);
         wake(
           `[monitor #${job.id} "${label}" aborted after ${job.pollFailures} consecutive broken polls: ${hint}. Read the last poll with the jobs tool (action=tail, jobId=${job.id}) and fix the command.`,
+          {},
+          job,
         );
         finalize(job);
         return;
@@ -735,10 +806,12 @@ export default function backgroundTasksExtension(pi: PiApi): void {
       if (evaluate(result.stdout ?? "", result.code)) {
         job.exitCode = result.code ?? undefined;
         job.status = "satisfied";
-        notify("success", `monitor #${job.id} "${label}" satisfied (${satisfyOn})`);
+        notify("success", `monitor #${job.id} "${label}" satisfied (${satisfyOn})`, job);
         // Trusted wake: no command output.
         wake(
           `[monitor #${job.id} "${label}" satisfied: ${satisfyOn}, exit ${result.code ?? "?"}]. Read the result with the jobs tool (action=tail, jobId=${job.id}).`,
+          {},
+          job,
         );
         finalize(job);
         return;
@@ -746,19 +819,25 @@ export default function backgroundTasksExtension(pi: PiApi): void {
       if (Date.now() >= (job.deadline ?? 0)) {
         job.exitCode = result.code ?? undefined;
         job.status = "timeout";
-        notify("warning", `monitor #${job.id} "${label}" timed out after ${timeoutSeconds}s`);
+        notify("warning", `monitor #${job.id} "${label}" timed out after ${timeoutSeconds}s`, job);
         wake(
           `[monitor #${job.id} "${label}" timed out after ${timeoutSeconds}s without satisfying ${satisfyOn}]. Read the last poll with the jobs tool (action=tail, jobId=${job.id}).`,
+          {},
+          job,
         );
         finalize(job);
         return;
       }
       // Schedule the NEXT poll only after this one finished -> no overlap.
-      job.timer = setTimeout(() => void tick(), intervalSeconds * 1000);
+      job.timer = setTimeout(
+        () => runDetached(job, "running monitor poll", tick),
+        intervalSeconds * 1000,
+      );
     };
 
-    // First tick immediately so short conditions resolve fast.
-    void tick();
+    // First tick immediately so short conditions resolve fast. A monitor poll
+    // runs outside Pi's awaited tool boundary, so contain every rejection here.
+    runDetached(job, "running monitor poll", tick);
 
     return {
       content: [
@@ -972,12 +1051,20 @@ export default function backgroundTasksExtension(pi: PiApi): void {
   // Await cancellations so SIGTERM/SIGKILL escalation actually completes before
   // the process tears down (a fire-and-forget timer could be killed mid-escalate).
   pi.on?.("session_shutdown", async () => {
+    // Set the fence before the first await. Any process event that arrives
+    // during teardown may finish its in-memory state, but must not start a new
+    // turn. Clear the retained UI before Pi invalidates this extension context.
     shuttingDown = true;
-    await Promise.all(
-      Array.from(jobs.values())
-        .filter((j) => j.status === "running" || j.status === "cancelling")
-        .map((j) => cancelJob(j)),
+    lastUi = undefined;
+    const active = Array.from(jobs.values()).filter(
+      (job) => job.status === "running" || job.status === "cancelling",
     );
+    const outcomes = await Promise.allSettled(active.map((job) => cancelJob(job)));
+    outcomes.forEach((outcome, index) => {
+      if (outcome.status === "rejected") {
+        recordOperationalError(active[index], "cancelling job during session shutdown", outcome.reason);
+      }
+    });
   });
 }
 

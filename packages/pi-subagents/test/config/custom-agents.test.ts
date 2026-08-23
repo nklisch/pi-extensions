@@ -217,6 +217,23 @@ Second agent.`);
     expect(result.has("agent2")).toBe(true);
   });
 
+  it("skips malformed frontmatter and continues discovery", () => {
+    writeAgent("broken", `---
+description: [unterminated
+---
+
+Broken.`);
+    writeAgent("valid", `---
+description: Valid
+---
+
+Valid.`);
+
+    const result = loadCustomAgents(tmpDir);
+    expect(result.has("broken")).toBe(false);
+    expect(result.get("valid")?.description).toBe("Valid");
+  });
+
   it("skips non-.md files", () => {
     const dir = join(tmpDir, ".pi", "agents");
     mkdirSync(dir, { recursive: true });

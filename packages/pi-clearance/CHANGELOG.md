@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.5
+
+### Fixed
+
+- Contain raw package-registration and command-transform event listeners, native settings UI callbacks, session cleanup, hostile tool inputs, and native policy finalizers. Independent failures remain observable without suppressing later cleanup or policy decisions.
+- Preserve structured config-write results when temporary-file cleanup fails, and validate persisted allow-request details before transcript rendering.
+
 ## v0.2.4
 
 ### Changed

@@ -201,6 +201,23 @@ describe("createSubagentSession — lifecycle ordering", () => {
 });
 
 describe("createSubagentSession — dispose on creation failure", () => {
+  it("disposes the session when session-created publication throws", async () => {
+    const session = createFactorySession();
+    io.createSession.mockResolvedValue({ session });
+    const lifecycle = createChildLifecycleMock();
+    lifecycle.sessionCreated.mockImplementation(() => { throw new Error("listener failed"); });
+
+    await expect(
+      createSubagentSession(
+        { snapshot: STUB_SNAPSHOT, type: "Explore" },
+        createSubagentSessionDeps({ io, exec, registry: mockAgentLookup, lifecycle }),
+      ),
+    ).rejects.toThrow("listener failed");
+
+    expect(session.dispose).toHaveBeenCalledOnce();
+    expect(lifecycle.disposed).toHaveBeenCalledOnce();
+  });
+
   it("disposes the session and emits disposed when bindExtensions throws, then rethrows", async () => {
     const session = createFactorySession();
     session.bindExtensions = vi.fn().mockRejectedValue(new Error("bind failed"));

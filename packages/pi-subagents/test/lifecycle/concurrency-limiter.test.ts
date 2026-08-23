@@ -114,6 +114,17 @@ describe("ConcurrencyLimiter", () => {
 
 			expect(next.task).toHaveBeenCalledOnce();
 		});
+
+		it("contains a synchronous task throw and still drains the next task", async () => {
+			const limiter = new ConcurrencyLimiter(() => 1);
+			const next = makeTask();
+			const scheduled = limiter.schedule(() => { throw new Error("sync boom"); });
+			void limiter.schedule(next.task);
+
+			await expect(scheduled).rejects.toThrow("sync boom");
+			await Promise.resolve();
+			expect(next.task).toHaveBeenCalledOnce();
+		});
 	});
 
 	describe("recheck()", () => {

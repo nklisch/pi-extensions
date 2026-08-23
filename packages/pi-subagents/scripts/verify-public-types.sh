@@ -3,7 +3,7 @@
 # exactly as an external developer would consume it — no workspace privileges,
 # no publish round-trip.
 #
-#   1. pnpm pack       — triggers prepack -> build:types -> dist/public.d.ts
+#   1. npm pack        — triggers prepack -> build -> dist/public.d.ts
 #   2. self-containment guard — the emitted .d.ts carries no #src/* aliases
 #   3. install the tarball into a throwaway consumer and run tsc against it
 set -euo pipefail
@@ -14,7 +14,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 # --- 1. Pack the real tarball (prepack regenerates the declaration) --------
-pnpm --dir "$PKG_DIR" pack --pack-destination "$WORK" >/dev/null
+(cd "$PKG_DIR" && npm pack --pack-destination "$WORK" --silent >/dev/null)
 TARBALL="$(ls "$WORK"/*.tgz | head -n1)"
 echo "Packed: $(basename "$TARBALL")"
 
@@ -129,15 +129,12 @@ void config;
 TS
 
 # Install the packaged tarball plus the peer deps a real consumer would have.
-# --ignore-scripts: a type-check needs no dependency build scripts, and it
-# avoids ERR_PNPM_IGNORED_BUILDS in the isolated (--ignore-workspace) consumer,
-# which does not inherit the workspace allowBuilds approvals.
-pnpm --dir "$CONSUMER" --ignore-workspace --ignore-scripts add \
+# A type-check needs no dependency build scripts or throwaway lockfile.
+npm install --prefix "$CONSUMER" --ignore-scripts --no-package-lock --silent \
   "$TARBALL" \
   "@earendil-works/pi-ai@>=0.75.0" \
   "@earendil-works/pi-coding-agent@>=0.75.0" \
-  "@earendil-works/pi-tui@>=0.75.0" \
-  >/dev/null
+  "@earendil-works/pi-tui@>=0.75.0"
 
 # Update the tsconfig to include both probe files.
 cat > "$CONSUMER/tsconfig.json" <<'JSON'
@@ -154,8 +151,9 @@ cat > "$CONSUMER/tsconfig.json" <<'JSON'
 }
 JSON
 
-# Use the workspace TypeScript against the consumer project; module resolution
+# Use the package's TypeScript against the consumer project; module resolution
 # starts from the probe files, so the tarball and peers resolve from the consumer's
 # own node_modules via the package's exports "types" condition.
-pnpm --dir "$PKG_DIR" exec tsc -p "$CONSUMER/tsconfig.json"
+TSC="$(node -e 'console.log(require.resolve("typescript/bin/tsc", { paths: [process.argv[1]] }))' "$PKG_DIR")"
+node "$TSC" -p "$CONSUMER/tsconfig.json"
 echo "OK: external consumer type-checks against the packaged $PACKAGE_NAME"

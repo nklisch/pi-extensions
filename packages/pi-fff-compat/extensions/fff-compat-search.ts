@@ -26,6 +26,7 @@ import { statSync } from "node:fs";
 import path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { createGenerationGuardedFinderLifecycle } from "./finder-lifecycle.js";
 
 const EXTENSION_NAME = "pi-fff-compat";
 const PACKAGE_HINT = "bundled dependency of @nklisch/pi-fff-compat";
@@ -154,9 +155,6 @@ type Truncation = {
 };
 
 let fffModulePromise: Promise<FffModule> | null = null;
-let finder: FffFinder | null = null;
-let finderCwd: string | null = null;
-let finderPromise: { cwd: string; promise: Promise<FffFinder> } | null = null;
 let activeCwd = process.cwd();
 
 function envFlagEnabled(value: string | undefined): boolean {
@@ -195,7 +193,7 @@ function loadFffModule(): Promise<FffModule> {
   if (!fffModulePromise) {
     fffModulePromise = (async () => {
       try {
-        return (await import("@ff-labs/fff-node")) as FffModule;
+        return (await import("@ff-labs/fff-node")) as unknown as FffModule;
       } catch (error) {
         throw new Error(
           `Failed to load @ff-labs/fff-node (${PACKAGE_HINT}): ${error instanceof Error ? error.message : String(error)}`,
@@ -206,44 +204,38 @@ function loadFffModule(): Promise<FffModule> {
   return fffModulePromise;
 }
 
-async function ensureFinder(cwd: string): Promise<FffFinder> {
-  if (finder && !finder.isDestroyed && finderCwd === cwd) return finder;
-  if (finderPromise && finderPromise.cwd === cwd) return finderPromise.promise;
+const finderLifecycle = createGenerationGuardedFinderLifecycle<FffFinder>(async (cwd) => {
+  const { FileFinder } = await loadFffModule();
+  const created = FileFinder.create({
+    basePath: cwd,
+    frecencyDbPath: process.env.FFF_FRECENCY_DB,
+    historyDbPath: process.env.FFF_HISTORY_DB,
+    aiMode: true,
+    enableHomeDirScanning: envFlagEnabled(process.env[HOME_SCAN_ENV]),
+    enableFsRootScanning: envFlagEnabled(process.env.FFF_ENABLE_ROOT_SCAN),
+    disableWatch: envFlagEnabled(process.env[DISABLE_WATCH_ENV]),
+  });
+  if (!created.ok) throw new Error(`Failed to create FFF finder: ${created.error}`);
 
-  finderPromise = {
-    cwd,
-    promise: (async () => {
-      destroyFinder();
-      const { FileFinder } = await loadFffModule();
-      const created = FileFinder.create({
-        basePath: cwd,
-        frecencyDbPath: process.env.FFF_FRECENCY_DB,
-        historyDbPath: process.env.FFF_HISTORY_DB,
-        aiMode: true,
-        enableHomeDirScanning: envFlagEnabled(process.env[HOME_SCAN_ENV]),
-        enableFsRootScanning: envFlagEnabled(process.env.FFF_ENABLE_ROOT_SCAN),
-        disableWatch: envFlagEnabled(process.env[DISABLE_WATCH_ENV]),
-      });
-      if (!created.ok) throw new Error(`Failed to create FFF finder: ${created.error}`);
+  const candidate = created.value;
+  try {
+    const scan = await candidate.waitForScan(INITIAL_SCAN_WAIT_MS);
+    if (!scan.ok) throw new Error(`FFF scan failed: ${scan.error}`);
+    return candidate;
+  } catch (error) {
+    if (!candidate.isDestroyed) {
+      try {
+        candidate.destroy();
+      } catch {
+        // Preserve the scan/create failure; lifecycle cleanup is best effort.
+      }
+    }
+    throw error;
+  }
+});
 
-      finder = created.value;
-      finderCwd = cwd;
-
-      const scan = await finder.waitForScan(INITIAL_SCAN_WAIT_MS);
-      if (!scan.ok) throw new Error(`FFF scan failed: ${scan.error}`);
-      return finder;
-    })().finally(() => {
-      finderPromise = null;
-    }),
-  };
-
-  return finderPromise.promise;
-}
-
-function destroyFinder(): void {
-  if (finder && !finder.isDestroyed) finder.destroy();
-  finder = null;
-  finderCwd = null;
+function ensureFinder(cwd: string): Promise<FffFinder> {
+  return finderLifecycle.ensure(cwd);
 }
 
 function truncateLine(line: string): { text: string; wasTruncated: boolean } {
@@ -408,6 +400,21 @@ const findSchema = Type.Object({
   limit: Type.Optional(Type.Number({ description: `Maximum number of results (default ${DEFAULT_FIND_LIMIT})` })),
 });
 
+function reportInitializationFailure(ctx: ExtensionContext, error: unknown): void {
+  let detail = "unknown failure";
+  try { detail = error instanceof Error ? error.message : String(error); }
+  catch { detail = "unreadable failure"; }
+  const message = `${EXTENSION_NAME} init failed: ${detail}`;
+  try {
+    ctx.ui.notify(message, "error");
+  } catch {
+    // Initialization can settle after session replacement. The old UI is then
+    // intentionally stale, so fall back to a process diagnostic without
+    // allowing either reporting sink to escape the awaited host boundary.
+    try { console.error(message); } catch { /* no safe reporting sink remains */ }
+  }
+}
+
 const grepSchema = Type.Object({
   pattern: Type.String({ description: "Search pattern" }),
   path: Type.Optional(Type.String({ description: "Directory or file to search in (default: current directory)" })),
@@ -449,12 +456,12 @@ export default function fffCompatSearch(pi: ExtensionAPI) {
     try {
       await ensureFinder(activeCwd);
     } catch (error) {
-      ctx.ui.notify(`${EXTENSION_NAME} init failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+      reportInitializationFailure(ctx, error);
     }
   });
 
   pi.on("session_shutdown", async () => {
-    destroyFinder();
+    finderLifecycle.revoke();
   });
 
   pi.registerTool({

@@ -22,7 +22,7 @@ import {
 import { McpServerManager } from "./server-manager.ts";
 import { buildToolMetadata, totalToolCount } from "./tool-metadata.ts";
 import { UiResourceHandler } from "./ui-resource-handler.ts";
-import { formatMcpStatus, openUrl, parallelLimit, sanitizeTerminalText } from "./utils.ts";
+import { formatMcpStatus, formatTerminalError, openUrl, parallelLimit, sanitizeTerminalText, truncateAtWord } from "./utils.ts";
 import { logger } from "./logger.ts";
 import { throwIfAborted } from "./abort.ts";
 import { getAuthStorageOptions } from "./mcp-auth.ts";
@@ -64,16 +64,20 @@ export function recordFailure(state: McpExtensionState, serverName: string, mess
   state.failureTracker.set(serverName, failedAt);
   state.failureMessages?.set(serverName, message.slice(0, MAX_FAILURE_MESSAGE_CHARS));
   const timer = setTimeout(() => {
-    if (!state.owner.isActive()) {
+    try {
+      if (!state.owner.isActive()) return;
+      if (state.failureTracker.get(serverName) === failedAt) {
+        state.failureTracker.delete(serverName);
+        state.failureMessages?.delete(serverName);
+        publishMcpStatusSnapshot(state);
+      }
+    } catch (error) {
+      // Failure expiry runs as a detached timer; status publication must not
+      // turn a secondary observer failure into an uncaught host exception.
+      logger.error(`MCP failure expiry callback failed: ${truncateAtWord(formatTerminalError(error), 1_024) || "unknown error"}`);
+    } finally {
       getFailureExpiryTimers(state).delete(serverName);
-      return;
     }
-    if (state.failureTracker.get(serverName) === failedAt) {
-      state.failureTracker.delete(serverName);
-      state.failureMessages?.delete(serverName);
-      publishMcpStatusSnapshot(state);
-    }
-    getFailureExpiryTimers(state).delete(serverName);
   }, FAILURE_BACKOFF_MS);
   timer.unref?.();
   getFailureExpiryTimers(state).set(serverName, timer);

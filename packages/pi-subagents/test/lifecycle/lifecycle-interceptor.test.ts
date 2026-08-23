@@ -74,6 +74,21 @@ function control(registry: LifecycleInterceptorRegistry, signal = new AbortContr
 }
 
 describe("LifecycleInterceptorRegistry", () => {
+  it("rejects null registrations instead of deferring the failure to invocation", () => {
+    const registry = new LifecycleInterceptorRegistry();
+    expect(() => registry.register(null as never)).toThrow(/interceptor object/i);
+  });
+
+  it("consumes a rejecting provider disposer without rejecting the registration handle", async () => {
+    const registry = new LifecycleInterceptorRegistry();
+    const registration = registry.register({
+      dispose: () => Promise.reject(new Error("dispose failed")),
+    });
+
+    await expect(registration.dispose()).resolves.toBeUndefined();
+    await registry.dispose();
+  });
+
   it("runs sequentially, pipes exact prompt/result replacements, and preserves immutable identity", async () => {
     const registry = new LifecycleInterceptorRegistry();
     const calls: string[] = [];

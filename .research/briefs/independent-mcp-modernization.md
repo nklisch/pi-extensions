@@ -6,7 +6,7 @@ updated: 2026-08-06
 source_handles: [pi-mcp-adapter-2-20-1, pi-mcp-adapter-post-2-20-1]
 relationships:
   - type: informs
-    target: .work/active/epic-independent-mcp-modernization.md
+    target: .work/releases/prepared-packages-2026-08-06.md
   - type: informs
     target: packages/pi-mcp-adapter/docs/VISION.md
 ---

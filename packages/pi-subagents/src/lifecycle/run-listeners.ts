@@ -6,6 +6,8 @@
  * both atomically when the run ends or the agent is resumed.
  */
 
+import { runSafely } from "#src/debug";
+
 /** Owns the per-run observer-unsubscribe and signal-detach handles. */
 export class RunListeners {
 	private unsub?: () => void;
@@ -29,9 +31,11 @@ export class RunListeners {
 
 	/** Release the observer + signal handles. Idempotent. */
 	release(): void {
-		this.unsub?.();
+		const unsub = this.unsub;
 		this.unsub = undefined;
-		this.detach?.();
+		const detach = this.detach;
 		this.detach = undefined;
+		runSafely("subagent observer unsubscribe", () => unsub?.());
+		runSafely("subagent abort listener detach", () => detach?.());
 	}
 }
