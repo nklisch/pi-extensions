@@ -759,7 +759,11 @@ The extension factory registers:
 `session_start` runs migration, loads local state, performs runtime
 reconstruction, and runs bounded startup convergence without blocking on
 network access. It also schedules update-availability checks after the local
-runtime is ready.
+runtime is ready. After startup settles, the host publishes a short agent
+orientation into session context (installed plugins with version, marketplace,
+and component availability, plus degraded status) and regenerates the
+scope-aware `generated/agent-brief.md` detail files; orientation is
+informational and never blocks or fails startup.
 
 `resources_discover` contributes active skill roots.
 
