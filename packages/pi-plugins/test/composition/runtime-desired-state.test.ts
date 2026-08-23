@@ -58,6 +58,51 @@ describe("runtime desired state", () => {
     expect(result.skillHook.currentProject.trust.kind).toBe("untrusted");
   });
 
+  it("surfaces an MCP candidate receipt failure only for enabled MCP plugins", async () => {
+    const record = {
+      plugin: "mcp-demo@community",
+      activation: "enabled",
+      selectedRevision: `sha256:${"a".repeat(64)}`,
+      revisions: [{
+        revision: `sha256:${"a".repeat(64)}`,
+        evidence: { components: [{ kind: "mcp-server" }] },
+      }],
+    };
+    const currentProject = { identity, projectKey, trust: { kind: "untrusted" as const } };
+    const result = await buildRuntimeDesiredState({
+      installed: { load: vi.fn() },
+      compatibility: { assess: vi.fn() },
+      projections: { prepare: vi.fn(), read: vi.fn() },
+      project: { scope: projectScope, current: () => currentProject, revalidate: async () => currentProject } as never,
+      state: {
+        async read() {
+          return {
+            ok: true as const,
+            snapshot: {
+              scope: { kind: "user" as const }, generation: 0 as never, pointers: pointers(),
+              config: { schemaVersion: 2 as const, generation: 0 as never, records: [] },
+              installed: { schemaVersion: 2 as const, generation: 0 as never, marketplaces: [], plugins: [record] },
+              trust: { schemaVersion: 1 as const, generation: 0 as never, records: [] },
+              corruptions: [],
+            },
+          };
+        },
+      } as never,
+      mcpUnavailable: {
+        code: "PACKAGE_DRIFT",
+        explanation: "The installed MCP adapter package does not match the required release.",
+      },
+      userBaseDirectory: "/workspace",
+      sha256,
+    }, new AbortController().signal);
+    expect(result.degraded).toMatchObject([{
+      plugin: "mcp-demo@community",
+      code: "MCP_RUNTIME_UNAVAILABLE",
+      explanation: "MCP runtime is unavailable: The installed MCP adapter package does not match the required release. (PACKAGE_DRIFT)",
+    }]);
+    expect(result.selections).toEqual([]);
+  });
+
   it("builds the runtime from committed pending candidates so recovery settles with observations", async () => {
     // A pending transition is a committed candidate awaiting activation:
     // reconstruction must activate it (recording an observation), not exclude

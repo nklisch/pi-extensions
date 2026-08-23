@@ -17,12 +17,16 @@ export default async function packagedPluginHostExtension(pi: ExtensionAPI): Pro
   // context is available when central qualification captures environment-aware
   // facts. It starts empty; authoritative full-bundle reconciliation remains
   // the only source publication path.
-  const mcp = await createProductionMcpRuntimeCandidate();
-  mcp?.extension(pi);
+  const mcpCandidate = await createProductionMcpRuntimeCandidate();
+  if (mcpCandidate.kind === "verified") mcpCandidate.adapter.extension(pi);
   // Host construction registers its lifecycle delegates before presentation.
+  // Keep the candidate's fixed explanation, but never forward its native cause
+  // into status, doctor, or any other serialized host surface.
   const host = createPackagedPluginHost({
     pi,
-    ...(mcp === undefined ? {} : { runtime: { mcp: mcp.runtime } }),
+    runtime: mcpCandidate.kind === "verified"
+      ? { mcp: mcpCandidate.adapter.runtime }
+      : { mcpUnavailable: { code: mcpCandidate.code, explanation: mcpCandidate.explanation } },
     update: { publisher },
   });
   const handoff = createPiManagerReloadHandoff();

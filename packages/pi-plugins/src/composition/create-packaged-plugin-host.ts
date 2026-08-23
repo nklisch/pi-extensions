@@ -197,6 +197,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           nodeVersion: process.versions.node,
           piVersion: PI_VERSION,
           ...(options.runtime?.mcp === undefined ? {} : { mcp: options.runtime.mcp }),
+          ...(options.runtime?.mcpUnavailable === undefined ? {} : { mcpUnavailable: options.runtime.mcpUnavailable }),
           ...(subagentLifecycle === undefined ? {} : { subagents: subagentLifecycle }),
           signal: startupSignal,
         });
@@ -294,6 +295,9 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
               projections,
               project,
               ...(qualification.mcp.runtime === undefined ? {} : { mcp: qualification.mcp.runtime }),
+              ...(qualification.mcp.status === "unavailable" && qualification.mcp.code !== undefined
+                ? { mcpUnavailable: { code: qualification.mcp.code, explanation: qualification.mcp.explanation } }
+                : {}),
               state: state.state,
               content: content.content,
               userBaseDirectory: binding.current().cwd,

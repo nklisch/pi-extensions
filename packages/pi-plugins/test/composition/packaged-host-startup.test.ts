@@ -51,6 +51,38 @@ describe("explicit packaged host startup", () => {
     await startup.close();
   });
 
+  it("keeps an unavailable MCP capability quiet when no enabled plugin needs MCP", () => {
+    const result = startupResult({
+      blocked: [],
+      mcp: { status: "unavailable", explanation: "MCP runtime unavailable (PACKAGE_DRIFT): receipt mismatch" },
+      subagents: capabilities.subagents,
+      piReload: capabilities.piReload,
+      secrets: "unavailable",
+    });
+    expect(result.status).toBe("ready");
+    expect(result.capabilities.mcp.explanation).toContain("PACKAGE_DRIFT");
+  });
+
+  it("marks an enabled MCP plugin degraded when the candidate attach failed", () => {
+    const result = startupResult({
+      blocked: [{
+        plugin: "demo@community",
+        scope: { kind: "user" },
+        selectedRevision: `sha256:${"a".repeat(64)}`,
+        code: "MCP_RUNTIME_UNAVAILABLE",
+        explanation: "MCP runtime is unavailable: receipt mismatch (PACKAGE_DRIFT)",
+      }],
+      mcp: { status: "unavailable", explanation: "MCP runtime unavailable (PACKAGE_DRIFT): receipt mismatch" },
+      subagents: capabilities.subagents,
+      piReload: capabilities.piReload,
+      secrets: "unavailable",
+    });
+    expect(result).toMatchObject({
+      status: "degraded",
+      blocked: [{ code: "MCP_RUNTIME_UNAVAILABLE", explanation: expect.stringContaining("PACKAGE_DRIFT") }],
+    });
+  });
+
   it("returns local readiness before detached background adapters settle", async () => {
     let backgroundStarted = false;
     const startup = createPackagedHostStartup({

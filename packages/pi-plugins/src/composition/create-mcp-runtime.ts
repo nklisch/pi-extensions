@@ -6,8 +6,10 @@ import { createInactiveProjectionExpectation } from "../application/ports/runtim
 import type { Sha256 } from "../domain/source.js";
 import type { PiProjectContextAdapters } from "../pi/pi-project-context.js";
 import { createTrustedMcpLaunchValueProvider } from "../runtime/mcp/launch-value-provider.js";
-import { createVerifiedPiMcpRuntimeCandidate } from "../runtime/mcp/pi-mcp-adapter-package.js";
-import type { PiMcpRuntimeAdapter } from "../runtime/mcp/pi-mcp-adapter-runtime.js";
+import {
+  createVerifiedPiMcpRuntimeCandidate,
+  type PiMcpRuntimeCandidate,
+} from "../runtime/mcp/pi-mcp-adapter-package.js";
 import {
   createMcpLifecycleParticipant,
   type McpLifecycleParticipant,
@@ -34,7 +36,7 @@ export type ComposedMcpRuntime = Readonly<{
  * Central runtime qualification remains the single authority that can admit it;
  * an empty initial set preserves full-bundle reconciliation as source authority.
  */
-export function createProductionMcpRuntimeCandidate(): Promise<PiMcpRuntimeAdapter | undefined> {
+export function createProductionMcpRuntimeCandidate(): Promise<PiMcpRuntimeCandidate> {
   return createVerifiedPiMcpRuntimeCandidate();
 }
 

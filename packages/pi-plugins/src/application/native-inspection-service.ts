@@ -404,7 +404,13 @@ export function createNativeInspectionService(dependencies: Readonly<{
       }
       if (snapshot.startup.blocked.length > 0) {
         for (const blocked of snapshot.startup.blocked) {
-          if (blocked.scope !== undefined && blocked.code === "PLUGIN_DEGRADED") {
+          if (blocked.code === "MCP_RUNTIME_UNAVAILABLE") {
+            findings.push({ key: "mcpRuntimeUnavailable", facts: [
+              ...(blocked.scope === undefined ? [] : ownerFacts(ScopeReferenceSchema.parse(blocked.scope), blocked.plugin)),
+              { key: "reason", value: safe(blocked.explanation) },
+              { key: "remediation", value: safe("Update pi-plugins and pi-mcp-adapter together; they are released jointly.") },
+            ] });
+          } else if (blocked.scope !== undefined && blocked.code === "PLUGIN_DEGRADED") {
             findings.push({ key: "pluginDegraded", facts: [
               ...ownerFacts(ScopeReferenceSchema.parse(blocked.scope), blocked.plugin),
               { key: "convergence-code", value: safe(blocked.code) },

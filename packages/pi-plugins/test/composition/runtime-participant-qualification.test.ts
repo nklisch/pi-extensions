@@ -67,6 +67,25 @@ describe("runtime participant qualification", () => {
     expect((await decide(mcp({ ...provider, nodeEngine: ">=25" }))).mcp.status).toBe("unavailable");
   });
 
+  it("carries a receipt failure into runtime qualification without exposing a native cause", async () => {
+    const qualified = await qualifyRuntimeParticipants({
+      pi: pi as never,
+      nodeVersion: "24.0.0",
+      piVersion: "0.82.0",
+      mcpUnavailable: {
+        code: "PACKAGE_DRIFT",
+        explanation: "The installed MCP adapter package does not match the required release.",
+      },
+      signal: new AbortController().signal,
+    });
+    expect(qualified.mcp).toMatchObject({
+      status: "unavailable",
+      code: "PACKAGE_DRIFT",
+      explanation: "The installed MCP adapter package does not match the required release.",
+    });
+    expect(qualified.mcp).not.toHaveProperty("cause");
+  });
+
   it("admits Pi's Node runtime floor and rejects older runtimes", async () => {
     expect((await decide(mcp(publishedProvider), "0.82.0", "22.18.0")).hostApi.status).toBe("unavailable");
     expect((await decide(mcp(publishedProvider), "0.82.0", "22.19.0")).hostApi.status).toBe("available");

@@ -87,6 +87,12 @@ function lineFor(diagnostic: NativeDiagnostic): string | undefined {
       return "Something this plugin declares can't run in this pi session.";
     case "RUNTIME_REQUIREMENT_UNAVAILABLE":
       return "A capability this plugin needs isn't available in this pi session.";
+    case "MCP_RUNTIME_UNAVAILABLE": {
+      const reason = factValue(diagnostic, "reason");
+      if (reason === undefined) return "The MCP runtime is unavailable for an enabled MCP plugin. Update pi-plugins and pi-mcp-adapter together; they are released jointly.";
+      const separator = /[.!?]$/u.test(reason) ? " " : ". ";
+      return `The MCP runtime is unavailable for an enabled MCP plugin: ${reason}${separator}Update pi-plugins and pi-mcp-adapter together; they are released jointly.`;
+    }
     case "TRUST_REQUIRED":
       return "This exact plugin revision needs your trust approval first.";
     case "TRUST_REVOKED":

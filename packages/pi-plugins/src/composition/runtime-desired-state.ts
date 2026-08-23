@@ -90,6 +90,7 @@ export async function buildRuntimeDesiredState(input: Readonly<{
   projections: RuntimeProjectionCachePort;
   project: PiProjectContextAdapters;
   mcp?: McpRuntimePort;
+  mcpUnavailable?: Readonly<{ code: string; explanation: string }>;
   state: LifecycleStateStore;
   content?: Pick<ContentStorePort, "resolvePlugin" | "ensureDataRoot">;
   userBaseDirectory: string;
@@ -171,6 +172,12 @@ export async function buildRuntimeDesiredState(input: Readonly<{
   function hasSubagentHooks(plugin: Awaited<ReturnType<InstalledPluginLoader["load"]>>["plugin"]): boolean {
     return plugin.components.hooks.some((hook) => hook.event.value === "SubagentStart" || hook.event.value === "SubagentStop");
   }
+  function mcpRuntimeUnavailable(): RuntimeLoadFailure {
+    const reason = input.mcpUnavailable === undefined
+      ? "no qualified published MCP runtime is composed"
+      : `${input.mcpUnavailable.explanation} (${input.mcpUnavailable.code})`;
+    return new RuntimeLoadFailure("MCP_RUNTIME_UNAVAILABLE", `MCP runtime is unavailable: ${reason}`);
+  }
 
   for (const entry of effectiveRecords) {
     signal.throwIfAborted();
@@ -191,10 +198,13 @@ export async function buildRuntimeDesiredState(input: Readonly<{
     let loadedSelection: RuntimeSelection | undefined;
     let loadedSkillHook: RuntimeProjectionSelection | undefined;
     let loadedMcpTransition: { from: McpLifecycleState; to: McpLifecycleState } | undefined;
+    const declaresMcp = record.revisions.find((revision) => revision.revision === record.selectedRevision)
+      ?.evidence.components.some((component) => component.kind === "mcp-server") === true;
 
     for (const candidateRevision of candidates) {
       try {
         const revision = candidateRevision.revision;
+        if (declaresMcp && input.mcp === undefined) throw mcpRuntimeUnavailable();
         if (mcpCapabilitiesFailed && revision.evidence.components.some((component) => component.kind === "mcp-server")) {
           throw new RuntimeLoadFailure("MCP_RUNTIME_UNAVAILABLE", "MCP runtime capabilities could not be reconstructed");
         }
