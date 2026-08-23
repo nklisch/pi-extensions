@@ -9,6 +9,10 @@ import type { PiSessionBinding } from "../composition/packaged-plugin-host-contr
 
 const REGISTRY = Symbol.for("@nklisch/pi-plugins/reload-broker-v1");
 
+/** A hung successor must not hold its predecessor past one reload window. */
+export const PI_RELOAD_TICKET_EXPIRY_MS = 2 * 60_000;
+type TicketExpiryTimer = ReturnType<typeof setTimeout>;
+
 type TicketState = {
   id: string;
   sessionId: string;
@@ -16,6 +20,7 @@ type TicketState = {
   scope: ScopeReference;
   claimed: boolean;
   settled: boolean;
+  expiryTimer: TicketExpiryTimer | undefined;
   resolve: (report: SuccessorActivationReport) => void;
   reject: (error: unknown) => void;
   promise: Promise<SuccessorActivationReport>;
@@ -70,7 +75,28 @@ export function createPiReloadBroker(): PiReloadBroker {
     // immediately so that exact failure remains broker evidence rather than an
     // unhandled process-level rejection.
     void promise.catch(() => undefined);
-    const state: TicketState = { id: randomUUID(), sessionId: binding.sessionId, cwd: binding.cwd, scope, claimed: false, settled: false, resolve, reject, promise };
+    const state: TicketState = {
+      id: randomUUID(),
+      sessionId: binding.sessionId,
+      cwd: binding.cwd,
+      scope,
+      claimed: false,
+      settled: false,
+      expiryTimer: undefined,
+      resolve,
+      reject,
+      promise,
+    };
+    state.expiryTimer = setTimeout(() => {
+      if (state.settled) return;
+      state.settled = true;
+      state.reject(new Error("Pi reload ticket expired"));
+    }, PI_RELOAD_TICKET_EXPIRY_MS);
+    // The broker is a coordination aid, not a reason for a Node process to
+    // remain alive after its host has otherwise finished shutting down.
+    if (typeof state.expiryTimer === "object" && state.expiryTimer !== null && "unref" in state.expiryTimer && typeof state.expiryTimer.unref === "function") {
+      state.expiryTimer.unref();
+    }
     states.tickets.set(state.id, state);
     return publicTicket(state);
   }
@@ -85,12 +111,14 @@ export function createPiReloadBroker(): PiReloadBroker {
     if (!state.claimed || state.settled) throw new Error("Pi reload ticket cannot be published");
     const report = SuccessorActivationReportSchema.parse(reportInput);
     state.settled = true;
+    if (state.expiryTimer !== undefined) clearTimeout(state.expiryTimer);
     state.resolve(report);
   }
   function fail(ticket: PiReloadTicket, error: unknown = new Error("Pi reload successor failed")): void {
     const state = lookup(ticket);
     if (state.settled) return;
     state.settled = true;
+    if (state.expiryTimer !== undefined) clearTimeout(state.expiryTimer);
     state.reject(error);
   }
   async function wait(ticket: PiReloadTicket, signal: AbortSignal): Promise<SuccessorActivationReport> {

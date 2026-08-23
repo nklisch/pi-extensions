@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { createPiReloadBroker } from "../../src/pi/pi-reload-broker.js";
+import { describe, expect, it, vi } from "vitest";
+import { createPiReloadBroker, PI_RELOAD_TICKET_EXPIRY_MS } from "../../src/pi/pi-reload-broker.js";
 
 const binding = { sessionId: "s-1", cwd: "/workspace", mode: "interactive" as const, projectTrusted: true };
 const scope = { kind: "user" as const };
@@ -40,6 +40,38 @@ describe("Pi reload broker", () => {
     broker.fail(ticket, new Error("successor reconstruction failed"));
     await Promise.resolve();
     await expect(broker.wait(ticket, new AbortController().signal)).rejects.toThrow("successor reconstruction failed");
+  });
+
+  it("settles an unclaimed ticket as failed when it outlives its expiry without aborting", async () => {
+    vi.useFakeTimers();
+    try {
+      const broker = createPiReloadBroker();
+      const ticket = broker.open({ ...binding, sessionId: "s-expired" }, scope);
+      const signal = new AbortController();
+      const waiting = broker.wait(ticket, signal.signal);
+      vi.advanceTimersByTime(PI_RELOAD_TICKET_EXPIRY_MS);
+      expect(signal.signal.aborted).toBe(false);
+      expect(broker.claimSuccessor({ ...binding, sessionId: "s-expired" })).toBeUndefined();
+      expect(() => broker.publish(ticket, { kind: "applied", degraded: [] })).toThrow(/cannot be published/);
+      await expect(waiting).rejects.toThrow("Pi reload ticket expired");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears expiry when a ticket settles normally", async () => {
+    vi.useFakeTimers();
+    try {
+      const broker = createPiReloadBroker();
+      const ticket = broker.open({ ...binding, sessionId: "s-normal" }, scope);
+      expect(broker.claimSuccessor({ ...binding, sessionId: "s-normal" })).toEqual(ticket);
+      const waiting = broker.wait(ticket, new AbortController().signal);
+      broker.publish(ticket, { kind: "applied", degraded: [] });
+      await expect(waiting).resolves.toEqual({ kind: "applied", degraded: [] });
+      await vi.advanceTimersByTimeAsync(PI_RELOAD_TICKET_EXPIRY_MS);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects duplicate pending reloads for one session", async () => {
