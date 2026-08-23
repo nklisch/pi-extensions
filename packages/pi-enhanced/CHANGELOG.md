@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.2
+
+### Fixed
+
+- Point the bundled FFF compatibility resource at its extension entrypoint instead of its source directory, preventing Pi from trying to load the finder lifecycle helper as an extension.
+
 ## v0.2.1
 
 ### Fixed

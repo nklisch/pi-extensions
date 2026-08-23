@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import fffCompatSearch from "./fff-compat-search";
 
 type ToolDef = { name: string; description?: string };
@@ -41,6 +43,11 @@ function setEnv(name: (typeof ENV_VARS)[number], value: string | undefined) {
 }
 
 describe("pi-fff-compat registration", () => {
+  test("package manifest declares only the extension factory", () => {
+    const manifest = JSON.parse(readFileSync(join(import.meta.dir, "../package.json"), "utf8"));
+    expect(manifest.pi.extensions).toEqual(["./extensions/fff-compat-search.ts"]);
+  });
+
   test("default mode registers additive fast_find/fast_grep tools", () => {
     setEnv("PI_FFF_COMPAT_OVERRIDE", undefined);
     setEnv("PI_FFF_COMPAT_DISABLE", undefined);

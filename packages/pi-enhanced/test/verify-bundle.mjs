@@ -34,6 +34,14 @@ const declared = [
 ].map((p) => p.replace(/^\.\//, ""));
 
 const failures = [];
+const fffCompatEntrypoint = "./node_modules/@nklisch/pi-fff-compat/extensions/fff-compat-search.ts";
+if (!manifest.pi.extensions.includes(fffCompatEntrypoint)) {
+  failures.push(`${fffCompatEntrypoint} (FFF compatibility extension entrypoint not declared)`);
+}
+if (manifest.pi.extensions.includes("./node_modules/@nklisch/pi-fff-compat/extensions")) {
+  failures.push("node_modules/@nklisch/pi-fff-compat/extensions (directory would load non-extension helpers)");
+}
+
 for (const declaredPath of declared) {
   // A declared path may be a directory, a single file, or a SKILL.md path.
   // It is satisfied when the tarball contains the path itself or anything

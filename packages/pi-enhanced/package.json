@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-enhanced",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Pi, enhanced — one install for nklisch's full harness: policy-gated command review, plugin marketplace, subagents, background tasks, research tools, search, model modes, and a curated UX set.",
   "author": {
     "name": "nklisch"
@@ -29,7 +29,7 @@
   "pi": {
     "extensions": [
       "./node_modules/@nklisch/pi-conveniences/extensions",
-      "./node_modules/@nklisch/pi-fff-compat/extensions",
+      "./node_modules/@nklisch/pi-fff-compat/extensions/fff-compat-search.ts",
       "./node_modules/@nklisch/pi-model-modes/extensions/index.ts",
       "./node_modules/@nklisch/pi-background-tasks/extensions/background-tasks.ts",
       "./node_modules/@nklisch/pi-plugins/dist/pi/production-subagents-extension.js",
