@@ -1,7 +1,7 @@
 ---
 id: feature-host-hardening-followups
 kind: feature
-status: active
+status: completed
 tags: [cleanup]
 parent: null
 blocked_by: []
@@ -10,6 +10,7 @@ research_refs: []
 mock_refs: []
 created: 2026-08-22
 updated: 2026-08-22
+completed: 2026-08-22
 ---
 
 # Host hardening follow-ups from the lifecycle epic
@@ -29,6 +30,17 @@ Three small hardening items parked during the lifecycle epic land together:
 3. **Public API pinning**: a slim (~50-line) positive test pinning the
    package's intentional export surface (the deleted 1,056-line test was an
    implementation mirror; pack inspection only pins what must NOT ship).
+
+## Deviation record (2026-08-22)
+
+Item 2 (trust-continuity fold-in) was NOT folded: continuity grants commit
+user-scope trust state while project updates commit project-scope state, and
+`runScopedMutation` is per-scope — joining them atomically would require a
+cross-scope transaction redesign, which is out of proportion to the gain
+(the second commit self-heals via the ensure sweep). Constraint: per-scope
+state DBs; consequence: update + grant remain two commits; better future
+direction: only if cross-scope transactions ever become necessary for another
+reason.
 
 ## Closure evidence
 
