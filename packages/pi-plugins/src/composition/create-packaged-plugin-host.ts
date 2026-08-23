@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHookFailureLog } from "../runtime/hooks/hook-failure-log.js";
 import { VERSION as PI_VERSION, getAgentDir, type ExtensionCommandContext, type ExtensionContext, type SessionShutdownEvent, type SessionStartEvent } from "@earendil-works/pi-coding-agent";
@@ -45,6 +46,9 @@ import { createNodePiRuntimeCapabilityProbe } from "./node-pi-runtime-capability
 import { createPublishedSubagentLifecyclePort } from "./create-subagent-lifecycle.js";
 import { buildRuntimeDesiredState, type HostBlockedPlugin, type RuntimeDesiredState } from "./runtime-desired-state.js";
 import { createRuntimeSelectionCatalog } from "./runtime-selection-catalog.js";
+import { createAgentOrientationFactsCollector } from "./agent-orientation-facts.js";
+import { createAgentOrientationPublisher, type AgentOrientationPublisher } from "../pi/agent-orientation-publisher.js";
+import { assembleAgentOrientation, AgentOrientationUnavailableError } from "../application/agent-orientation.js";
 import { createComposedSkillHookRuntime } from "./create-skill-hook-runtime.js";
 import { createComposedMcpRuntime } from "./create-mcp-runtime.js";
 import { createCompletePluginReloadPort } from "./complete-plugin-reload.js";
@@ -81,6 +85,15 @@ import type { SkillResourceDiscoveryPort } from "../runtime/skills/resource-disc
 import type { SuccessorActivationReport } from "../application/ports/lifecycle-reload.js";
 
 const sha256 = (bytes: Uint8Array): Uint8Array => new Uint8Array(createHash("sha256").update(bytes).digest());
+
+async function readPiPluginsPackageVersion(): Promise<string> {
+  try {
+    const manifest = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8")) as { version?: unknown };
+    return typeof manifest.version === "string" && manifest.version.length > 0 ? manifest.version : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 
 /** Render a compact `A <- B <- C` description of thrown values and their cause chains. */
 function describeErrorChain(errors: readonly unknown[]): string {
@@ -170,6 +183,17 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
   let activeResources: SkillResourceDiscoveryPort | undefined;
   let stopBackground: (() => Promise<void>) | undefined;
   let wakeBackground: (() => void) | undefined;
+  let refreshOrientation: (() => Promise<void>) | undefined;
+  let publishUnavailableOrientation: ((error: unknown, context: ExtensionContext) => Promise<void>) | undefined;
+  let orientationPackageVersion = "unknown";
+  let orientationBriefPaths: readonly string[] = [paths.orientationBrief({ kind: "user" })];
+  let orientationPublisher: AgentOrientationPublisher | undefined;
+  try {
+    orientationPublisher = createAgentOrientationPublisher({ pi: options.pi });
+  } catch {
+    // Orientation is advisory. A host without the optional delivery method
+    // still starts and retains every lifecycle capability.
+  }
 
   async function start(_event: SessionStartEvent, context: ExtensionContext): Promise<StartedPackagedPluginHost> {
     if (terminal) throw new PackagedPluginHostError(PackagedPluginHostErrorCode.terminal, "packaged plugin host is terminal");
@@ -188,6 +212,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
       try {
         const binding = createPiSessionBinding(context);
         activeBinding = binding;
+        orientationPackageVersion = await readPiPluginsPackageVersion();
         const startupSignal = new AbortController().signal;
         // The packaged host has one lifecycle package selection. Test fakes
         // exercise the package-neutral port below its composition boundary.
@@ -209,6 +234,10 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         own(async () => delegates.clear());
 
         const project = await createPiProjectContextAdapters({ binding, sha256, git: createNodeCommandRunner() });
+        orientationBriefPaths = Object.freeze([
+          paths.orientationBrief({ kind: "user" }),
+          paths.orientationBrief(toScopeReference(project.scope)),
+        ]);
         const state = await createNodeLifecycleStateAdapters({ paths, currentProject: project.scope, sha256 });
         own(() => state.close());
         // Host precedence is read through the state store at call time so a
@@ -218,6 +247,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         const configurations = await createSqlitePluginConfigurationStore({ root: paths.configurationRoot });
         own(async () => configurations[Symbol.asyncDispose]());
         const content = await createNodeContentInfrastructure({ hostRoot: paths.hostRoot });
+        const manifestContentReader = createManifestContentReader(sha256);
         const secrets = await createPlatformSecretStore();
         own(() => secrets.close());
         const identifiers = createNodeHostIdentifiers();
@@ -363,7 +393,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           projectionReferences: () => latestDesired === undefined ? undefined : new Set(latestDesired.selections.flatMap((selection) => selection.skillHook.prepared.expectation.kind === "active" ? [selection.skillHook.prepared.expectation.projectionRef.slice(selection.skillHook.prepared.expectation.projectionRef.lastIndexOf(":") + 1)] : [])),
         });
         const marketplaceInspection = createMarketplaceInspectionService({
-          content: createManifestContentReader(sha256),
+          content: manifestContentReader,
           readers: { claude: readClaudeMarketplace, codex: readCodexMarketplace, merge: mergeMarketplaces },
           sha256,
           hostPrecedence,
@@ -445,6 +475,45 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           runtime: runtimeBlocked.length === 0 ? "reconciled" : "degraded",
           schedulerStatus: marketplaceComposition.updates.schedulerStatus,
         });
+        const orientationFacts = createAgentOrientationFactsCollector({
+          paths,
+          packageVersion: orientationPackageVersion,
+          state: state.state,
+          project,
+          installed: content.installed,
+          content: content.content,
+          contentReader: manifestContentReader,
+          selections,
+          startup,
+          latestDesired: () => latestDesired,
+          sha256,
+        });
+        refreshOrientation = async (): Promise<void> => {
+          if (orientationPublisher === undefined) return;
+          const signal = new AbortController().signal;
+          const collected = await orientationFacts.collect(signal);
+          const orientation = assembleAgentOrientation(collected.input);
+          // Recheck after pure assembly and immediately before the adapter
+          // write. No lock is introduced; a later mutation is picked up by
+          // the next admitted-operation refresh.
+          if (!await orientationFacts.isCurrent(collected, signal)) return;
+          await orientationPublisher.publish(orientation, collected.input.briefPath, context);
+        };
+        publishUnavailableOrientation = async (error: unknown, unavailableContext: ExtensionContext): Promise<void> => {
+          if (orientationPublisher === undefined) return;
+          const code = error instanceof AgentOrientationUnavailableError
+            ? error.code
+            : "ORIENTATION_STATE_UNAVAILABLE";
+          for (const briefPath of orientationBriefPaths) {
+            await orientationPublisher.publishUnavailable({
+              briefPath,
+              code,
+              packageVersion: orientationPackageVersion,
+              sha256,
+              context: unavailableContext,
+            });
+          }
+        };
         const candidateContent = createCandidateContentLeasePort({ content: content.content, materializer: materializers.plugins });
         const nativeInspection = createNativeInspectionComposition({
           state: state.state,
@@ -753,6 +822,9 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
       } finally {
         activeBinding = undefined;
         activeResources = undefined;
+        orientationBriefPaths = [paths.orientationBrief({ kind: "user" })];
+        refreshOrientation = undefined;
+        publishUnavailableOrientation = undefined;
         if (reloadSuccessor !== undefined) {
           try { reloadSuccessor.reload.failSuccessor(reloadSuccessor.ticket); } catch { /* ticket may already be settled */ }
           reloadSuccessor = undefined;
@@ -818,6 +890,11 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
       try {
         return await operationContexts.run(frame, () => use(current.application));
       } finally {
+        // A committed foreground mutation is the completion boundary for the
+        // derived brief. The refresh is advisory, but awaiting it ensures a
+        // successful operation does not return before its orientation write is
+        // attempted. State-generation checks make read-only operations cheap.
+        await refreshOrientation?.().catch(() => undefined);
         // Lifecycle/local operations may settle installed state and notices.
         // Wake the one owner without coupling the foreground result to it.
         wakeBackground?.();
@@ -833,7 +910,33 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
   };
   const target = Object.freeze({
     async sessionStart(event: SessionStartEvent, context: ExtensionContext): Promise<void> {
-      await start(event, context);
+      try {
+        await start(event, context);
+      } catch (error) {
+        // Startup failure must not strand an old brief. Replace it with an
+        // honest marker, then preserve the host's existing startup error.
+        try {
+          if (orientationPublisher !== undefined) {
+            for (const briefPath of orientationBriefPaths) {
+              await orientationPublisher.publishUnavailable({
+                briefPath,
+                code: error instanceof AgentOrientationUnavailableError ? error.code : "ORIENTATION_STATE_UNAVAILABLE",
+                packageVersion: orientationPackageVersion,
+                sha256,
+                context,
+              });
+            }
+          }
+        } catch {
+          // Orientation cannot turn a host startup failure into a second error.
+        }
+        throw error;
+      }
+      try {
+        await refreshOrientation?.();
+      } catch (error) {
+        try { await publishUnavailableOrientation?.(error, context); } catch { /* informational surface only */ }
+      }
       sessionStartDispatch ??= delegates.dispatchSessionStart(event, context);
       await sessionStartDispatch;
     },

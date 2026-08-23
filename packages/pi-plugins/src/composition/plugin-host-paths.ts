@@ -9,6 +9,7 @@ export type PluginHostPathPlan = Readonly<{
   stateRoot: string;
   lockRoot: string;
   configurationRoot: string;
+  orientationBrief(scope: ScopeReference): string;
   stateDatabase(scope: ScopeReference): string;
 }>;
 
@@ -42,6 +43,12 @@ export function createPluginHostPathPlan(agentDir: string): PluginHostPathPlan {
     stateRoot,
     lockRoot,
     configurationRoot,
+    orientationBrief(scopeInput): string {
+      const scope = ScopeReferenceSchema.parse(scopeInput);
+      return scope.kind === "user"
+        ? join(hostRoot, "generated", "agent-brief.md")
+        : join(hostRoot, "generated", "projects", projectKeyDigest(scope.projectKey), "agent-brief.md");
+    },
     stateDatabase(scopeInput): string {
       const scope = ScopeReferenceSchema.parse(scopeInput);
       return join(
