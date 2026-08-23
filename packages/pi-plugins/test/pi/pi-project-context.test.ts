@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -52,9 +52,10 @@ describe("Pi project context adapters", () => {
     const binding = createPiSessionBinding(context(root, () => true));
     const project = await createPiProjectContextAdapters({ binding, sha256, git: createNodeCommandRunner() });
     const capability = await project.authority.acquire(new AbortController().signal);
-    await rm(join(root, ".git"), { recursive: true, force: true });
-    // A distinct common-directory path makes identity replacement deterministic;
-    // deleting and recreating `.git` can reuse the same inode on CI filesystems.
+    // Keep the retired common directory alive so its inode cannot be reused by
+    // the replacement on fast CI filesystems. The repository fingerprint is
+    // inode-based; changing only the path is not sufficient evidence.
+    await rename(join(root, ".git"), join(root, "retired.git"));
     await run("git", ["init", "-q", `--separate-git-dir=${join(root, "replacement.git")}`, root]);
 
     await expect(project.trust.assess(project.scope.projectKey, new AbortController().signal)).resolves.toEqual({ kind: "untrusted" });
