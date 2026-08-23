@@ -183,7 +183,7 @@ export const MarketplaceRefreshMemorySchema = z.object({
 export type MarketplaceRefreshMemory = z.infer<typeof MarketplaceRefreshMemorySchema>;
 
 export const AutomaticUpdateReasonSchema = z.enum([
-  "manual", "approval-required", "stale", "project-untrusted", "recovery-required",
+  "manual", "approval-required", "stale", "project-untrusted", "degraded",
   "configuration-required", "secret-unavailable", "capability-unavailable",
   // Legacy read compatibility: pre-staging durable notices may carry this
   // reason. It is never produced anymore.
@@ -192,7 +192,7 @@ export const AutomaticUpdateReasonSchema = z.enum([
 export type AutomaticUpdateReason = z.infer<typeof AutomaticUpdateReasonSchema>;
 
 export const AutomaticUpdateAttemptMemorySchema = z.object({
-  state: z.enum(["pending", "blocked", "retryable", "applied", "recovery-required"]),
+  state: z.enum(["pending", "blocked", "retryable", "applied"]),
   reason: AutomaticUpdateReasonSchema.optional(),
   attemptedAt: EpochMillisecondsSchema.optional(),
   retryAt: EpochMillisecondsSchema.optional(),
@@ -206,7 +206,6 @@ export type AutomaticUpdateAttemptMemory = z.infer<typeof AutomaticUpdateAttempt
 export const UpdateNoticeDispositionSchema = z.enum([
   "manual-required", "approval-required", "automatic-pending", "automatic-applied",
   "automatic-retryable", "configuration-blocked", "capability-blocked",
-  "recovery-required",
 ]);
 export type UpdateNoticeDisposition = z.infer<typeof UpdateNoticeDispositionSchema>;
 

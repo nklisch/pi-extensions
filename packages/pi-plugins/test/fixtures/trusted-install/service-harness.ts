@@ -481,7 +481,7 @@ export function createTrustedInstallServiceHarness(options: TrustedInstallHarnes
     }],
     capability: { status: "ready" as const, digest: capabilityDigest, capturedBy: "trusted-install-harness" },
     runtimeEpoch: `sha256:${"6".repeat(64)}` as never,
-    recoveryDigest: `sha256:${"7".repeat(64)}` as never,
+    convergenceDigest: `sha256:${"7".repeat(64)}` as never,
     updateDigest: `sha256:${"8".repeat(64)}` as never,
   };
   const inspectionSnapshot = {

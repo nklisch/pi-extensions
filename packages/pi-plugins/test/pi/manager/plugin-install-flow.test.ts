@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { trustedInstallFlowFixture } from "../../fixtures/trusted-install/plugin-install-flow.js";
 import { createPluginInstallState, pluginInstallReducer } from "../../../src/pi/manager/plugin-install-flow.js";
-import { TrustedInstallActivationResultSchema } from "../../../src/application/trusted-install-contract.js";
 import { PluginInstallComponent, renderPluginInstall } from "../../../src/pi/manager/plugin-install-component.js";
 
 const theme = { fg: (_token: string, text: string) => text, bg: (_token: string, text: string) => text, bold: (text: string) => text } as any;
@@ -38,15 +37,14 @@ describe("signed plugin install flow", () => {
   it.each([
     trustedInstallFlowFixture.states.cancelled,
     trustedInstallFlowFixture.states.candidateStale,
-    trustedInstallFlowFixture.states.rolledBack,
-    trustedInstallFlowFixture.states.recoveryRequired,
+    trustedInstallFlowFixture.states.degraded,
+    trustedInstallFlowFixture.states.failed,
   ])("renders owner result truth without treating cancellation as stronger evidence", (result) => {
     let state = createPluginInstallState(trustedInstallFlowFixture.chooseInspect);
     state = pluginInstallReducer(state, { type: "activation-result", result });
     const output = renderPluginInstall({ state, width: 58, height: 20, theme }).join("\n");
     expect(output).toContain(result.kind);
-    if (result.kind === "recovery-required") expect(output).toContain("finish setting it up");
-    if (result.kind === "rolled-back") expect(output).toContain("change was undone");
+    if (result.kind === "degraded") expect(output).toContain("Use /plugins repair");
   });
 
   it("retains only non-sensitive values across Back while exact evidence remains current", () => {
@@ -151,22 +149,4 @@ describe("signed plugin install flow", () => {
     expect(state.step).toBe("choose-inspect");
   });
 
-  it("routes owner-provided workflow recovery back through renewed configuration and trust", () => {
-    const session = trustedInstallFlowFixture.states.missingInput.session;
-    const retry = TrustedInstallActivationResultSchema.parse({
-      kind: "recovery-required",
-      action: "retry-trust-recovery",
-      session,
-      progress: [],
-      retained: { configuration: true, trust: false },
-    });
-    let state = createPluginInstallState(trustedInstallFlowFixture.chooseInspect);
-    state = pluginInstallReducer(state, { type: "session-opened", session });
-    state = pluginInstallReducer(state, { type: "activation-result", result: retry });
-    expect(renderPluginInstall({ state, width: 72, height: 20, theme }).join("\n")).toContain("Review recovery configuration");
-    state = pluginInstallReducer(state, { type: "session-opened", session: retry.session!, submission: "recover" });
-    expect(state).toMatchObject({ step: "configure-trust", submission: "recover" });
-    expect(state.consentId).toBeUndefined();
-    expect(renderPluginInstall({ state, width: 72, height: 20, theme }).join("\n")).toContain("Finish setup");
-  });
 });

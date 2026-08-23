@@ -49,7 +49,7 @@ export const ProjectSyncRequiredActionKindRegistry = Object.freeze({
   updatePlugin: { tag: "update-plugin" },
   reviewTrust: { tag: "review-trust" },
   provideConfiguration: { tag: "provide-configuration" },
-  runRecovery: { tag: "run-recovery" },
+  repairPlugin: { tag: "repair-plugin" },
   repreviewSync: { tag: "repreview-sync" },
 } as const);
 export const ProjectSyncRequiredActionKindSchema = z.enum(
@@ -59,7 +59,7 @@ export const ProjectSyncRequiredActionKindSchema = z.enum(
     "update-plugin",
     "review-trust",
     "provide-configuration",
-    "run-recovery",
+    "repair-plugin",
     "repreview-sync",
   ],
 );
@@ -99,7 +99,7 @@ export const ProjectSyncRequiredActionSchema = z.object({
   if (action.kind === "register-marketplace" && action.marketplace === undefined) {
     context.addIssue({ code: "custom", path: ["marketplace"], message: "marketplace registration action requires a marketplace" });
   }
-  if (["install-plugin", "update-plugin", "review-trust", "provide-configuration", "run-recovery"].includes(action.kind) && action.plugin === undefined) {
+  if (["install-plugin", "update-plugin", "review-trust", "provide-configuration", "repair-plugin"].includes(action.kind) && action.plugin === undefined) {
     context.addIssue({ code: "custom", path: ["plugin"], message: "plugin action requires a plugin" });
   }
   if (action.kind === "repreview-sync" && (action.plugin !== undefined || action.marketplace !== undefined || action.action !== "retry-read")) {

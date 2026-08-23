@@ -28,7 +28,6 @@ export const NativeTrustGrantResultSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("stale"), plugin: PluginKeySchema, scope: ScopeReferenceSchema, reason: z.enum(["revision", "generation", "project", "capability"]) }).strict().readonly(),
   z.object({ kind: z.literal("rejected"), plugin: PluginKeySchema, scope: ScopeReferenceSchema, code: z.enum(["PROJECT_UNTRUSTED", "INCOMPATIBLE"]) }).strict().readonly(),
   z.object({ kind: z.literal("unavailable"), plugin: PluginKeySchema, scope: ScopeReferenceSchema }).strict().readonly(),
-  z.object({ kind: z.literal("recovery-required"), plugin: PluginKeySchema, scope: ScopeReferenceSchema }).strict().readonly(),
 ]);
 export type NativeTrustGrantResult = z.infer<typeof NativeTrustGrantResultSchema>;
 
@@ -197,7 +196,7 @@ export function createInstalledTrustGrantService(dependencies: InstalledTrustGra
       if (granted.kind === "stale") return NativeTrustGrantResultSchema.parse({ ...base, kind: "stale", reason: "generation" });
       if (granted.kind === "project-stale") return NativeTrustGrantResultSchema.parse({ ...base, kind: "stale", reason: "project" });
       if (granted.kind === "project-untrusted") return NativeTrustGrantResultSchema.parse({ ...base, kind: "rejected", code: "PROJECT_UNTRUSTED" });
-      return NativeTrustGrantResultSchema.parse({ ...base, kind: "recovery-required" });
+      return NativeTrustGrantResultSchema.parse({ ...base, kind: "unavailable" });
     },
   };
   return Object.freeze(service);

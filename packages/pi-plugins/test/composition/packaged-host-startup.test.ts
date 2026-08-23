@@ -9,12 +9,12 @@ const capabilities = {
 };
 
 describe("explicit packaged host startup", () => {
-  it("is construction inert and orders local reconciliation before recovery and background", async () => {
+  it("is construction inert and orders local reconciliation before convergence and background", async () => {
     const calls: string[] = [];
     const startup = createPackagedHostStartup({
       async open() { calls.push("open"); },
       async capabilities() { calls.push("capabilities"); return capabilities; },
-      async recover() { calls.push("recovery"); return { blocked: [] }; },
+      async converge() { calls.push("convergence"); return { blocked: [] }; },
       async reconcile() { calls.push("reconcile"); return { blocked: [] }; },
       publish() { calls.push("status"); },
       async startBackground() { calls.push("background"); },
@@ -22,7 +22,7 @@ describe("explicit packaged host startup", () => {
     });
     expect(calls).toEqual([]);
     await expect(startup.start(new AbortController().signal)).resolves.toMatchObject({ status: "ready" });
-    expect(calls).toEqual(["open", "capabilities", "reconcile", "recovery", "status", "background"]);
+    expect(calls).toEqual(["open", "capabilities", "reconcile", "convergence", "status", "background"]);
     await startup.close();
   });
 
@@ -30,7 +30,7 @@ describe("explicit packaged host startup", () => {
     let backgroundStarted = false;
     const startup = createPackagedHostStartup({
       async open() {}, async capabilities() { return capabilities; },
-      async recover() { return { blocked: [] }; }, async reconcile() { return { blocked: [] }; },
+      async converge() { return { blocked: [] }; }, async reconcile() { return { blocked: [] }; },
       publish() {},
       async startBackground() {
         backgroundStarted = true;
@@ -42,11 +42,11 @@ describe("explicit packaged host startup", () => {
     expect(backgroundStarted).toBe(true);
   });
 
-  it("publishes plugin-local recovery failure as degraded rather than host blocked", async () => {
+  it("publishes plugin-local convergence failure as degraded rather than host blocked", async () => {
     let published = false;
     const startup = createPackagedHostStartup({
       async open() {}, async capabilities() { return capabilities; },
-      async recover() { return { blocked: [{ plugin: "demo@community", code: "RECOVERY_REQUIRED", explanation: "retry recovery" }] }; },
+      async converge() { return { blocked: [{ plugin: "demo@community", code: "PLUGIN_DEGRADED", explanation: "repair the selected revision" }] }; },
       async reconcile() { return { blocked: [] }; },
       publish() { published = true; }, async startBackground() {}, async closeResources() {},
     });

@@ -103,10 +103,12 @@ function lineFor(diagnostic: NativeDiagnostic): string | undefined {
       return "The marketplace catalog is corrupt; remove and re-add the marketplace.";
     case "CANDIDATE_MISSING":
       return "That plugin is no longer in the marketplace; refresh and browse again.";
-    case "RECOVERY_REQUIRED":
-    case "TRANSITION_PENDING":
-    case "RECOVERY_BLOCKED":
-      return "A previous install or update didn't finish; it will settle on recovery (usually automatic when pi restarts).";
+    case "PLUGIN_DEGRADED":
+      return "This plugin is degraded; repair it or roll back to its previous revision.";
+    case "PLUGIN_FALLBACK_ACTIVE":
+      return "This plugin is running its previous revision; repair the selected revision or keep this fallback with rollback.";
+    case "CONVERGENCE_BLOCKED":
+      return "Startup convergence could not finish; inspect the plugin host and retry repair.";
     default:
       return undefined;
   }
@@ -128,14 +130,6 @@ export function presentNativeDiagnostics(diagnostics: readonly NativeDiagnostic[
     lines.push("The plugin couldn't be read; inspect its source for details.");
   }
   return Object.freeze(lines.map((line) => safe(line)));
-}
-
-/**
- * Text for results that landed in recovery-required: the work completed far
- * enough to keep, but activation must be finished by the recovery pass.
- */
-export function presentRecoveryRequired(): SafeDisplayField {
-  return safe("The plugin is installed, but activation didn't finish in this session; the plugin host finishes it on recovery (usually automatic when pi restarts). `/plugins doctor` shows details.");
 }
 
 /** Actionable human text for a rejected marketplace registration. */

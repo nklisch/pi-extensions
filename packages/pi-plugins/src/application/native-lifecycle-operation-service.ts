@@ -22,7 +22,6 @@ import {
 import { deriveNativeLifecyclePreviewId } from "./native-lifecycle-operation-identifiers.js";
 import { canonicalJson } from "../domain/canonical-json.js";
 import { hashContent } from "../domain/content-manifest.js";
-import type { ConfigurationRecoveryCapability } from "./configuration-service.js";
 import type { TrustedInstallConfigurationAuthority } from "./trusted-install-configuration.js";
 import type { NativeLifecycleTargetService } from "./native-lifecycle-target.js";
 import type { NativeLifecycleUpdateService } from "./native-lifecycle-update.js";
@@ -34,10 +33,7 @@ import {
 import type { LifecycleClock } from "./ports/lifecycle-clock.js";
 import type { LifecycleOperationIdPort } from "./ports/lifecycle-operation-id.js";
 import { createNativeLifecycleOperationSessionRegistry, type NativeLifecycleOperationSessionEntry } from "./native-lifecycle-operation-session.js";
-import {
-  NativeLifecycleConfigurationRecoveryError,
-  type createNativeLifecycleOperationExecutor,
-} from "./native-lifecycle-operation.js";
+import type { createNativeLifecycleOperationExecutor } from "./native-lifecycle-operation.js";
 import type { ProjectSyncService } from "./project-sync-service.js";
 
 export type NativeLifecycleOperationServiceDependencies = Readonly<{
@@ -62,7 +58,6 @@ export function createNativeLifecycleOperationService(dependencies: NativeLifecy
   if (dependencies === null || typeof dependencies !== "object" || typeof dependencies.sha256 !== "function") throw new TypeError("native lifecycle operation service dependencies are required");
   const sessions = createNativeLifecycleOperationSessionRegistry({ clock: dependencies.clock, sessionIds: dependencies.sessionIds, hostEpoch: dependencies.hostEpoch, sha256: dependencies.sha256 });
   const pendingCandidateCleanup = new Set<CandidateContentCleanupRecovery>();
-  const pendingConfigurationRecovery = new Set<ConfigurationRecoveryCapability>();
   let closePromise: Promise<void> | undefined;
 
   function cleanupRecoveryForLease(lease: CandidateContentLease): CandidateContentCleanupRecovery {
@@ -152,7 +147,6 @@ export function createNativeLifecycleOperationService(dependencies: NativeLifecy
       }
       if (prepared.kind === "current-state") return NativeLifecycleOperationPreviewResultSchema.parse({ kind: "current-state", operation: request.operation, diagnostics: [] });
       if (prepared.kind === "stale") return NativeLifecycleOperationPreviewResultSchema.parse({ kind: "stale", reason: prepared.reason });
-      if (prepared.kind === "blocked") return NativeLifecycleOperationPreviewResultSchema.parse({ kind: "unavailable", code: "PENDING_TRANSITION", diagnostics: [] });
       if (prepared.kind === "cleanup-failed") {
         pendingCandidateCleanup.add(prepared.cleanup);
         return NativeLifecycleOperationPreviewResultSchema.parse({ kind: "unavailable", code: "CLEANUP_FAILED", diagnostics: [] });
@@ -196,7 +190,6 @@ export function createNativeLifecycleOperationService(dependencies: NativeLifecy
 
     const resolved = await dependencies.targets.resolve(request.target, signal);
     if (resolved.kind === "stale") return NativeLifecycleOperationPreviewResultSchema.parse({ kind: "stale", reason: resolved.reason });
-    if (resolved.kind === "blocked") return NativeLifecycleOperationPreviewResultSchema.parse({ kind: "unavailable", code: "PENDING_TRANSITION", diagnostics: [] });
     if (resolved.kind !== "ready") return NativeLifecycleOperationPreviewResultSchema.parse({ kind: "unavailable", code: "ADAPTER_FAILED", diagnostics: [] });
     if (request.operation === "enable" && resolved.target.binding.activation === "enabled" || request.operation === "disable" && resolved.target.binding.activation === "disabled") {
       return NativeLifecycleOperationPreviewResultSchema.parse({ kind: "current-state", operation: request.operation, diagnostics: [] });
@@ -264,10 +257,7 @@ export function createNativeLifecycleOperationService(dependencies: NativeLifecy
       return result;
     } catch (error) {
       let result: NativeLifecycleOperationResult;
-      if (error instanceof NativeLifecycleConfigurationRecoveryError) {
-        pendingConfigurationRecovery.add(error.recovery);
-        result = failed(entry, error.code, error.retainedPreflight);
-      } else if (retainCandidateCleanup(error)) {
+      if (retainCandidateCleanup(error)) {
         result = failed(entry, "CLEANUP_FAILED", retainedFrom(error));
       } else if (signal.aborted && !durablePhaseStarted(entry)) {
         result = NativeLifecycleOperationResultSchema.parse({
@@ -366,18 +356,6 @@ export function createNativeLifecycleOperationService(dependencies: NativeLifecy
           try {
             await cleanup.retry();
             pendingCandidateCleanup.delete(cleanup);
-          } catch (error) {
-            failures.push(error);
-          }
-        }
-        for (const recovery of [...pendingConfigurationRecovery]) {
-          try {
-            const settlement = await recovery.settle(new AbortController().signal);
-            if (settlement.kind === "recovery-required") {
-              failures.push(new Error("native lifecycle configuration recovery remains pending"));
-            } else {
-              pendingConfigurationRecovery.delete(recovery);
-            }
           } catch (error) {
             failures.push(error);
           }

@@ -116,7 +116,7 @@ type AuthorityCapture = Readonly<{
 }>;
 
 /**
- * Compose existing state, catalog, capability, recovery, and local runtime
+ * Compose existing state, catalog, capability, convergence, and local runtime
  * evidence. The adapter never reconciles, reloads, refreshes, launches, or
  * probes; all runtime calls below are observation-only against already
  * composed local participants.
@@ -132,7 +132,6 @@ export function createNativeInspectionEvidence(input: Readonly<{
   mcp: Pick<McpLifecycleParticipant, "status">;
   capabilities?: RuntimeCapabilitySnapshot;
   convergence?: ConvergenceReport;
-  recovery?: ConvergenceReport;
   startup: HostStartupResult;
   status?: HostStatusService;
   clock: LifecycleClock;
@@ -143,7 +142,7 @@ export function createNativeInspectionEvidence(input: Readonly<{
   }
   const scopes = [...input.scopes].sort(scopeOrder);
   const capabilities = input.capabilities === undefined ? undefined : RuntimeCapabilitySnapshotSchema.parse(input.capabilities);
-  const convergence = ConvergenceReportSchema.parse(input.convergence ?? input.recovery ?? { results: [], deferred: false, processed: 0 });
+  const convergence = ConvergenceReportSchema.parse(input.convergence ?? { results: [], deferred: false, processed: 0 });
   const capabilityDigest = capabilities === undefined ? undefined : digest("inspection-capability-v1", capabilities, input.sha256);
 
   async function captureAuthority(signal: AbortSignal): Promise<AuthorityCapture> {
@@ -258,7 +257,7 @@ export function createNativeInspectionEvidence(input: Readonly<{
       currentProject: { projectKey: currentProject.projectKey, trust: currentProject.trust },
       runtime,
     }, input.sha256);
-    const recoveryDigest = digest("inspection-convergence-v1", convergence, input.sha256);
+    const convergenceDigest = digest("inspection-convergence-v1", convergence, input.sha256);
     const hostStatus = input.status?.snapshot();
     const updateDigest = digest("inspection-update-v1", {
       scopes: states.filter((result) => result.ok).map((result) => ({
@@ -278,7 +277,7 @@ export function createNativeInspectionEvidence(input: Readonly<{
         ? { status: "unavailable" as const }
         : { status: "ready" as const, digest: capabilityDigest!, capturedBy: capabilities.capturedBy }),
       runtimeEpoch,
-      recoveryDigest,
+      convergenceDigest,
       updateDigest,
     });
     return Object.freeze({ states: Object.freeze(states), currentProject, runtime: Object.freeze(runtime), binding });

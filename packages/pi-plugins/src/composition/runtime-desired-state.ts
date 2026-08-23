@@ -203,8 +203,8 @@ export async function buildRuntimeDesiredState(input: Readonly<{
         // descriptor) so an unchanged runtime reproduces the install-time
         // report and projection digest exactly, while live capability probing
         // still fails closed when the runtime drifts. Assessing without the
-        // policy diverges from the install-time digest and strands installs in
-        // recovery-required; using the stored report verbatim would freeze
+        // policy diverges from the install-time digest and marks plugins
+        // degraded; using the stored report verbatim would freeze
         // install-time capability availability into activation.
         const compatibility = await input.compatibility.assess({
           plugin: loaded.plugin,

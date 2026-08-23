@@ -47,7 +47,7 @@ describe("packed clean-environment Pi infrastructure", () => {
       status: "ok",
       exit: { code: 0 },
       data: {
-        local: { recovery: "settled", runtime: "reconciled" },
+        local: { convergence: "settled", runtime: "reconciled" },
         capabilities: {
           mcp: { status: "available" },
           subagents: { status: "available" },

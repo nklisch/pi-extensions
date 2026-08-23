@@ -406,14 +406,14 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
             runtimeStartupBlocked.push({
               plugin: "host-runtime",
               code: "RUNTIME_RECONSTRUCTION_FAILED",
-              explanation: "reload successor reconstruction failed; recovery remains authoritative",
+              explanation: "reload successor reconstruction failed; convergence will retry on the next start",
             });
           }
         }
-        const recoveryResult = await convergence.sweep({ scopes: [{ kind: "user" }, project.scope], signal: startupSignal });
-        const unresolvedRecovery: HostBlockedPlugin[] = recoveryResult.results.filter((result) => result.kind !== "completed").map((result) => ({ plugin: result.plugin ?? "convergence", code: `CONVERGENCE_${result.code}`, explanation: "startup convergence retained work for a later pass" }));
+        const convergenceResult = await convergence.sweep({ scopes: [{ kind: "user" }, project.scope], signal: startupSignal });
+        const unresolvedConvergence: HostBlockedPlugin[] = convergenceResult.results.filter((result) => result.kind !== "completed").map((result) => ({ plugin: result.plugin ?? "convergence", code: `CONVERGENCE_${result.code}`, explanation: "startup convergence retained work for a later pass" }));
         const startup = startupResult({
-          blocked: [...(latestDesired?.degraded ?? []), ...unresolvedRecovery, ...runtimeStartupBlocked],
+          blocked: [...(latestDesired?.degraded ?? []), ...unresolvedConvergence, ...runtimeStartupBlocked],
           mcp: qualification.mcp,
           subagents: qualification.subagents,
           piReload: qualification.hostApi,
@@ -421,7 +421,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         });
         const hostStatus = createHostStatusService({
           startup,
-          recovery: unresolvedRecovery.length === 0 ? "settled" : "degraded",
+          convergence: unresolvedConvergence.length === 0 ? "settled" : "degraded",
           runtime: [...(latestDesired?.degraded ?? []), ...runtimeStartupBlocked].length === 0 ? "reconciled" : "degraded",
           schedulerStatus: marketplaceComposition.updates.schedulerStatus,
         });
@@ -435,7 +435,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           skillHook: skillHook.participant,
           mcp: mcp.participant,
           capabilities: capabilitySnapshot,
-          convergence: recoveryResult,
+          convergence: convergenceResult,
           startup,
           status: hostStatus,
           configurations,
@@ -697,7 +697,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         });
         started = value;
         // Background maintenance is detached: session_start returns from local
-        // recovery/reconciliation even if a remote adapter or publisher hangs.
+        // convergence even if a remote adapter or publisher hangs.
         void background.start();
         return value;
       } catch (error) {

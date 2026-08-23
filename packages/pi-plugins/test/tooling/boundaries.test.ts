@@ -60,8 +60,9 @@ describe("convergent lifecycle structural boundaries", () => {
   it("does not ship the removed recovery and lifecycle suites", () => {
     expect(retiredTests.filter((path) => existsSync(join(root, path)))).toEqual([]);
   });
-  it("keeps the legacy marker spelling confined to the migration decoder", () => {
-    const offenders = sourceFiles(join(root, "src")).filter((path) => path !== join(root, "src/infrastructure/state/lifecycle-convergence-migration.ts") && readFileSync(path, "utf8").includes("pendingTransition"));
+  it("keeps removed lifecycle vocabulary confined to the migration decoder", () => {
+    const legacy = ["pendingTransition", "recovery-required", "LifecycleTransitionStore", "install.recover"];
+    const offenders = sourceFiles(join(root, "src")).filter((path) => path !== join(root, "src/infrastructure/state/lifecycle-convergence-migration.ts") && legacy.some((term) => readFileSync(path, "utf8").includes(term)));
     expect(offenders).toEqual([]);
   });
 });

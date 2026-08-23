@@ -29,7 +29,6 @@ export type NativeLifecycleUpdatePreparationResult =
   | Readonly<{ kind: "ready"; update: PreparedNativeLifecycleUpdate }>
   | Readonly<{ kind: "current-state"; reason: "revision-current"; target: VerifiedNativeLifecycleTarget }>
   | Readonly<{ kind: "stale"; reason: "inspection" | "target" | "candidate" | "project" | "capability" }>
-  | Readonly<{ kind: "blocked"; reason: "pending-transition" | "recovery-required" }>
   | Readonly<{ kind: "cleanup-failed"; cleanup: CandidateContentCleanupRecovery }>
   | Readonly<{ kind: "unavailable" | "rejected"; reason: "candidate" | "target" }>;
 
@@ -43,7 +42,6 @@ export interface NativeLifecycleUpdateService {
 
 function mapTarget(result: Exclude<Awaited<ReturnType<NativeLifecycleTargetService["resolve"]>>, { kind: "ready" }>): NativeLifecycleUpdatePreparationResult {
   if (result.kind === "stale") return { kind: "stale", reason: result.reason === "inspection" ? "inspection" : result.reason === "project" ? "project" : result.reason === "capability" ? "capability" : "target" };
-  if (result.kind === "blocked") return { kind: "blocked", reason: result.reason === "pending-transition" ? "pending-transition" : "recovery-required" };
   return { kind: "unavailable", reason: "target" };
 }
 

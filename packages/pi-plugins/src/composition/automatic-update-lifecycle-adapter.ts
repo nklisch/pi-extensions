@@ -66,19 +66,18 @@ export function createAutomaticUpdateLifecycleAdapter(dependencies: Readonly<{
   const port: AutomaticUpdateLifecyclePort = {
     async inspect(notice, signal) {
       const [resolved, current] = await Promise.all([resolve(notice, signal), target(notice, signal)]);
-      if (resolved.kind !== "resolved") return { candidate: "stale", source: "stable", target: "current", project: "trusted", recovery: "clear", configuration: "valid", secrets: "available", capability: "available" };
+      if (resolved.kind !== "resolved") return { candidate: "stale", source: "stable", target: "current", project: "trusted", configuration: "valid", secrets: "available", capability: "available" };
       const candidate = resolved.candidate;
       if (current !== undefined && "unauthorized" in current) {
-        return { candidate: "current", source: "stable", target: "current", project: "untrusted", recovery: "clear", configuration: "valid", secrets: "available", capability: "available" };
+        return { candidate: "current", source: "stable", target: "current", project: "untrusted", configuration: "valid", secrets: "available", capability: "available" };
       }
       const selected = current?.record.revisions.find((revision) => revision.revision === current.record.selectedRevision);
       const source = deriveMarketplaceSourceIdentity(candidate.marketplace.source.declared, dependencies.sha256) === notice.available.marketplaceSourceIdentity &&
         derivePluginSourceIdentity(candidate.entry.source.value, dependencies.sha256) === notice.available.pluginSourceIdentity &&
         selected?.evidence.source.marketplaceSourceIdentity === notice.available.marketplaceSourceIdentity &&
         selected.evidence.source.pluginSourceIdentity === notice.available.pluginSourceIdentity ? "stable" as const : "changed" as const;
-      if (current === undefined || selected === undefined) return { candidate: "current", source, target: "stale", project: "trusted", recovery: "clear", configuration: "valid", secrets: "available", capability: "available" };
+      if (current === undefined || selected === undefined) return { candidate: "current", source, target: "stale", project: "trusted", configuration: "valid", secrets: "available", capability: "available" };
       const project = await projectAuthorized(current.scope, signal) ? "trusted" as const : "untrusted" as const;
-      const recovery = "clear" as const;
       const detailId = deriveInspectionDetailId({
         version: 1,
         subject: "marketplace-candidate",
@@ -96,17 +95,17 @@ export function createAutomaticUpdateLifecycleAdapter(dependencies: Readonly<{
         if (detail.kind !== "stale") break;
       }
       if (detail?.kind !== "found" || detail.detail.summary.revision.immutable !== notice.available.immutableRevision) {
-        return { candidate: "stale", source, target: "current", project, recovery, configuration: "valid", secrets: "available", capability: "available" };
+        return { candidate: "stale", source, target: "current", project, configuration: "valid", secrets: "available", capability: "available" };
       }
       const configuration = detail.detail.configuration.some((field) => field.required && ["missing", "invalid"].includes(field.state)) ? "required" as const : "valid" as const;
       const secrets = detail.detail.configuration.some((field) => field.required && field.sensitive && field.state === "unavailable") ? "unavailable" as const : "available" as const;
       const capability = detail.detail.compatibility.status === "incompatible" || detail.detail.compatibility.requirements.some((requirement) => requirement.status === "unavailable") ? "unavailable" as const : "available" as const;
-      return { candidate: "current", source, target: "current", project, recovery, configuration, secrets, capability };
+      return { candidate: "current", source, target: "current", project, configuration, secrets, capability };
     },
     async apply(notice, signal): Promise<AutomaticUpdateLifecycleResult> {
       return run(notice, "immediate", signal);
     },
-    async stage(notice, signal): Promise<AutomaticUpdateLifecycleResult> {
+    async defer(notice, signal): Promise<AutomaticUpdateLifecycleResult> {
       return run(notice, "deferred", signal);
     },
   };
@@ -177,11 +176,11 @@ export function createAutomaticUpdateLifecycleAdapter(dependencies: Readonly<{
       switch (result.kind) {
         case "applied": return { kind: "changed" };
         case "current": return { kind: "unchanged" };
-        case "live-next-start": return { kind: "staged" };
-        case "degraded": return { kind: "rejected", code: "CAPABILITY_UNAVAILABLE" };
+        case "live-next-start": return { kind: "live-next-start" };
+        case "degraded": return { kind: "degraded" };
         case "stale": return { kind: "stale" };
         case "rejected": {
-          const code = result.code === "INCOMPATIBLE" || result.code === "UNTRUSTED" || result.code === "UNCONFIGURED" || result.code === "AVAILABLE_REVISION_CHANGED" || result.code === "CONFIGURATION_STALE" || result.code === "PROJECTION_FAILED" || result.code === "PROMOTION_FAILED" || result.code === "ABORTED"
+          const code = result.code === "INCOMPATIBLE" || result.code === "UNTRUSTED" || result.code === "UNCONFIGURED" || result.code === "AVAILABLE_REVISION_CHANGED" || result.code === "CONFIGURATION_STALE" || result.code === "PROJECTION_FAILED" || result.code === "PROMOTION_FAILED" || result.code === "BUSY" || result.code === "ABORTED"
             ? result.code : "UNTRUSTED";
           return { kind: "rejected", code };
         }

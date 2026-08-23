@@ -212,18 +212,16 @@ async function mutateClaimRecord(
 }
 
 type AutomaticDispositionInput =
-  | Readonly<{ kind: "changed" | "unchanged" }>
-  | Readonly<{ kind: "stale" | "rolled-back" }>
-  | Readonly<{ kind: "recovery-required" }>
+  | Readonly<{ kind: "changed" | "unchanged" | "live-next-start" }>
+  | Readonly<{ kind: "stale" }>
   | Readonly<{ kind: "rejected"; code: LifecycleRejectionCode }>;
 
-export function automaticDisposition(result: AutomaticDispositionInput): "automatic-applied" | "automatic-retryable" | "manual-required" | "approval-required" | "recovery-required" {
+export function automaticDisposition(result: AutomaticDispositionInput): "automatic-applied" | "automatic-retryable" | "manual-required" | "approval-required" {
   switch (result.kind) {
     case "changed":
-    case "unchanged": return "automatic-applied";
-    case "recovery-required": return "recovery-required";
-    case "stale":
-    case "rolled-back": return "automatic-retryable";
+    case "unchanged":
+    case "live-next-start": return "automatic-applied";
+    case "stale": return "automatic-retryable";
     case "rejected":
       switch (result.code) {
         case "INVALID_REQUEST":

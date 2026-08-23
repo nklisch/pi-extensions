@@ -40,10 +40,12 @@ export const NativeLifecycleOperationRegistry = Object.freeze({
   update: { tag: "update" },
   uninstall: { tag: "uninstall" },
   projectSync: { tag: "project-sync" },
+  rollback: { tag: "rollback" },
+  repair: { tag: "repair" },
 } as const);
 export const NativeLifecycleOperationKindSchema = z.enum(
   Object.values(NativeLifecycleOperationRegistry).map((entry) => entry.tag) as [
-    "enable", "disable", "update", "uninstall", "project-sync",
+    "enable", "disable", "update", "uninstall", "project-sync", "rollback", "repair",
   ],
 );
 
@@ -123,6 +125,7 @@ export const NativeLifecycleOperationRequestSchema = z.discriminatedUnion("opera
   z.object({ operation: z.literal("disable"), target: NativeInstalledOperationTargetRequestSchema }).strict().readonly(),
   z.object({ operation: z.literal("uninstall"), target: NativeInstalledOperationTargetRequestSchema }).strict().readonly(),
   z.object({ operation: z.literal("update"), target: NativeInstalledOperationTargetRequestSchema, candidate: NativeInstalledOperationTargetRequestSchema }).strict().readonly(),
+  z.object({ operation: z.enum(["rollback", "repair"]), target: NativeInstalledOperationTargetRequestSchema }).strict().readonly(),
   z.object({ operation: z.literal("project-sync"), mode: z.enum(["apply-intent", "publish-intent", "merge"]), projectKey: ProjectKeySchema }).strict().readonly(),
 ]);
 
@@ -248,7 +251,7 @@ export const NativeLifecycleOperationResultSchema = z.discriminatedUnion("kind",
   z.object({ kind: z.literal("stale"), ...ResultBase, reason: z.enum(["session", "inspection", "target", "candidate", "configuration", "consent", "project", "file", "capability"]) }).strict().readonly(),
   z.object({ kind: z.literal("conflict"), ...ResultBase, reason: z.enum(["operation-in-progress", "target-changed", "state-generation-changed", "file-changed", "unresolved-merge", "concurrent-mutation"]) }).strict().readonly(),
   z.object({ kind: z.literal("rejected"), ...ResultBase, code: NativeLifecycleStableCodeSchema }).strict().readonly(),
-  z.object({ kind: z.literal("degraded"), ...ResultBase, operation: z.enum(["enable", "disable", "update", "uninstall"]), failure: z.object({ plugin: PluginKeySchema, code: z.string().min(1), explanation: z.string().min(1) }).strict().readonly(), repairHint: z.enum(["repair", "rollback", "both"]).optional() }).strict().readonly(),
+  z.object({ kind: z.literal("degraded"), ...ResultBase, operation: z.enum(["enable", "disable", "update", "uninstall", "repair", "rollback"]), failure: z.object({ plugin: PluginKeySchema, code: z.string().min(1), explanation: z.string().min(1) }).strict().readonly(), repairHint: z.enum(["repair", "rollback", "both"]) }).strict().readonly(),
   z.object({ kind: z.literal("failed"), ...ResultBase, code: z.enum(["ADAPTER_FAILED", "PROGRESS_DELIVERY_FAILED", "PROJECT_INTENT_WRITE_FAILED", "CLEANUP_FAILED", "DISPOSED"]) }).strict().readonly(),
   z.object({ kind: z.literal("expired") }).strict().readonly(),
   z.object({ kind: z.literal("disposed") }).strict().readonly(),
@@ -261,6 +264,7 @@ export const NativeLifecycleOperationResultSchema = z.discriminatedUnion("kind",
     if (!sync && result.operation !== "uninstall" && result.after === undefined) context.addIssue({ code: "custom", path: ["after"], message: "activation success requires after evidence" });
     if (result.operation === "uninstall" && result.after !== undefined) context.addIssue({ code: "custom", path: ["after"], message: "uninstall success must prove target absence" });
     if ((result.operation === "uninstall") !== (result.cleanup !== undefined)) context.addIssue({ code: "custom", path: ["cleanup"], message: "cleanup belongs only to uninstall success" });
+    if (result.operation !== "project-sync" && result.activation === undefined) context.addIssue({ code: "custom", path: ["activation"], message: "lifecycle success requires activation outcome" });
   }
   if (result.kind === "current-state") {
     const sync = result.operation === "project-sync";
@@ -303,6 +307,7 @@ export const NativeLifecycleOperationConfirmationSchema = z.discriminatedUnion("
   z.object({ kind: z.literal("confirm"), previewId: NativeLifecyclePreviewIdSchema, expectedVersion: NativeLifecycleSessionVersionSchema, operation: z.enum(["enable", "disable"]) }).strict().readonly(),
   z.object({ kind: z.literal("confirm-update"), previewId: NativeLifecyclePreviewIdSchema, expectedVersion: NativeLifecycleSessionVersionSchema, input: NativeUpdateConfirmationInputSchema }).strict().readonly(),
   z.object({ kind: z.literal("confirm-uninstall"), previewId: NativeLifecyclePreviewIdSchema, expectedVersion: NativeLifecycleSessionVersionSchema, persistentData: z.enum(["keep", "delete-confirmed"]) }).strict().readonly(),
+  z.object({ kind: z.literal("confirm-action"), previewId: NativeLifecyclePreviewIdSchema, expectedVersion: NativeLifecycleSessionVersionSchema, operation: z.enum(["repair", "rollback"]) }).strict().readonly(),
   z.object({ kind: z.literal("confirm-project-sync"), previewId: NativeLifecyclePreviewIdSchema, expectedVersion: NativeLifecycleSessionVersionSchema, resolutions: z.array(ProjectSyncConflictResolutionSchema).max(NativeLifecycleOperationSessionPolicy.maxSyncActions).readonly() }).strict().readonly().superRefine((confirmation, context) => {
     const ids = confirmation.resolutions.map((resolution) => resolution.conflictId);
     if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", path: ["resolutions"], message: "duplicate conflict resolutions" });

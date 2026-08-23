@@ -17,9 +17,12 @@ export async function buildNativeLifecycleConfirmation(input: Readonly<{
   signal: AbortSignal;
 }>): Promise<Readonly<{ kind: "confirmation"; confirmation: NativeLifecycleOperationConfirmation }> | Exclude<NativeControlInputResult, { kind: "supplied" }> | Readonly<{ kind: "input-required" }>> {
   const { preview } = input.session;
-  if (!input.confirmed && preview.operation !== "update" && preview.operation !== "project-sync") return { kind: "input-required" };
+  if (!input.confirmed && preview.operation !== "update" && preview.operation !== "project-sync" && preview.operation !== "repair" && preview.operation !== "rollback") return { kind: "input-required" };
   if (preview.operation === "enable" || preview.operation === "disable") {
     return { kind: "confirmation", confirmation: { kind: "confirm", previewId: preview.previewId, expectedVersion: input.session.version, operation: preview.operation } };
+  }
+  if (preview.operation === "repair" || preview.operation === "rollback") {
+    return { kind: "confirmation", confirmation: { kind: "confirm-action", previewId: preview.previewId, expectedVersion: input.session.version, operation: preview.operation } };
   }
   if (preview.operation === "uninstall") {
     if (input.persistentData === undefined) return { kind: "input-required" };

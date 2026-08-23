@@ -196,6 +196,12 @@ function detailLines(state: PluginManagerState, theme: Theme, bodyHeight: number
       `  ${detail.compatibility.components.counts.skills} skills · ${detail.compatibility.components.counts.hooks} command hooks · ${detail.compatibility.components.counts.mcpServers} MCP servers`,
       "",
       ...compatibilityLines(detail, theme),
+      ...(detail.activation === undefined ? [] : [
+        "",
+        theme.fg("accent", "Activation"),
+        `  ${detail.activation.state}${detail.activation.runningRevision === undefined ? "" : ` — running previous revision ${plain(detail.activation.runningRevision)}`}`,
+        ...(detail.activation.state === "degraded" && detail.activation.runningRevision === undefined ? [theme.fg("warning", "  not running — repair is available")] : []),
+      ]),
     );
   } else {
     lines.push(`Scope         ${row.scope ?? "unknown"}`, `Marketplace   ${plain(row.subtitle)}`, "", theme.fg("warning", "Exact detail is unavailable. Press R to retry."));

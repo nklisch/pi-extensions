@@ -151,7 +151,7 @@ export function createTrustedInstallationService(dependencies: TrustedInstallati
   }
 
   function safeRetained(entry: TrustedInstallSessionEntry) { return { ...entry.retained }; }
-  function conflict(entry: TrustedInstallSessionEntry, reason: "already-installed-different-revision" | "operation-in-progress" | "pending-transition" | "concurrent-mutation"): TrustedInstallActivationResult {
+  function conflict(entry: TrustedInstallSessionEntry, reason: "already-installed-different-revision" | "operation-in-progress" | "concurrent-mutation"): TrustedInstallActivationResult {
     return TrustedInstallActivationResultSchema.parse({ kind: "conflict", reason, progress: entry.progress, retained: safeRetained(entry) });
   }
   function stale(entry: TrustedInstallSessionEntry, reason: "session" | "candidate" | "configuration" | "consent" | "project" | "capability"): TrustedInstallActivationResult {
@@ -159,55 +159,6 @@ export function createTrustedInstallationService(dependencies: TrustedInstallati
   }
   function cancelled(entry: TrustedInstallSessionEntry, phase: TrustedInstallProgressEvent["phase"]): TrustedInstallActivationResult {
     return TrustedInstallActivationResultSchema.parse({ kind: "cancelled", phase, progress: entry.progress, retained: safeRetained(entry) });
-  }
-
-  function pauseForWorkflowRecovery(
-    entry: TrustedInstallSessionEntry,
-    action: "retry-configuration-recovery" | "retry-trust-recovery",
-  ): TrustedInstallActivationResult {
-    entry.state = "recovery-required";
-    const result = TrustedInstallActivationResultSchema.parse({
-      kind: "recovery-required",
-      action,
-      session: view(entry),
-      progress: entry.progress,
-      retained: safeRetained(entry),
-    });
-    registry.pause(entry, "recovery-required", result);
-    return result;
-  }
-
-  async function settleConfigurationRecovery(
-    entry: TrustedInstallSessionEntry,
-    signal: AbortSignal,
-  ): Promise<"current" | "retry" | "stale" | "pending"> {
-    const pending = entry.configurationRecovery;
-    if (pending === undefined) return "current";
-    let settlement: ConfigurationRecoverySettlement;
-    try {
-      settlement = await pending.recovery.settle(signal);
-    } catch {
-      return "pending";
-    }
-    if (settlement.kind === "recovery-required") return "pending";
-    if (pending.kind === "stale-cleanup" || settlement.kind === "stale") {
-      delete entry.configurationRecovery;
-      return "stale";
-    }
-    if (pending.kind === "retry-save") {
-      delete entry.configurationRecovery;
-      return "retry";
-    }
-    const document = settlement.kind === "stored"
-      ? settlement.document
-      : pending.kind === "stored-cleanup"
-        ? pending.document
-        : undefined;
-    if (document === undefined) return "pending";
-    delete entry.configurationRecovery;
-    entry.configurationRevision = document.revision;
-    entry.retained.configuration = true;
-    return "current";
   }
 
   async function projectRoot(candidate: TrustedInstallCandidate, signal: AbortSignal): Promise<TrustedProjectRoot | undefined> {
@@ -259,7 +210,7 @@ export function createTrustedInstallationService(dependencies: TrustedInstallati
       });
     }
     if (result.kind === "current") return finish(entry, { kind: "current-state", plugin: entry.candidate.binding.plugin, scope: entry.candidate.binding.scope, revision: entry.candidate.binding.immutableRevision, activation: "enabled", reason: "already-active", progress: entry.progress, retained: safeRetained(entry) });
-    if (result.kind === "degraded") return finish(entry, { kind: "failed", code: "ADAPTER_FAILED", progress: entry.progress, retained: safeRetained(entry) });
+    if (result.kind === "degraded") return finish(entry, { kind: "degraded", plugin: entry.candidate.binding.plugin, scope: entry.candidate.binding.scope, failure: result.failure, repairHint: result.runningRevision === undefined ? "repair" : "both", progress: entry.progress, retained: safeRetained(entry) });
     if (result.kind === "stale") return finish(entry, conflict(entry, "concurrent-mutation"));
     if (result.code === "ABORTED") return finish(entry, cancelled(entry, "activation-transaction"));
     if (result.code === "AVAILABLE_REVISION_CHANGED") return finish(entry, stale(entry, "candidate"));
@@ -412,7 +363,8 @@ export function createTrustedInstallationService(dependencies: TrustedInstallati
       }
       if (issues.length > 0) {
         progress(entry, phase, "failed", options, "INPUT_REQUIRED");
-        registry.restore(entry);
+        entry.state = "awaiting-input";
+        delete entry.result;
         return TrustedInstallActivationResultSchema.parse({ kind: "needs-input", issues: sortedIssues(issues), session: view(entry) });
       }
       progress(entry, phase, "completed", options);
@@ -425,27 +377,20 @@ export function createTrustedInstallationService(dependencies: TrustedInstallati
           if (configurationRequest === undefined) throw new Error("configuration authority was not established");
           const saved = await dependencies.configuration.save(configurationRequest, signal);
           if (saved.kind === "stale") return finish(entry, stale(entry, "configuration"));
-          if (saved.kind === "stale-with-cleanup-required") {
-            entry.configurationRecovery = { kind: "stale-cleanup", recovery: saved.cleanup.recovery };
-          } else if (saved.kind === "ambiguous-with-recovery-required") {
-            entry.configurationRecovery = { kind: "ambiguous", recovery: saved.recovery.recovery };
-          } else if (saved.kind === "stored-with-cleanup-required") {
-            entry.retained.configuration = true;
-            entry.configurationRecovery = {
-              kind: "stored-cleanup",
-              recovery: saved.cleanup.recovery,
-              document: saved.document,
-            };
-          }
-          if (entry.configurationRecovery !== undefined) {
-            const settled = await settleConfigurationRecovery(entry, signal);
-            if (settled === "pending") return pauseForWorkflowRecovery(entry, "retry-configuration-recovery");
-            if (settled === "stale") return finish(entry, stale(entry, "configuration"));
-            if (settled === "retry") throw new Error("configuration save recovery requires retry");
-          }
           if (saved.kind === "secret-collision") return finish(entry, { kind: "rejected", code: saved.code, diagnostics: [], progress: entry.progress, retained: safeRetained(entry) });
           if (saved.kind === "stored") {
             entry.configurationRevision = saved.document.revision;
+            entry.retained.configuration = true;
+          } else {
+            const cleanupAuthority = saved.kind === "ambiguous-with-cleanup-required" ? saved.recovery.recovery : saved.cleanup.recovery;
+            let settlement: ConfigurationRecoverySettlement;
+            try { settlement = await cleanupAuthority.settle(signal); }
+            catch { return finish(entry, { kind: "failed", code: "CLEANUP_FAILED", progress: entry.progress, retained: safeRetained(entry) }); }
+            if (settlement.kind === "unresolved") return finish(entry, { kind: "failed", code: "CLEANUP_FAILED", progress: entry.progress, retained: safeRetained(entry) });
+            if (saved.kind === "stale-with-cleanup-required" || settlement.kind === "stale") return finish(entry, stale(entry, "configuration"));
+            const document = settlement.kind === "stored" ? settlement.document : saved.kind === "stored-with-cleanup-required" ? saved.document : undefined;
+            if (document === undefined) return finish(entry, { kind: "failed", code: "ADAPTER_FAILED", progress: entry.progress, retained: safeRetained(entry) });
+            entry.configurationRevision = document.revision;
             entry.retained.configuration = true;
           }
         }
@@ -508,8 +453,7 @@ export function createTrustedInstallationService(dependencies: TrustedInstallati
     } catch (error) {
       if (error instanceof ProjectAuthorityStale) return finish(entry, stale(entry, "project"));
       if (error instanceof ConfigurationCleanupError) {
-        entry.configurationRecovery = { kind: "retry-save", recovery: error.cleanup.recovery };
-        return pauseForWorkflowRecovery(entry, "retry-configuration-recovery");
+        return finish(entry, { kind: "failed", code: "CLEANUP_FAILED", progress: entry.progress, retained: safeRetained(entry) });
       }
       if (isCandidateContentCleanupError(error)) {
         retainCandidateCleanup(error);
@@ -531,31 +475,6 @@ export function createTrustedInstallationService(dependencies: TrustedInstallati
   const application: TrustedInstallationService = Object.freeze({
     open,
     activate,
-    async recover(
-      request: Parameters<TrustedInstallationService["recover"]>[0],
-      options: TrustedInstallExecutionOptions,
-      callerSignal: AbortSignal,
-    ) {
-      if (quiesced) return TrustedInstallActivationResultSchema.parse({ kind: "disposed" });
-      const lookup = await registry.lookup(request.token);
-      if (lookup.kind !== "found") return TrustedInstallActivationResultSchema.parse({ kind: lookup.kind });
-      const entry = lookup.entry;
-      const submission = TrustedInstallSubmissionSchema.parse(request.submission);
-      if (submission.expectedVersion !== entry.version) return stale(entry, "session");
-      if (entry.configurationRecovery !== undefined) {
-        // Recovery owns already-created credentials and must remain callable even
-        // when cancellation aborted the original activation controller.
-        const settled = await settleConfigurationRecovery(entry, callerSignal);
-        if (settled === "pending") return pauseForWorkflowRecovery(entry, "retry-configuration-recovery");
-        if (settled === "stale") return finish(entry, stale(entry, "configuration"));
-      } else if (entry.trustRecoveryPending) {
-        delete entry.trustRecoveryPending;
-      } else {
-        return entry.result ?? stale(entry, "session");
-      }
-      registry.restore(entry);
-      return activate({ token: request.token, submission }, options, callerSignal);
-    },
     async run(request: Parameters<TrustedInstallationService["run"]>[0], options: TrustedInstallRunOptions, signal: AbortSignal) {
       const opened = await open(request, signal);
       if (opened.kind !== "opened") {

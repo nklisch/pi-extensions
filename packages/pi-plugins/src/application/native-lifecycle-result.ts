@@ -27,17 +27,17 @@ export function projectPluginLifecycleResult(input: Readonly<{
   components?: Readonly<{ skills: number; hooks: number; mcpServers: number }>;
   sha256: Sha256;
 }>): NativeLifecycleOperationResult {
-  const base = { operation: input.result.operation as "enable" | "disable" | "update" | "uninstall", previewId: input.previewId, progress: input.progress, diagnostics: input.diagnostics ?? [] } as const;
+  const base = { operation: input.result.operation as "enable" | "disable" | "update" | "uninstall" | "repair" | "rollback", previewId: input.previewId, progress: input.progress, diagnostics: input.diagnostics ?? [] } as const;
   const result = input.result;
   if (result.kind === "applied" || result.kind === "live-next-start") {
     const after = observedTarget(input.target, result.snapshot, input.sha256);
     return NativeLifecycleOperationResultSchema.parse({ kind: "succeeded", ...base, before: input.target.binding, ...(after === undefined ? {} : { after }), ...(input.components === undefined ? {} : { components: input.components }), ...(result.operation === "uninstall" ? { cleanup: { persistentData: input.cleanupPersistentData ?? (input.persistentData === "delete-confirmed" ? "pending" : "retained"), configuration: "retained", trust: "retained", revisions: "collection-deferred" } } : {}), activation: result.kind === "applied" ? "applied" : "live-next-start", effects: effects("changed", result.snapshot.generation) });
   }
   if (result.kind === "current") {
-    const reason = result.operation === "enable" ? "already-enabled" : result.operation === "disable" ? "already-disabled" : result.operation === "update" ? "revision-current" : "already-uninstalled";
+    const reason = result.operation === "enable" ? "already-enabled" : result.operation === "disable" ? "already-disabled" : result.operation === "update" ? "revision-current" : result.operation === "uninstall" ? "already-uninstalled" : "revision-current";
     return NativeLifecycleOperationResultSchema.parse({ kind: "current-state", ...base, reason, target: observedTarget(input.target, result.snapshot, input.sha256) ?? input.target.binding, effects: effects("unchanged", result.snapshot.generation) });
   }
-  if (result.kind === "degraded") return NativeLifecycleOperationResultSchema.parse({ kind: "degraded", ...base, failure: result.failure, repairHint: result.runningRevision === undefined ? "both" : "repair", effects: effects("changed", result.snapshot.generation) });
+  if (result.kind === "degraded") return NativeLifecycleOperationResultSchema.parse({ kind: "degraded", ...base, failure: result.failure, repairHint: result.runningRevision === undefined ? "repair" : "both", effects: effects("changed", result.snapshot.generation) });
   if (result.kind === "stale") return NativeLifecycleOperationResultSchema.parse({ kind: "conflict", ...base, reason: "target-changed", effects: effects("unchanged", result.actual) });
   if (result.code === "ABORTED") return NativeLifecycleOperationResultSchema.parse({ kind: "cancelled", ...base, phase: input.cancellationPhase ?? "lifecycle-transaction", effects: effects("unchanged") });
   if (result.code === "AVAILABLE_REVISION_CHANGED" || result.code === "CONFIGURATION_STALE") return NativeLifecycleOperationResultSchema.parse({ kind: "stale", ...base, reason: result.code === "CONFIGURATION_STALE" ? "configuration" : "candidate", effects: effects("unchanged") });

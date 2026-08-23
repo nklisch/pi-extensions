@@ -457,12 +457,13 @@ trailing `...` is repeatable.
 | `inspection.diagnose` | `/plugins doctor [<plugin-key>] [--scope user\|project] [--snapshot-id <value>] [--detail-id <value>] [--include-adoption]` | `local-read` | `none` | Check plugin host or plugin health |
 | `install.open` | `/plugins install open <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>]` | `mutation` | `none` | Open a trusted installation |
 | `install.apply` | `/plugins install apply <install-token>` | `mutation` | `configuration` | Apply a trusted installation |
-| `install.recover` | `/plugins install recover <install-token>` | `mutation` | `configuration` | Recover a trusted installation |
 | `install.run` | `/plugins add <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>]` | `mutation` | `configuration` | Add a plugin |
 | `lifecycle.enable` | `/plugins enable <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>] [--preview-only] [--yes]` | `mutation` | `confirmation` | Enable a plugin |
 | `lifecycle.disable` | `/plugins disable <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>] [--preview-only] [--yes]` | `mutation` | `confirmation` | Disable a plugin |
 | `lifecycle.update` | `/plugins update <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>] [--preview-only] [--yes] [--candidate-snapshot-id <value>] [--candidate-detail-id <value>]` | `mutation` | `configuration` | Update a plugin |
 | `lifecycle.uninstall` | `/plugins remove <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>] [--preview-only] [--yes] [--keep-data] [--delete-data]` | `mutation` | `confirmation` | Remove a plugin |
+| `lifecycle.rollback` | `/plugins rollback <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>]` | `mutation` | `none` | Run the previous plugin revision |
+| `lifecycle.repair` | `/plugins repair <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>]` | `mutation` | `none` | Repair a degraded plugin |
 | `trust.grant` | `/plugins trust <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>] --yes` | `mutation` | `confirmation` | Trust the exact installed plugin revision |
 | `project.sync` | `/plugins project sync --mode apply-intent\|publish-intent\|merge [--preview-only] [--yes]` | `mutation` | `decision` | Synchronize current project intent |
 | `updates.status` | `/plugins updates status [--scope user\|project\|all-current] [--plugin <value>]` | `local-read` | `none` | Show update status |
@@ -471,7 +472,7 @@ trailing `...` is repeatable.
 | `updates.policy.set` | `/plugins updates policy set --kind application\|cadence --target global\|scope\|marketplace\|plugin [--scope user\|project\|all-current] [--marketplace-id <value>] [--plugin <value>] [--mode inherit\|manual\|automatic] [--cadence paused\|conservative\|balanced\|frequent] [--preview-id <value>] [--consent-id <value>]` | `mutation` | `decision` | Set update policy through preview |
 | `updates.notices.list` | `/plugins updates notices list [--scope user\|project\|all-current] [--plugin <value>] [--after <value>] [--limit <integer>]` | `local-read` | `none` | List update notices |
 | `updates.notices.acknowledge` | `/plugins updates notices acknowledge <notice-id>...` | `mutation` | `none` | Acknowledge update notices |
-| `updates.automatic.run` | `/plugins updates automatic run [--notice-id <value>]... [--limit <integer>] [--explicit] [--mode stage\|apply]` | `mutation` | `none` | Run admitted plugin updates |
+| `updates.automatic.run` | `/plugins updates automatic run [--notice-id <value>]... [--limit <integer>] [--explicit] [--mode apply\|defer]` | `mutation` | `none` | Run admitted plugin updates |
 | `config.host-precedence` | `/plugins config host-precedence <order>` | `mutation` | `none` | Set dual-host declaration precedence |
 | `config.hook-visibility` | `/plugins config hook-visibility [<visibility>]` | `mutation` | `none` | Show or set hook context visibility |
 | `status` | `/plugins status` | `local-read` | `none` | Show plugin host status |

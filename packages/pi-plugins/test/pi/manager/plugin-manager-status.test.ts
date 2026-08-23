@@ -25,7 +25,6 @@ describe("plugin manager exact status presentation", () => {
       unavailable: "error",
       rejected: "error",
       partial: "warning",
-      "recovery-required": "error",
       cancelled: "warning",
       failed: "error",
       "presentation-required": "warning",

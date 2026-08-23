@@ -3,7 +3,7 @@ import { createNativePluginControlService } from "../../../src/application/nativ
 
 export const ControlReadyStatus = Object.freeze({
   status: "ready" as const,
-  local: { recovery: "settled" as const, runtime: "reconciled" as const },
+  local: { convergence: "settled" as const, runtime: "reconciled" as const },
   update: { state: "standby" as const, unreadCount: 0, unresolvedCount: 0, scopes: [] },
   blocked: [],
   capabilities: {
@@ -25,7 +25,7 @@ export function createControlFixture() {
       adoption: { preview: vi.fn(async () => ({ candidates: [], documents: [], diagnostics: [] })), import: vi.fn(async () => ({ outcomes: [], diagnostics: [] })) },
     },
     inspection: { list: vi.fn(async () => { throw Object.assign(new Error("private canary"), { code: "ADAPTER_FAILED" }); }), detail: vi.fn(), diagnose: vi.fn() },
-    trustedInstallation: { open: vi.fn(), activate: vi.fn(), recover: vi.fn(), run: vi.fn(), status: vi.fn(async () => ({ kind: "missing" })), cancel: vi.fn(async () => ({ kind: "missing" })) },
+    trustedInstallation: { open: vi.fn(), activate: vi.fn(), run: vi.fn(), status: vi.fn(async () => ({ kind: "missing" })), cancel: vi.fn(async () => ({ kind: "missing" })) },
     operations: { preview: vi.fn(), apply: vi.fn(), run: vi.fn(), status: vi.fn(async () => ({ kind: "missing" })), cancel: vi.fn(async () => ({ kind: "missing" })) },
     updates: {
       previewPolicy: vi.fn(async () => ({ kind: "rejected", code: "INVALID_CHANGE" })),

@@ -122,7 +122,7 @@ function applyResolutions(base: PortableProjectDeclaration, conflicts: readonly 
 }
 
 function requiredAction(kind: ProjectSyncRequiredAction["kind"], owner: Readonly<{ plugin?: string; marketplace?: string }>, sha256: Sha256): ProjectSyncRequiredAction {
-  const action = kind === "review-trust" ? "review-trust" : kind === "provide-configuration" ? "provide-configuration" : kind === "run-recovery" ? "run-recovery" : kind === "update-plugin" ? "review-update" : "inspect-source";
+  const action = kind === "review-trust" ? "review-trust" : kind === "provide-configuration" ? "provide-configuration" : kind === "repair-plugin" ? "repair" : kind === "update-plugin" ? "review-update" : "inspect-source";
   const evidence = { kind, ...owner, action };
   return { id: deriveProjectSyncActionId(evidence, sha256), kind, ...owner, action } as ProjectSyncRequiredAction;
 }

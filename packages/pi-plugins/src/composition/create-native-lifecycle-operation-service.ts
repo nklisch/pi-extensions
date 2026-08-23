@@ -24,13 +24,14 @@ import type { ProjectTrustPort } from "../application/ports/project-trust.js";
 import type { InspectionReadinessPort } from "../application/ports/inspection-readiness.js";
 import type { PluginInspectionService } from "../application/inspection-service.js";
 import type { MarketplaceCatalogService } from "../application/marketplace-catalog-service.js";
-import type { PluginLifecycleComposition } from "../application/plugin-lifecycle-service.js";
+import type { PluginLifecycleComposition, PluginLifecycleResult } from "../application/plugin-lifecycle-service.js";
 import type { MarketplaceRegistrationService } from "../application/marketplace-registration-service.js";
 import type { ProjectSyncReadinessSnapshot } from "../application/project-sync-projection.js";
 import type { ProjectGenerationSnapshot } from "../application/state-contract.js";
 import type { HostCapabilityStatus } from "../application/host-observation-contract.js";
 import type { ContentDigest } from "../domain/content-manifest.js";
 import type { Sha256 } from "../domain/source.js";
+import { marketplaceUpdateRecords } from "../application/marketplace-update-state.js";
 
 /** Private packaged wiring over the existing lifecycle/state authorities. */
 export function createComposedNativeLifecycleOperationService(input: Readonly<{
@@ -70,6 +71,48 @@ export function createComposedNativeLifecycleOperationService(input: Readonly<{
       : { scope, trustedBaseDirectory: input.userBaseDirectory };
     return { pathContext, paths: input.configurationPaths, secretCustody: input.secretCustody };
   };
+  const repair = async (target: import("../application/native-lifecycle-target.js").VerifiedNativeLifecycleTarget, signal: AbortSignal) => {
+    const notices = target.snapshot.states
+      .flatMap((state) => state.ok && JSON.stringify(state.snapshot.scope) === JSON.stringify(target.scope)
+        ? marketplaceUpdateRecords(state.snapshot).flatMap((record) => record.notices)
+        : [])
+      .filter((notice) => notice.plugin === target.binding.plugin && notice.available.immutableRevision === target.binding.selectedRevision)
+      .sort((left, right) => right.discoveredAt - left.discoveredAt);
+    const notice = notices[0];
+    if (notice === undefined) return { kind: "rejected", operation: "repair", code: "AVAILABLE_REVISION_CHANGED" } as PluginLifecycleResult;
+    const subject = {
+      version: 1 as const,
+      subject: "marketplace-candidate" as const,
+      scope: target.binding.scope,
+      plugin: notice.plugin,
+      registrationId: notice.registrationId as never,
+      candidateId: notice.candidateId as never,
+      catalogSnapshot: notice.snapshot as never,
+    };
+    const acquired = await candidate.acquire({ subject, snapshot: target.snapshot }, signal);
+    if (acquired.kind !== "ready") return { kind: "rejected", operation: "repair", code: acquired.kind === "stale" ? "AVAILABLE_REVISION_CHANGED" : "MALFORMED" } as PluginLifecycleResult;
+    const value = acquired.candidate;
+    try {
+      const root = target.scope.kind === "project" ? await input.projectRoots.acquire(signal) : undefined;
+      const configurationPathContext = target.scope.kind === "project"
+        ? { scope: target.scope, trustedProjectRoot: root! }
+        : { scope: target.scope, trustedBaseDirectory: input.userBaseDirectory };
+      const sourceContext = value.resolved.entry.source.value.kind === "marketplace-path"
+        ? { kind: "marketplace" as const, root: value.resolved.marketplace.root, source: value.resolved.marketplace.source, contentRootDigest: value.resolved.marketplace.content.rootDigest, content: value.resolved.marketplace.content, binding: value.resolved.marketplace.binding }
+        : { kind: "external" as const };
+      return await input.lifecycle.application.repair({
+        scope: target.scope,
+        plugin: target.binding.plugin,
+        entry: value.resolved.entry,
+        marketplaceSource: value.resolved.marketplace.source,
+        sourceContext,
+        configurationPathContext,
+      }, signal);
+    } finally {
+      await value.lease.release().catch(() => undefined);
+    }
+  };
+
   const executor = createNativeLifecycleOperationExecutor({
     targets,
     updates,
@@ -86,6 +129,7 @@ export function createComposedNativeLifecycleOperationService(input: Readonly<{
     evidence: input.evidence,
     projectRoots: input.projectRoots,
     sha256: input.sha256,
+    repair,
   });
   const sync = createProjectSyncService({
     state: input.state,

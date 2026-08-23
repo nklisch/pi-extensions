@@ -12,6 +12,6 @@ describe("native control result projection", () => {
   it("preserves semantic status/exit across renderer-neutral projection", () => {
     const projector = createNativeControlResultProjector();
     expect(projector.project(parsed.command, { status: "stale", data: ControlReadyStatus, diagnostics: [], human: [] }, executionId)).toMatchObject({ status: "stale", exit: { classification: "conflict-or-stale", code: 5 } });
-    expect(projector.project(parsed.command, { status: "recovery-required", data: ControlReadyStatus, diagnostics: [], human: [] }, executionId)).toMatchObject({ status: "recovery-required", exit: { code: 8 }, data: { status: "ready" } });
+    expect(projector.project(parsed.command, { status: "partial", data: ControlReadyStatus, diagnostics: [], human: [] }, executionId)).toMatchObject({ status: "partial", exit: { code: 8 }, data: { status: "ready" } });
   });
 });

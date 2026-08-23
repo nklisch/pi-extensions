@@ -273,7 +273,7 @@ export function createNativeCandidateInspector(dependencies: CandidateInspection
               compatibility,
               trust,
               configuration,
-              lifecycle: { installed: false, transition: "none", update: "not-applicable" },
+              lifecycle: { installed: false, health: "none", update: "not-applicable" },
               diagnostics,
             }),
           });

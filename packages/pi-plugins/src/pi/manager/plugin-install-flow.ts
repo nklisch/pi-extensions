@@ -20,13 +20,13 @@ export type PluginInstallState = Readonly<{
   editing?: Readonly<{ key: string; buffer: string; cursor: number }>;
   focus: PluginInstallFocus;
   scroll: Readonly<{ content: number; disclosure: number }>;
-  submission: "apply" | "recover";
+  submission: "apply";
   busy: boolean;
   frames: readonly NativeControlFrame[];
 }>;
 
 export type PluginInstallEvent =
-  | Readonly<{ type: "session-opened"; session: TrustedInstallSessionView; submission?: "apply" | "recover" }>
+  | Readonly<{ type: "session-opened"; session: TrustedInstallSessionView; submission?: "apply" }>
   | Readonly<{ type: "activation-result"; result: TrustedInstallActivationResult }>
   | Readonly<{ type: "toggle-disclosure"; key: string }>
   | Readonly<{ type: "consent"; consentId: string }>

@@ -68,22 +68,22 @@ function selectedRow(state: PluginManagerState): PluginManagerRow | undefined {
 const automaticRunResult = (envelope: NativeControlEnvelope) => NativeAutomaticUpdateRunResultSchema.safeParse(envelope.data);
 
 /**
- * Sync-now stages updates without activating them. When anything staged,
+ * Sync-now defers activation. When anything is live on the next start,
  * offer exactly one reload so the user can use the new versions immediately;
  * declining leaves activation to the next start. The offer lives only in this
  * foreground gesture — never in durable state, never from the background.
  */
-async function offerStagedReload(
+async function offerDeferredReload(
   context: ExtensionCommandContext,
   envelope: NativeControlEnvelope,
   confirm: (title: string, lines: readonly string[]) => Promise<boolean>,
 ): Promise<void> {
   const parsed = automaticRunResult(envelope);
   if (!parsed.success) return;
-  const staged = parsed.data.outcomes.filter((outcome) => outcome.kind === "staged").length;
-  if (staged === 0) return;
+  const deferred = parsed.data.outcomes.filter((outcome) => outcome.kind === "live-next-start").length;
+  if (deferred === 0) return;
   const confirmed = await confirm(
-    `${staged} update${staged === 1 ? "" : "s"} installed — reload now to use ${staged === 1 ? "it" : "them"}?`,
+    `${deferred} update${deferred === 1 ? "" : "s"} installed — reload now to use ${deferred === 1 ? "it" : "them"}?`,
     ["The updates are already installed. Reloading activates them now; otherwise they go live on the next start."],
   );
   if (confirmed) await context.reload();
@@ -285,7 +285,7 @@ export function createPluginManagerSession(input: Readonly<{
         change.policyKind === "application" && change.policyMode === "automatic" ? "Turn on automatic updates?" : "Change update policy?",
         [
           `Applies to ${audience}.`,
-          "Eligible updates install without asking each time; trust, configuration, and recovery checks still run.",
+          "Eligible updates install without asking each time; trust, configuration, and health checks still run.",
         ]);
       if (!approved) return "cancelled";
       report = await run(updatePolicySetCommand(change, { previewId: preview.data.preview.previewId, consentId: consent.consentId }));
@@ -391,7 +391,7 @@ export function createPluginManagerSession(input: Readonly<{
         tui.requestRender();
       };
 
-      const runPhase = async (phase: "open" | "apply" | "recover"): Promise<void> => {
+      const runPhase = async (phase: "open" | "apply"): Promise<void> => {
         if (state.busy) return;
         apply({ type: "busy", value: true });
         const port = phase === "open"
@@ -434,7 +434,7 @@ export function createPluginManagerSession(input: Readonly<{
             apply({ type: "busy", value: false });
             return;
           }
-          const phaseResult = await runner.run({ action: phase === "recover" ? "install-recover" : "install-apply", token: session.token });
+          const phaseResult = await runner.run({ action: "install-apply", token: session.token });
           if (phaseResult.kind === "cancelled") {
             apply({ type: "busy", value: false });
             return;
@@ -453,15 +453,8 @@ export function createPluginManagerSession(input: Readonly<{
             return;
           }
           if (activation.data.kind === "needs-input") {
-            apply({ type: "session-opened", session: activation.data.session, submission: phase === "recover" ? "recover" : "apply" });
+            apply({ type: "session-opened", session: activation.data.session, submission: "apply" });
             context.ui.notify("Configuration or exact consent needs renewed input.", "warning");
-            return;
-          }
-          if (activation.data.kind === "recovery-required") {
-            // The only result that still earns the screen: it carries the
-            // actionable recovery path. Everything else closes the flow and
-            // lets the manager refresh flip the row behind us.
-            apply({ type: "activation-result", result: activation.data });
             return;
           }
           result = Object.freeze({ kind: "handled", presentation: "local" });
@@ -478,8 +471,8 @@ export function createPluginManagerSession(input: Readonly<{
             }
           } else if (activation.data.kind === "current-state") {
             context.ui.notify(`${activation.data.plugin} is already added`, "info");
-          } else if (activation.data.kind === "rolled-back") {
-            context.ui.notify(`Couldn't add it — ${plainLifecycleFailure(activation.data.failure)}. The change was undone${activation.data.restored ? "" : "; check /plugins → Health for what's left pending"}.`, "error");
+          } else if (activation.data.kind === "degraded") {
+            context.ui.notify(`Added ${activation.data.plugin}, but it is degraded — repair or rollback it from /plugins → Health.`, "warning");
           } else if (activation.data.kind === "cancelled") {
             context.ui.notify("Add cancelled — nothing was installed.", "warning");
           } else if (activation.data.kind === "rejected") {
@@ -528,10 +521,6 @@ export function createPluginManagerSession(input: Readonly<{
         }
         if (state.step === "activation-result") {
           const activation = state.result;
-          if (activation?.kind === "recovery-required" && activation.action !== "run-recovery" && activation.session !== undefined) {
-            apply({ type: "session-opened", session: activation.session, submission: "recover" });
-            return;
-          }
           result = Object.freeze({ kind: "handled", presentation: "local" });
           done();
         } else void runPhase(state.step === "choose-inspect" ? "open" : state.submission);
@@ -583,7 +572,7 @@ export function createPluginManagerSession(input: Readonly<{
         try {
           const result = await runner.run(resolvedIntent);
           if (resolvedIntent.action === "update-all" && result.kind === "completed") {
-            await offerStagedReload(context, result.envelope, (title, lines) => confirmInline(context, title, lines));
+            await offerDeferredReload(context, result.envelope, (title, lines) => confirmInline(context, title, lines));
           }
           return result;
         }

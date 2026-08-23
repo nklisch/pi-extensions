@@ -1,7 +1,4 @@
-import type {
-  BoundPluginConfigurationService,
-  ConfigurationRecoveryCapability,
-} from "./configuration-service.js";
+import type { BoundPluginConfigurationService } from "./configuration-service.js";
 import type { ExactTrustGrantService } from "./exact-trust-grant-service.js";
 import {
   NativeLifecycleOperationResultSchema,
@@ -19,7 +16,7 @@ import type { NativeInspectionEvidencePort } from "./ports/native-inspection-evi
 import type { ProjectRootAuthorityPort, TrustedProjectRoot } from "./ports/project-root-authority.js";
 import { isCandidateContentCleanupError } from "./ports/candidate-content-lease.js";
 import type { ConfigurationPathContext } from "./ports/configuration-path.js";
-import type { PluginLifecycleComposition } from "./plugin-lifecycle-service.js";
+import type { PluginLifecycleComposition, PluginLifecycleResult } from "./plugin-lifecycle-service.js";
 import { validateTrustedInstallSubmission, type TrustedInstallConfigurationAuthority, type TrustedInstallConfigurationDependencies } from "./trusted-install-configuration.js";
 import { canonicalJson } from "../domain/canonical-json.js";
 import { hashContent, type ContentDigest } from "../domain/content-manifest.js";
@@ -37,28 +34,16 @@ export type NativeLifecycleOperationDependencies = Readonly<{
   evidence: NativeInspectionEvidencePort;
   projectRoots: ProjectRootAuthorityPort;
   sha256: Sha256;
+  repair?(target: VerifiedNativeLifecycleTarget, signal: AbortSignal): Promise<PluginLifecycleResult>;
 }>;
 
 export type VerifiedNativeLifecycleOperationContext = Readonly<{
-  operation: "enable" | "disable" | "update" | "uninstall";
+  operation: "enable" | "disable" | "update" | "uninstall" | "repair" | "rollback";
   previewId: NativeLifecyclePreviewId;
   target: VerifiedNativeLifecycleTarget;
   update?: PreparedNativeLifecycleUpdate;
   diagnostics?: readonly NativeDiagnostic[];
 }>;
-
-/** Opaque configuration recovery remains owned by the operation composition. */
-export class NativeLifecycleConfigurationRecoveryError extends Error {
-  constructor(
-    readonly recovery: ConfigurationRecoveryCapability,
-    readonly code: "ADAPTER_FAILED" | "CLEANUP_FAILED",
-    readonly retainedPreflight?: NativeLifecycleRetainedPreflightEvidence,
-    options?: ErrorOptions,
-  ) {
-    super("native lifecycle configuration recovery is required", options);
-    this.name = "NativeLifecycleConfigurationRecoveryError";
-  }
-}
 
 function emptyEffects() { return { state: "unchanged" as const, projectFile: "unchanged" as const, completedActionIds: [], pendingActionIds: [] }; }
 
@@ -72,7 +57,7 @@ function currentState(
 }
 
 function terminal(
-  input: Readonly<Record<string, unknown> & { kind: "stale" | "conflict" | "rejected" | "recovery-required" | "cancelled" | "failed" }>,
+  input: Readonly<Record<string, unknown> & { kind: "stale" | "conflict" | "rejected" | "cancelled" | "failed" }>,
   context: VerifiedNativeLifecycleOperationContext,
   progress: NativeLifecycleProgressRecorder,
   retainedPreflight?: NativeLifecycleRetainedPreflightEvidence,
@@ -98,6 +83,7 @@ function matchingConfirmation(operation: VerifiedNativeLifecycleOperationContext
   if (confirmation.kind === "deny") return true;
   if (operation === "enable" || operation === "disable") return confirmation.kind === "confirm" && confirmation.operation === operation;
   if (operation === "update") return confirmation.kind === "confirm-update";
+  if (operation === "repair" || operation === "rollback") return confirmation.kind === "confirm-action" && confirmation.operation === operation;
   return confirmation.kind === "confirm-uninstall";
 }
 
@@ -125,7 +111,6 @@ async function executeUpdate(
   const validated = await dependencies.updates.validate(context.update, signal);
   if (validated.kind === "current-state") return currentState(context, progress, "revision-current", validated.target);
   if (validated.kind !== "ready") {
-    if (validated.kind === "blocked") return terminal({ kind: "conflict", reason: "pending-transition" }, context, progress);
     if (validated.kind === "stale") return terminal({ kind: "stale", reason: validated.reason }, context, progress);
     return terminal({ kind: "rejected", code: "AVAILABLE_REVISION_CHANGED" }, context, progress);
   }
@@ -181,26 +166,17 @@ async function executeUpdate(
         configurationRevision = saved.document.revision;
         retained.configurationRevision = configurationRevision;
       } else {
-        const recovery = saved.kind === "ambiguous-with-recovery-required"
+        const cleanupAuthority = saved.kind === "ambiguous-with-cleanup-required"
           ? saved.recovery.recovery
           : saved.cleanup.recovery;
-        let settlement: Awaited<ReturnType<ConfigurationRecoveryCapability["settle"]>>;
+        let settlement: import("./configuration-service.js").ConfigurationRecoverySettlement;
         try {
-          settlement = await recovery.settle(signal);
-        } catch (error) {
-          throw new NativeLifecycleConfigurationRecoveryError(
-            recovery,
-            saved.kind === "ambiguous-with-recovery-required" ? "ADAPTER_FAILED" : "CLEANUP_FAILED",
-            retainedPreflight(retained),
-            { cause: error },
-          );
+          settlement = await cleanupAuthority.settle(signal);
+        } catch {
+          return terminal({ kind: "failed", code: saved.kind === "ambiguous-with-cleanup-required" ? "ADAPTER_FAILED" : "CLEANUP_FAILED" }, context, progress, retainedPreflight(retained));
         }
-        if (settlement.kind === "recovery-required") {
-          throw new NativeLifecycleConfigurationRecoveryError(
-            recovery,
-            saved.kind === "ambiguous-with-recovery-required" ? "ADAPTER_FAILED" : "CLEANUP_FAILED",
-            retainedPreflight(retained),
-          );
+        if (settlement.kind === "unresolved") {
+          return terminal({ kind: "failed", code: saved.kind === "ambiguous-with-cleanup-required" ? "ADAPTER_FAILED" : "CLEANUP_FAILED" }, context, progress, retainedPreflight(retained));
         }
         if (saved.kind === "stale-with-cleanup-required" || settlement.kind === "stale") {
           return terminal({ kind: "stale", reason: "configuration" }, context, progress, retainedPreflight(retained));
@@ -210,7 +186,7 @@ async function executeUpdate(
           : saved.kind === "stored-with-cleanup-required"
             ? saved.document
             : undefined;
-        if (document === undefined) throw new NativeLifecycleConfigurationRecoveryError(recovery, "ADAPTER_FAILED", retainedPreflight(retained));
+        if (document === undefined) return terminal({ kind: "failed", code: "ADAPTER_FAILED" }, context, progress, retainedPreflight(retained));
         configurationRevision = document.revision;
         retained.configurationRevision = configurationRevision;
       }
@@ -249,7 +225,7 @@ async function executeUpdate(
     const result = currentState(context, progress, "revision-current", revalidated.target);
     return NativeLifecycleOperationResultSchema.parse({ ...result, retainedPreflight: retainedPreflight(retained) });
   }
-  if (revalidated.kind !== "ready") return terminal({ kind: revalidated.kind === "blocked" ? "conflict" : "stale", ...(revalidated.kind === "blocked" ? { reason: "pending-transition" } : { reason: "candidate" }) } as never, context, progress, retainedPreflight(retained));
+  if (revalidated.kind !== "ready") return terminal({ kind: "stale", reason: "candidate" }, context, progress, retainedPreflight(retained));
   let evidenceCurrent: "current" | "stale";
   try {
     const validateEvidence = dependencies.evidence.validateForInstall?.bind(dependencies.evidence) ?? dependencies.evidence.validate.bind(dependencies.evidence);
@@ -306,11 +282,21 @@ export async function executeNativeLifecycleOperation(
   await progress.emit({ phase: "authority-revalidation", state: "started", plugin: context.target.binding.plugin });
   const validated = await dependencies.targets.validate(context.target, signal);
   if (validated.kind !== "ready") {
-    if (validated.kind === "blocked") return terminal({ kind: "conflict", reason: "pending-transition" }, context, progress);
     return terminal({ kind: "stale", reason: validated.reason === "project" ? "project" : validated.reason === "capability" ? "capability" : "target" }, context, progress);
   }
   await progress.emit({ phase: "authority-revalidation", state: "completed", plugin: context.target.binding.plugin });
   const target = validated.target;
+  if (context.operation === "rollback" || context.operation === "repair") {
+    if (confirmation.kind !== "confirm-action" || confirmation.operation !== context.operation) return terminal({ kind: "stale", reason: "session" }, context, progress);
+    await progress.emit({ phase: "lifecycle-transaction", state: "started", plugin: target.binding.plugin });
+    const result = context.operation === "rollback"
+      ? await dependencies.lifecycle.application.rollback({ scope: target.scope, plugin: target.binding.plugin, expectedTarget: target.expectation }, signal)
+      : dependencies.repair === undefined
+        ? ({ kind: "rejected", operation: "repair", code: "MALFORMED" } as PluginLifecycleResult)
+        : await dependencies.repair(target, signal);
+    await progress.emit({ phase: "lifecycle-transaction", state: "completed", plugin: target.binding.plugin });
+    return projectPluginLifecycleResult({ result, target: context.target, previewId: context.previewId, progress: progress.events(), ...(context.diagnostics === undefined ? {} : { diagnostics: context.diagnostics }), sha256: dependencies.sha256 });
+  }
   if (context.operation === "enable" && target.binding.activation === "enabled") return currentState(context, progress, "already-enabled", target);
   if (context.operation === "disable" && target.binding.activation === "disabled") return currentState(context, progress, "already-disabled", target);
   if (context.operation === "update") {

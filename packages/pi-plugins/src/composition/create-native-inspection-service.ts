@@ -35,7 +35,6 @@ export function createNativeInspectionComposition(input: Readonly<{
   mcp: Pick<McpLifecycleParticipant, "status">;
   capabilities?: RuntimeCapabilitySnapshot;
   convergence?: ConvergenceReport;
-  recovery?: ConvergenceReport;
   startup: HostStartupResult;
   status?: HostStatusService;
   configurations: PluginConfigurationStore;
@@ -58,7 +57,7 @@ export function createNativeInspectionComposition(input: Readonly<{
     skillHook: input.skillHook,
     mcp: input.mcp,
     ...(input.capabilities === undefined ? {} : { capabilities: input.capabilities }),
-    convergence: input.convergence ?? input.recovery ?? { results: [], deferred: false, processed: 0 },
+    convergence: input.convergence ?? { results: [], deferred: false, processed: 0 },
     startup: input.startup,
     ...(input.status === undefined ? {} : { status: input.status }),
     clock: input.clock,

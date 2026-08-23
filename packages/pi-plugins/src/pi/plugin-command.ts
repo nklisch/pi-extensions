@@ -65,7 +65,7 @@ function ownInvocationName(pi: ExtensionAPI, sourceUrl: string): string | undefi
 }
 
 function reloadDestination(command: string): PluginManagerDestination | undefined {
-  if (command === "install.run" || command === "install.apply" || command === "install.recover") return "install-result";
+  if (command === "install.run" || command === "install.apply") return "install-result";
   if (command.startsWith("lifecycle.") || command === "project.sync" || command === "updates.automatic.run") return "operation-result";
   return undefined;
 }

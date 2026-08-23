@@ -4,7 +4,7 @@ import { compareUtf8 } from "../domain/canonical-json.js";
 import type { ComponentId } from "../domain/components.js";
 import { parsePluginKey } from "../domain/identity.js";
 import type { InstalledPluginRecord, InstalledRevisionRecord } from "../domain/state/installed-state.js";
-import { ScopeReferenceSchema, toScopeReference, type ScopeContext, type ScopeReference } from "../domain/state/scope.js";
+import { toScopeReference, type ScopeContext, type ScopeReference } from "../domain/state/scope.js";
 import { createTrustCandidate } from "../domain/trust-policy.js";
 import type { InstalledPluginLoader } from "./ports/installed-plugin-loader.js";
 import type { InspectionReadinessPort } from "./ports/inspection-readiness.js";
@@ -80,12 +80,9 @@ function sameIds(left: readonly ComponentId[], right: readonly ComponentId[]): b
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
-function recoveryTransition(subject: InstalledInspectionDetailSubject, snapshot: InspectionEvidenceSnapshot): "none" | "deferred" | "blocked" {
-  const convergence = snapshot.convergence ?? snapshot.recovery ?? { results: [] };
-  const matches = convergence.results.filter((result) => result.scope !== undefined && sameScope(ScopeReferenceSchema.parse(result.scope), subject.scope) && result.plugin === subject.plugin);
-  if (matches.some((result) => result.kind === "blocked")) return "blocked";
-  if (matches.some((result) => result.kind === "deferred")) return "deferred";
-  return snapshot.startup.blocked.some((entry) => entry.plugin === subject.plugin) ? "blocked" : "none";
+function degradedLookup(subject: InstalledInspectionDetailSubject, snapshot: InspectionEvidenceSnapshot) {
+  return snapshot.startup.blocked.find((entry) => entry.plugin === subject.plugin &&
+    (entry.scope === undefined || sameScope(entry.scope, subject.scope)));
 }
 
 function updateState(
@@ -295,12 +292,13 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
       const activeExpected = authority.record.activation === "enabled";
       const skillsStatus = participantStatus({ evidence: runtime, participant: "skills-hooks", expectedSkills, expectedHooks, selectedRevision: subject.selectedRevision, activeExpected });
       const mcpStatus = participantStatus({ evidence: runtime, participant: "mcp", expectedMcp, selectedRevision: subject.selectedRevision, activeExpected });
-      const recovery = recoveryTransition(subject, snapshot);
-      const transition = recovery;
+      const degraded = degradedLookup(subject, snapshot);
       const update = updateState(subject, snapshot, authority.revision, dependencies.sha256);
       const findings: NativeDiagnosticInput["findings"][number][] = [];
-      if (transition === "deferred") findings.push(finding("recoveryDeferred", detailId));
-      else if (transition === "blocked") findings.push(finding("recoveryRequired", detailId));
+      if (degraded !== undefined) {
+        findings.push(finding("pluginDegraded", detailId));
+        if (degraded.runningRevision !== undefined) findings.push(finding("pluginFallbackActive", detailId));
+      }
       if (trust === "project-untrusted") findings.push(finding("projectUntrusted", detailId));
       if (report === undefined) findings.push(finding("capabilityUnavailable", detailId));
       else {
@@ -329,7 +327,7 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
 
       const configurationReady = !configurationUnavailable && !configuration.some((option) =>
         option.state === "invalid" || option.required && ["missing", "unavailable"].includes(option.state));
-      const runtimeAuthorityEligible = report?.activatable === true && trust === "authorized" && configurationReady && transition === "none";
+      const runtimeAuthorityEligible = report?.activatable === true && trust === "authorized" && configurationReady && degraded === undefined;
       if (runtimeAuthorityEligible) {
         const skillsFinding = runtimeFinding("skills-hooks", skillsStatus);
         const mcpFinding = runtimeFinding("mcp", mcpStatus);
@@ -349,7 +347,6 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
       else if (update.state === "automatic-retryable") findings.push(finding("updateAvailable", detailId));
       else if (update.state === "approval-required") findings.push(finding("updateApprovalRequired", detailId));
       else if (update.state === "manual-required") findings.push(finding("updateManualRequired", detailId));
-      else if (update.state === "recovery-required") findings.push(finding("updateRecoveryRequired", detailId));
       else if (update.state === "failed" || update.stale) findings.push(finding("updateFailed", detailId));
       if (update.schedule?.state === "clock-regressed") findings.push(finding("updateClockRegressed", detailId));
 
@@ -381,7 +378,7 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
           provenance: projectSafeProvenance(assessment.requirement.provenance),
         })).sort((left, right) => compareUtf8(left.id, right.id)),
       });
-      const activationState = transition !== "none" ? "recovery-required"
+      const activationState = degraded !== undefined ? "degraded"
         : condition === "blocked" ? "blocked"
         : !localRuntimeCurrent ? "unavailable"
         : authority.record.activation === "disabled" ? "inactive"
@@ -390,6 +387,7 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
         intent: authority.record.activation,
         state: activationState,
         selectedRevision: subject.selectedRevision,
+        ...(degraded?.runningRevision === undefined ? {} : { runningRevision: degraded.runningRevision }),
         ...(runtime?.projectionDigest === undefined ? {} : { projectionDigest: runtime.projectionDigest }),
         participants: [
           { participant: "skills-hooks", status: skillsStatus, ...(runtime?.skillsHooks.kind === "ready" ? { contributionDigest: runtime.skillsHooks.observation.contributionDigest } : {}) },
@@ -429,7 +427,7 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
           lifecycle: {
             installed: true,
             activationIntent: authority.record.activation,
-            transition,
+            health: degraded === undefined ? condition === "blocked" ? "blocked" : "none" : degraded.runningRevision === undefined ? "degraded" : "fallback-active",
             update: update.state,
             ...(update.policy === undefined ? {} : { policy: update.policy }),
             ...(update.notice === undefined ? {} : { notice: update.notice }),

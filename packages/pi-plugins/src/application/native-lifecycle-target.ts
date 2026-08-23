@@ -37,7 +37,7 @@ export type VerifiedNativeLifecycleTarget = Readonly<{
 
 export type NativeLifecycleTargetResolution =
   | Readonly<{ kind: "ready"; target: VerifiedNativeLifecycleTarget }>
-  | Readonly<{ kind: "current-state" | "stale" | "blocked" | "unavailable"; reason: "inspection" | "target" | "project" | "capability" | "pending-transition" | "recovery-required" }>;
+  | Readonly<{ kind: "current-state" | "stale" | "unavailable"; reason: "inspection" | "target" | "project" | "capability" }>;
 
 export interface NativeLifecycleTargetService {
   resolve(request: NativeInstalledOperationTargetRequest, signal: AbortSignal): Promise<NativeLifecycleTargetResolution>;
@@ -54,13 +54,6 @@ function findRecord(snapshot: InspectionEvidenceSnapshot, scope: ScopeReference,
   const records = "installed" in state.snapshot ? state.snapshot.installed.plugins : state.snapshot.project.plugins;
   const record = records.find((candidate) => candidate.plugin === plugin);
   return record === undefined ? undefined : { scope: state.snapshot.scope, record };
-}
-
-function recoveryBlocked(snapshot: InspectionEvidenceSnapshot, _scope: ScopeReference, plugin: string): boolean {
-  // Raw startup-recovery results describe the instant a successor began. An
-  // exact reload handoff can settle that transition immediately afterward, so
-  // only the host's published unresolved block set remains current authority.
-  return snapshot.startup.blocked.some((entry) => entry.plugin === plugin);
 }
 
 function buildTarget(
@@ -117,7 +110,6 @@ export function createNativeLifecycleTargetService(input: Readonly<{
     }
     const authority = findRecord(snapshot, subject.scope, subject.plugin);
     if (authority === undefined || authority.record.selectedRevision !== subject.selectedRevision) return { kind: "stale", reason: "target" };
-    if (recoveryBlocked(snapshot, subject.scope, subject.plugin)) return { kind: "blocked", reason: "recovery-required" };
     try { return { kind: "ready", target: buildTarget(request, snapshot, authority.scope, authority.record, input.sha256) }; }
     catch { return { kind: "unavailable", reason: "capability" }; }
   }
@@ -133,7 +125,6 @@ export function createNativeLifecycleTargetService(input: Readonly<{
     }
     const authority = findRecord(snapshot, target.binding.scope, target.binding.plugin);
     if (authority === undefined) return { kind: "stale", reason: "target" };
-    if (recoveryBlocked(snapshot, target.binding.scope, target.binding.plugin)) return { kind: "blocked", reason: "recovery-required" };
     const digest = deriveLifecycleTargetDigest(target.binding.scope, authority.record, input.sha256);
     if (digest !== target.binding.targetDigest || authority.record.selectedRevision !== target.binding.selectedRevision || authority.record.activation !== target.binding.activation) {
       return { kind: "stale", reason: "target" };

@@ -41,7 +41,7 @@ export type HostStartupResult = z.infer<typeof HostStartupResultSchema>;
 export const HostStatusSnapshotSchema = z.object({
   status: HostReadinessStatusSchema,
   local: z.object({
-    recovery: z.enum(["settled", "degraded", "blocked"]),
+    convergence: z.enum(["settled", "degraded", "blocked"]),
     runtime: z.enum(["reconciled", "degraded", "blocked"]),
   }).strict().readonly(),
   update: z.object({

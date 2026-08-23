@@ -70,7 +70,7 @@ export function nativeControlHumanLines(envelope: NativeControlEnvelope): readon
   if (status.success) {
     const value = status.data;
     return Object.freeze([
-      `Host ${value.status} · recovery ${value.local.recovery} · runtime ${value.local.runtime}`,
+      `Host ${value.status} · convergence ${value.local.convergence} · runtime ${value.local.runtime}`,
       `Updates ${value.update.state} · ${value.update.unreadCount} unread · ${value.update.unresolvedCount} unresolved`,
       ...Object.entries(value.capabilities).map(([name, capability]) => `${name}: ${capability.status} · ${capability.explanation}`),
       ...(value.blocked.length === 0 ? [] : value.blocked.map((blocked) => `blocked ${blocked.plugin}: ${blocked.code}`)),
@@ -90,5 +90,5 @@ export function nativeControlHumanLines(envelope: NativeControlEnvelope): readon
   const lines = [...human, ...diagnostics];
   return Object.freeze(lines.length > 0
     ? lines
-    : [`${summary} — ${envelope.status === "ok" ? "done" : envelope.status === "no-change" ? "already up to date" : envelope.status === "partial" ? "partly done" : envelope.status === "recovery-required" ? "needs recovery" : envelope.status}`]);
+    : [`${summary} — ${envelope.status === "ok" ? "done" : envelope.status === "no-change" ? "already up to date" : envelope.status === "partial" ? "partly done" : envelope.status}`]);
 }

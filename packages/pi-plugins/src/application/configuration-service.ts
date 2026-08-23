@@ -54,8 +54,7 @@ export type ConfigurationRecoverySettlement =
   | Readonly<{ kind: "settled" }>
   | Readonly<{ kind: "stored"; document: PluginConfigurationDocument }>
   | Readonly<{ kind: "stale"; actualRevision: ContentDigest | null }>
-  | Readonly<{ kind: "recovery-required" }>;
-
+  | Readonly<{ kind: "unresolved" }>;
 /** Opaque, bounded authority that owns every locator/evidence needed to settle recovery. */
 export interface ConfigurationRecoveryCapability {
   readonly [configurationRecoveryCapabilityBrand]: true;
@@ -90,7 +89,7 @@ export type ConfigurationSaveResult =
       cleanup: ConfigurationCleanup;
     }>
   | Readonly<{
-      kind: "ambiguous-with-recovery-required";
+      kind: "ambiguous-with-cleanup-required";
       recovery: ConfigurationReconciliation;
     }>
   | Readonly<{
@@ -301,7 +300,7 @@ function credentialCleanupRecovery(
     unowned = [...await cleanupUnownedLocators(secrets, unowned)];
     return owned.length === 0 && unowned.length === 0
       ? { kind: "settled" }
-      : { kind: "recovery-required" };
+      : { kind: "unresolved" };
   });
 }
 
@@ -350,7 +349,7 @@ function replaceRecovery(
         request,
         sha256,
       );
-      if (reconciliation.kind === "unknown") return { kind: "recovery-required" };
+      if (reconciliation.kind === "unknown") return { kind: "unresolved" };
       if (reconciliation.kind === "inactive") {
         settledAuthority = { kind: "stale", actualRevision: reconciliation.actualRevision };
         pendingOwned = owned;
@@ -367,7 +366,7 @@ function replaceRecovery(
     pendingUnowned = await cleanupUnownedLocators(secrets, pendingUnowned);
     return pendingOwned.length === 0 && pendingUnowned.length === 0
       ? settledAuthority
-      : { kind: "recovery-required" };
+      : { kind: "unresolved" };
   });
 }
 
@@ -554,7 +553,7 @@ export async function savePluginConfiguration(
     );
     if (reconciliation.kind === "unknown") {
       return {
-        kind: "ambiguous-with-recovery-required",
+        kind: "ambiguous-with-cleanup-required",
         recovery: {
           code: "CONFIGURATION_RECONCILIATION_REQUIRED",
           recovery: replaceRecovery(
@@ -615,7 +614,7 @@ export async function savePluginConfiguration(
     );
     if (reconciliation.kind === "unknown") {
       return {
-        kind: "ambiguous-with-recovery-required",
+        kind: "ambiguous-with-cleanup-required",
         recovery: {
           code: "CONFIGURATION_RECONCILIATION_REQUIRED",
           recovery: replaceRecovery(

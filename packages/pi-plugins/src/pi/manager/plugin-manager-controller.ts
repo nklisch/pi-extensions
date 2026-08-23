@@ -67,7 +67,7 @@ function installedRows(envelope: NativeControlEnvelope): readonly PluginManagerR
       key: Object.freeze({ subject: "installed" as const, key: `${scope ?? "unknown"}:${item.plugin}`, snapshotId: parsed.data.snapshotId, detailId: item.detailId }),
       title: item.name.text,
       subtitle: `${item.marketplace.text} · ${scope ?? "unknown scope"}`,
-      status: "installed",
+      status: item.condition === "degraded" ? "degraded" : item.condition === "blocked" ? "blocked" : "installed",
       statusTone: item.condition === "ready" ? "success" : item.condition === "degraded" ? "warning" : "error",
       ...(scope === undefined ? {} : { scope }),
       plugin: item.plugin,

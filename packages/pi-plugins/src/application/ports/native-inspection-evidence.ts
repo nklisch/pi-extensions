@@ -40,7 +40,7 @@ export type InspectionSnapshotBinding = Readonly<{
     capturedBy?: string;
   }>;
   runtimeEpoch: ContentDigest;
-  recoveryDigest: ContentDigest;
+  convergenceDigest: ContentDigest;
   updateDigest: ContentDigest;
 }>;
 
@@ -81,8 +81,6 @@ export type InspectionEvidenceSnapshot = Readonly<{
   capabilities?: RuntimeCapabilitySnapshot;
   runtime: readonly InstalledRuntimeEvidence[];
   convergence: ConvergenceReport;
-  /** Legacy name accepted only at the composition boundary during migration. */
-  recovery?: ConvergenceReport;
   startup: HostStartupResult;
   hostStatus?: HostStatusSnapshot;
 }>;
@@ -93,7 +91,7 @@ export interface NativeInspectionEvidencePort {
   /**
    * Revalidate install-bearing authority after the workflow's own configuration
    * or trust mutation. Scope generation and notice-only digest changes are
-   * expected there; catalog, capability, project, runtime, and recovery
+   * expected there; catalog, capability, project, runtime, and convergence
    * authority must remain exact.
    */
   validateForInstall?(binding: InspectionSnapshotBinding, signal: AbortSignal): Promise<"current" | "stale">;

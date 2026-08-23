@@ -192,7 +192,7 @@ export function createProjectSyncService(dependencies: ProjectSyncServiceDepende
           const replaced = await dependencies.files.replace({ root: context.root, expected: context.observation, declaration: planning.desired, writeId }, signal);
           if (replaced.kind === "stale") return result(context, progress, { kind: "conflict", reason: "file-changed" }, completed, actions.slice(index).map((entry) => entry.id), projectFile, latest.generation);
           if (replaced.kind === "unavailable") return result(context, progress, { kind: "rejected", code: replaced.code }, completed, actions.slice(index).map((entry) => entry.id), projectFile, latest.generation);
-          if (replaced.kind === "ambiguous") return result(context, progress, { kind: "recovery-required", code: "PROJECT_INTENT_WRITE_FAILED", action: "run-recovery" }, completed, actions.slice(index).map((entry) => entry.id), "unknown", latest.generation);
+          if (replaced.kind === "ambiguous") return result(context, progress, { kind: "failed", code: "PROJECT_INTENT_WRITE_FAILED" }, completed, actions.slice(index).map((entry) => entry.id), "unknown", latest.generation);
           projectFile = replaced.kind === "written" ? "written" : projectFile;
           completed.push(action.id);
           await progress.emit({ phase: "project-file-write", state: "completed", actionId: action.id });
