@@ -1,4 +1,15 @@
-## Unreleased
+## v0.4.0
+
+### Added
+
+- Agent orientation at session start: agents see installed plugins with
+  version, marketplace, component availability, and degraded status, plus a
+  generated per-plugin brief with an explicitly user-facing command section.
+- MCP candidate-attach failures surface as degraded host status with a
+  doctor finding and remediation instead of silently disabling MCP.
+- Reload broker tickets expire after two minutes, so a successor that never
+  answers cannot hang a reload.
+- Exact public export-surface pinning test.
 
 ### Changed
 

@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.21.0-nklisch.0] - 2026-08-23
+
+### Fixed
+
+- Load `@earendil-works/pi-ai/compat` lazily at sampling-request time so the
+  programmatic entry's static import graph stays host-peer-clean. A native
+  `import()` of `dist/programmatic.js` outside pi's jiti aliases no longer
+  crashes, which had silently disabled the MCP runtime in every pi session.
+  Sampling on hosts without pi-ai fails with a clear protocol error, and the
+  programmatic entry is pinned host-peer-clean by a contract test.
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
