@@ -1,3 +1,18 @@
+## Unreleased
+
+### Changed
+
+- Complete lifecycle convergence: interrupted installs, updates, and
+  uninstall data deletion converge on the next start without durable recovery
+  state; degraded revisions remain visible with repair and rollback actions.
+- Reconcile the architecture and specification with files-and-pointer state,
+  CAS mutation, mtime-grace cleanup, and live-next-start updates.
+
+### Fixed
+
+- Validate migration against a copy of the real pre-convergence plugin-host
+  state, including the krometrail-class pending marker and journal evidence.
+
 ## v0.3.9
 
 ### Fixed

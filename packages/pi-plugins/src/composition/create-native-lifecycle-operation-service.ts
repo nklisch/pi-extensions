@@ -32,10 +32,11 @@ import type { HostCapabilityStatus } from "../application/host-observation-contr
 import type { ContentDigest } from "../domain/content-manifest.js";
 import type { Sha256 } from "../domain/source.js";
 import { marketplaceUpdateRecords } from "../application/marketplace-update-state.js";
+import type { CandidateInspectionDetailSubject } from "../application/native-inspection-identifiers.js";
 
 /** Private packaged wiring over the existing lifecycle/state authorities. */
 export function createComposedNativeLifecycleOperationService(input: Readonly<{
-  catalog: Pick<MarketplaceCatalogService, "resolve">;
+  catalog: Pick<MarketplaceCatalogService, "resolve" | "search">;
   candidateContent: CandidateContentLeasePort;
   inspector: PluginInspectionService;
   readiness: InspectionReadinessPort;
@@ -78,39 +79,63 @@ export function createComposedNativeLifecycleOperationService(input: Readonly<{
         : [])
       .filter((notice) => notice.plugin === target.binding.plugin && notice.available.immutableRevision === target.binding.selectedRevision)
       .sort((left, right) => right.discoveredAt - left.discoveredAt);
+    let subject: CandidateInspectionDetailSubject;
     const notice = notices[0];
-    if (notice === undefined) return { kind: "rejected", operation: "repair", code: "AVAILABLE_REVISION_CHANGED" } as PluginLifecycleResult;
-    const subject = {
-      version: 1 as const,
-      subject: "marketplace-candidate" as const,
-      scope: target.binding.scope,
-      plugin: notice.plugin,
-      registrationId: notice.registrationId as never,
-      candidateId: notice.candidateId as never,
-      catalogSnapshot: notice.snapshot as never,
-    };
-    const acquired = await candidate.acquire({ subject, snapshot: target.snapshot }, signal);
-    if (acquired.kind !== "ready") return { kind: "rejected", operation: "repair", code: acquired.kind === "stale" ? "AVAILABLE_REVISION_CHANGED" : "MALFORMED" } as PluginLifecycleResult;
-    const value = acquired.candidate;
-    try {
-      const root = target.scope.kind === "project" ? await input.projectRoots.acquire(signal) : undefined;
-      const configurationPathContext = target.scope.kind === "project"
-        ? { scope: target.scope, trustedProjectRoot: root! }
-        : { scope: target.scope, trustedBaseDirectory: input.userBaseDirectory };
-      const sourceContext = value.resolved.entry.source.value.kind === "marketplace-path"
-        ? { kind: "marketplace" as const, root: value.resolved.marketplace.root, source: value.resolved.marketplace.source, contentRootDigest: value.resolved.marketplace.content.rootDigest, content: value.resolved.marketplace.content, binding: value.resolved.marketplace.binding }
-        : { kind: "external" as const };
-      return await input.lifecycle.application.repair({
-        scope: target.scope,
-        plugin: target.binding.plugin,
-        entry: value.resolved.entry,
-        marketplaceSource: value.resolved.marketplace.source,
-        sourceContext,
-        configurationPathContext,
+    if (notice !== undefined) {
+      subject = {
+        version: 1 as const,
+        subject: "marketplace-candidate" as const,
+        scope: target.binding.scope,
+        plugin: notice.plugin,
+        registrationId: notice.registrationId as never,
+        candidateId: notice.candidateId as never,
+        catalogSnapshot: notice.snapshot as never,
+      };
+    } else {
+      // Repair is valid even after the update notice has been resolved. Search
+      // the selected local catalog again instead of treating the absence of a
+      // notification as source drift; the installed record remains the
+      // authority for the revision being repaired.
+      const page = await input.catalog.search({
+        scope: target.binding.scope.kind === "user" ? "user" : "project",
+        query: target.binding.plugin,
+        limit: 100,
       }, signal);
-    } finally {
-      await value.lease.release().catch(() => undefined);
+      const candidate = page.candidates.find((entry) => entry.plugin === target.binding.plugin);
+      if (candidate === undefined) return { kind: "rejected", operation: "repair", code: "AVAILABLE_REVISION_CHANGED" } as PluginLifecycleResult;
+      subject = {
+        version: 1 as const,
+        subject: "marketplace-candidate" as const,
+        scope: target.binding.scope,
+        plugin: candidate.plugin as never,
+        registrationId: candidate.registrationId as never,
+        candidateId: candidate.id as never,
+        catalogSnapshot: candidate.snapshot as never,
+      };
     }
+    // Repair validates the selected source again in the lifecycle service;
+    // resolving the catalog candidate here is enough to recover its materializer
+    // context. Candidate acquisition is intentionally skipped because it also
+    // requires a current inspection snapshot and can reject a valid repair
+    // merely because the update notice was already resolved.
+    const resolved = await input.catalog.resolve({ candidateId: subject.candidateId, snapshot: subject.catalogSnapshot }, signal);
+    if (resolved.kind !== "resolved") return { kind: "rejected", operation: "repair", code: resolved.kind === "candidate-stale" ? "AVAILABLE_REVISION_CHANGED" : "MALFORMED" } as PluginLifecycleResult;
+    const value = resolved.candidate;
+    const root = target.scope.kind === "project" ? await input.projectRoots.acquire(signal) : undefined;
+    const configurationPathContext = target.scope.kind === "project"
+      ? { scope: target.scope, trustedProjectRoot: root! }
+      : { scope: target.scope, trustedBaseDirectory: input.userBaseDirectory };
+    const sourceContext = value.entry.source.value.kind === "marketplace-path"
+      ? { kind: "marketplace" as const, root: value.marketplace.root, source: value.marketplace.source, contentRootDigest: value.marketplace.content.rootDigest, content: value.marketplace.content, binding: value.marketplace.binding }
+      : { kind: "external" as const };
+    return input.lifecycle.application.repair({
+      scope: target.scope,
+      plugin: target.binding.plugin,
+      entry: value.entry,
+      marketplaceSource: value.marketplace.source,
+      sourceContext,
+      configurationPathContext,
+    }, signal);
   };
 
   const executor = createNativeLifecycleOperationExecutor({

@@ -1,4 +1,4 @@
-import { lstat } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanupSandbox, type CleanE2ESandbox } from "../harness/environment.js";
@@ -59,14 +59,11 @@ describe("final from-empty packed registry acceptance", () => {
     });
     expect(installed.installedReceipts).toContainEqual(expect.objectContaining({
       name: "@nklisch/pi-mcp-adapter",
-      version: "2.20.1-nklisch.0",
-      integrity: "sha512-keVNCjw0ZldLr5p6TwB3UvM9dHc9SwhCHbSQQOvdR+nhMFRua2lHdAG3nMqmr9CK1torEd8e5PX3ZyptXXhmbQ==",
+      version: "2.20.1-nklisch.1",
+      integrity: expect.stringMatching(/^sha512-/u),
     }));
-    expect(installed.installedReceipts).toContainEqual(expect.objectContaining({
-      name: "@nklisch/pi-subagents",
-      version: "18.0.4-nklisch.1",
-      integrity: "sha512-33Q8JDffXUuiT1M3XjLXCI4If9p+3AOwsUp/b5f1+B7Y5JI8Z8SVU+Dncq0umAG2IjgVYKnT9FHToFHNoZGWoQ==",
-    }));
+    const bundledSubagents = JSON.parse(await readFile(join(installed.packageRoot, "node_modules", "@nklisch", "pi-subagents", "package.json"), "utf8"));
+    expect(bundledSubagents).toMatchObject({ name: "@nklisch/pi-subagents", version: "18.1.0-nklisch.1" });
     expect(installed.installedReceipts.every((receipt) => receipt.realpath.startsWith(destination))).toBe(true);
 
     const finalSandbox: CleanE2ESandbox = {

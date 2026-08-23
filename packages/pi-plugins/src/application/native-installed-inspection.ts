@@ -229,22 +229,42 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
       }
 
       let loaded: Awaited<ReturnType<InstalledPluginLoader["load"]>>;
+      let loadedFallback = false;
       try {
         loaded = await dependencies.installed.load({ scope: authority.scope, revision: authority.revision }, signal);
       } catch (error) {
         if (signal.aborted) throw signal.reason ?? error;
-        const diagnostics = compileNativeDiagnostics({ findings: [finding("revisionUnavailable", detailId)] }, dependencies.sha256);
-        const names = parsePluginKey(subject.plugin);
-        const summary = NativeInspectionSummarySchema.parse({
-          detailId, subject: "installed", scope: subject.scope, plugin: subject.plugin,
-          name: safe(names.plugin), marketplace: safe(names.marketplace),
-          revision: { installed: safe(subject.selectedRevision), immutable: subject.selectedRevision, resolution: "exact" },
-          condition: deriveNativeInspectionCondition(diagnostics), freshness: { status: "unavailable", basis: "state" },
-          diagnosticCounts: countNativeDiagnostics(diagnostics),
-        });
-        return NativeInspectionDetailResultSchema.parse({ kind: "unavailable", summary, diagnostics });
+        // A broken selected revision is still an installed, inspectable plugin:
+        // use the session's previous revision as the presentation source while
+        // retaining the selected digest and degraded diagnostics as authority.
+        // Returning `unavailable` here hid the repair/rollback actions exactly
+        // when the user needed them.
+        const previousRevision = authority.record.previousRevision === undefined
+          ? undefined
+          : authority.record.revisions.find((revision) => revision.revision === authority.record.previousRevision);
+        if (previousRevision === undefined) {
+          const diagnostics = compileNativeDiagnostics({ findings: [finding("revisionUnavailable", detailId)] }, dependencies.sha256);
+          const names = parsePluginKey(subject.plugin);
+          const summary = NativeInspectionSummarySchema.parse({
+            detailId, subject: "installed", scope: subject.scope, plugin: subject.plugin,
+            name: safe(names.plugin), marketplace: safe(names.marketplace),
+            revision: { installed: safe(subject.selectedRevision), immutable: subject.selectedRevision, resolution: "exact" },
+            condition: deriveNativeInspectionCondition(diagnostics), freshness: { status: "unavailable", basis: "state" },
+            diagnosticCounts: countNativeDiagnostics(diagnostics),
+          });
+          return NativeInspectionDetailResultSchema.parse({ kind: "unavailable", summary, diagnostics });
+        }
+        try {
+          loaded = await dependencies.installed.load({ scope: authority.scope, revision: previousRevision }, signal);
+          loadedFallback = true;
+        } catch (fallbackError) {
+          if (signal.aborted) throw signal.reason ?? fallbackError;
+          const diagnostics = compileNativeDiagnostics({ findings: [finding("revisionUnavailable", detailId)] }, dependencies.sha256);
+          return NativeInspectionDetailResultSchema.parse({ kind: "unavailable", diagnostics });
+        }
       }
-      if (loaded.plugin.identity.key !== subject.plugin || loaded.binding !== subject.selectedRevision) {
+      const expectedLoadedBinding = loadedFallback ? authority.record.previousRevision : subject.selectedRevision;
+      if (loaded.plugin.identity.key !== subject.plugin || loaded.binding !== expectedLoadedBinding) {
         const diagnostics = compileNativeDiagnostics({ findings: [finding("revisionUnavailable", detailId)] }, dependencies.sha256);
         return NativeInspectionDetailResultSchema.parse({ kind: "unavailable", diagnostics });
       }

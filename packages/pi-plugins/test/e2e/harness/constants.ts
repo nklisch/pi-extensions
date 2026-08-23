@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const E2E_PI_VERSION = "0.80.8";
+export const E2E_PI_VERSION = "0.82.0";
 export const E2E_SEED = 0x504c5547;
 export const E2E_GIT_PORT = Number.parseInt(process.env.PI_PLUGIN_HOST_E2E_GIT_PORT ?? "46180", 10);
 export const E2E_MODEL_PORT = Number.parseInt(process.env.PI_PLUGIN_HOST_E2E_MODEL_PORT ?? "46181", 10);

@@ -25,7 +25,7 @@ describe("packed headless and native Pi manager parity", () => {
       "--mode", "text", "--print", "--no-session", "/plugins status",
     ], { cwd: sandbox.project, env: sandbox.env, timeoutMs: 30_000 });
     const userOutput = `${printed.stdout}${printed.stderr}`;
-    expect(userOutput).toContain("Host ready · recovery settled · runtime reconciled");
+    expect(userOutput).toContain("Host ready · convergence settled · runtime reconciled");
     expect(userOutput).not.toContain("\u001b");
     expect(userOutput.length).toBeLessThan(65_536);
   });

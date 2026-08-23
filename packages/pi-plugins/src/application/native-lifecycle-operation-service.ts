@@ -214,7 +214,9 @@ export function createNativeLifecycleOperationService(dependencies: NativeLifecy
     return entry.preview.operation === "update" ? false
       : entry.preview.operation === "uninstall" ? confirmation.kind === "confirm-uninstall"
       : entry.preview.operation === "project-sync" ? confirmation.kind === "confirm-project-sync"
-      : confirmation.kind === "confirm" && confirmation.operation === entry.preview.operation;
+      : entry.preview.operation === "repair" || entry.preview.operation === "rollback"
+        ? confirmation.kind === "confirm-action" && confirmation.operation === entry.preview.operation
+        : confirmation.kind === "confirm" && confirmation.operation === entry.preview.operation;
   }
 
   async function apply(request: Parameters<NativeLifecycleOperationService["apply"]>[0], options: NativeLifecycleExecutionOptions, callerSignal: AbortSignal): Promise<NativeLifecycleOperationResult> {
