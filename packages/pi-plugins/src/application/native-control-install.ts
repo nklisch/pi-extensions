@@ -8,7 +8,7 @@ export async function collectTrustedInstallSubmission(input: Readonly<{
   executionId: NativeControlExecutionId;
   input: NativeControlInputPort;
   channel: NativeControlInputChannel;
-  purpose: Extract<NativeControlInputPurpose, "trusted-install" | "trusted-install-recovery" | "update">;
+  purpose: Extract<NativeControlInputPurpose, "trusted-install" | "update">;
   session: TrustedInstallSessionView;
   signal: AbortSignal;
 }>): Promise<Readonly<{ kind: "submission"; submission: TrustedInstallSubmission }> | Exclude<NativeControlInputResult, { kind: "supplied" }>> {

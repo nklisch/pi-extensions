@@ -8,8 +8,8 @@ const cleanupMocks = vi.hoisted(() => ({
   status: vi.fn(),
 }));
 
-vi.mock("../../src/runtime/mcp/revision-lease-provider.js", () => ({
-  createMcpRevisionLeaseProvider: () => ({
+vi.mock("../../src/runtime/mcp/mcp-runtime-binding-provider.js", () => ({
+  createMcpRuntimeBindingProvider: () => ({
     acquire: vi.fn(),
     release: vi.fn(),
     drain: cleanupMocks.drain,

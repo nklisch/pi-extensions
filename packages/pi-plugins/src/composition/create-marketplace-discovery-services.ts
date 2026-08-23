@@ -10,12 +10,11 @@ import {
   type MarketplaceRefreshResult,
 } from "../application/update-contract.js";
 import { MarketplaceUpdatePreferenceResultSchema } from "../application/marketplace-update-policy-service.js";
-import type { GenerationMutationCoordinator } from "../application/generation-mutation-coordinator.js";
+import type { LifecycleStateStore } from "../application/ports/lifecycle-state-store.js";
 import type { MarketplaceInspectionService } from "../application/marketplace-inspection-contract.js";
 import type { ContentStorePort } from "../application/ports/content-store.js";
 import type { LifecycleClock } from "../application/ports/lifecycle-clock.js";
 import type { LifecycleStateInventoryPort } from "../application/ports/lifecycle-state-inventory.js";
-import type { LifecycleStateStore } from "../application/ports/lifecycle-state-store.js";
 import type { CurrentProjectRuntimeContext, ProjectTrustPort } from "../application/ports/project-trust.js";
 import type { RefreshClaimIdPort } from "../application/ports/refresh-claim-id.js";
 import type { RefreshClaimOwnerPort } from "../application/ports/refresh-claim-owner.js";
@@ -65,7 +64,7 @@ export type NodeMarketplaceDiscoveryComposition = Readonly<{
 export type NodeMarketplaceDiscoveryServicesOptions = Readonly<{
   state: LifecycleStateStore;
   inventory: LifecycleStateInventoryPort;
-  mutations: GenerationMutationCoordinator;
+  mutations: LifecycleStateStore;
   clock: LifecycleClock;
   claimIds: RefreshClaimIdPort;
   claimOwners?: RefreshClaimOwnerPort;

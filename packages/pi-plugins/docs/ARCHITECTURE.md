@@ -108,7 +108,7 @@ src/
 │   ├── activation-service.ts
 │   ├── update-service.ts
 │   ├── adoption-service.ts
-│   └── recovery-service.ts
+│   └── convergence-service.ts
 ├── formats/
 │   ├── claude/
 │   │   ├── marketplace-reader.ts
@@ -362,7 +362,7 @@ against each host's documented behavior.
 
 ## Source acquisition
 
-Source materialization is a staging producer, not a store or transaction manager. The lifecycle caller allocates a new empty private staging slot. A materializer writes only `content/` and temporary `.work/` children inside that slot, removes temporary work before success, and returns the content root, verified resolved source, and deterministic content manifest. Error or cancellation returns no partial handoff and cleans materializer-owned writes. Lifecycle code separately owns cache and marketplace paths, atomic promotion, state, locks, fsync/journaling, rollback, recovery, retention, and garbage collection.
+Source materialization is a staging producer, not a store or transaction manager. The lifecycle caller allocates a new empty private staging slot. A materializer writes only `content/` and temporary `.work/` children inside that slot, removes temporary work before success, and returns the content root, verified resolved source, and deterministic content manifest. Error or cancellation returns no partial handoff and cleans materializer-owned writes. Lifecycle code separately owns cache and marketplace paths, atomic promotion, state CAS, and convergence garbage collection.
 
 The source tree and archive are treated as malicious. The security boundary assumes lifecycle created a private staging slot and that an already-materialized marketplace root is immutable for the duration of a marketplace-relative copy. It does not claim portable resistance to a privileged local process that can concurrently mutate those private roots.
 
@@ -485,10 +485,10 @@ bindings before branding that value. Mutations replace one or more documents
 against an expected generation and return a typed stale-generation result
 rather than overwriting newer state. The port does not prescribe storage,
 paths, locks, transaction callbacks, fsync/rename, secret storage, trust
-policy, promotion, generated projections, operations, or recovery. Lifecycle
-features provide these schema and application contracts; the packaged
+policy, promotion, generated projections, operations, or convergence payloads.
+Lifecycle features provide these schema and application contracts; the packaged
 `epic-native-plugin-management` composition owns concrete authoritative-state,
-credential, configuration-path/write-id, inventory, recovery-artifact, and
+credential, configuration-path/write-id, inventory, convergence-artifact, and
 project-root adapters. No current state schema contains secret values, expanded
 environment, absolute installed/data paths, projection contents, timestamps in
 portable intent, or native error causes.
@@ -497,107 +497,58 @@ portable intent, or native error causes.
 
 ```text
 resolve
-  → materialize staging
-  → parse
-  → normalize
-  → validate compatibility
-  → inspect trust
+  → materialize private staging
+  → parse and normalize
+  → validate compatibility and trust
   → prepare runtime projections
-  → acquire scope-qualified plugin keys
-  → acquire the SQLite scope lock
-  → read and verify expected generation
-  → run the prepared promotion callback
-  → commit the verified mutation
-  → write pending transition
-  → reload
-  → verify activation
-  → finalize transition
+  → atomically promote immutable content
+  → one BEGIN IMMEDIATE state commit with expected-generation CAS
+  → best-effort reload / live-next-start
 ```
 
-Long-running network, source materialization, inspection, compatibility, trust,
-and projection preparation happen before coordination. `createKeyedMutationScheduler`
-and `createGenerationMutationCoordinator` then compose scope-qualified FIFO
-ownership with the application `ScopeLockManager`; scheduler callbacks expose no
-nested-acquisition capability. The SQLite adapter holds its rollback-journal
-`BEGIN IMMEDIATE` transaction only for the short guarded window; schema first
-use serializes inside that transaction and a killed holder is released by the
-OS, so there are no durable root or per-database path-identity markers. Its
-private lock root enforces a 0o700 leaf with no symlink at the leaf, but the
-filesystem capability gate is best-effort: it only checks the integer
-`statfs.f_type` magic number on platforms where it carries one
-(linux/win32/freebsd); on Darwin and any platform Node cannot introspect, the
-gate is a no-op rather than failing closed, because the integer has no signal
-there and SQLite locking works empirically. SQLite busy code 5 is retried with
-caller cancellation and bounded application jitter. Locks do not expire, claim
-fairness, or fall back to process-local safety; process death releases the OS
-lock, while a paused live owner remains held. `LifecycleStateStore.commit`
-remains the final compare-and-swap authority. A commit error or cancellation is
-reconciled by reading authority under the still-held scope lock: only an exact
-expected-generation-plus-one snapshot becomes committed evidence; unchanged
-state is explicit failure and any other/unreadable state is explicit ambiguity.
-An uncertain cleanup after a committed result is reported with committed evidence
-rather than replayed blindly.
+Network, materialization, inspection, compatibility, trust, and projection
+preparation happen before the transaction. `runScopedMutation` plans from a
+validated snapshot and retries only bounded `stale-generation` conflicts. The
+SQLite store is the sole cross-session coordination point: its short
+`BEGIN IMMEDIATE` window contains no I/O or awaits, its busy budget maps
+exhaustion to a retryable result, and process death releases the operating-system
+transaction. There are no scheduler, scope-lock, lease, journal, or settlement
+fences.
 
-A pending transition records:
+State is authoritative as soon as the CAS commits. Reload reconstructs the
+runtime from state directly; a reload-unavailable or reload-failed operation
+returns `live-next-start`. A committed operation that cannot load its selected
+revision is `degraded` and visible, while reconstruction may run the previous
+revision for that session. Repair re-materializes the selected revision and
+rollback flips the selected/previous pointers explicitly; neither operation
+silently rewrites state during startup.
 
-- candidate revision;
-- previous active revision;
-- expected state generation;
-- prepared projection hashes;
-- operation identifier;
-- recovery status.
+### Committed updates
 
-On successful reload, the new extension instance verifies the projections and
-marks the transition active. On failed or interrupted activation, recovery
-restores the previous revision.
+Automatic and update-all runs commit the candidate and report
+`live-next-start`; there is no durable staged state or ownership handoff. The
+next start or an accepted reload reconstructs from the committed pointer.
+Interrupted work either leaves state unchanged with an orphan eligible for
+mtime-grace collection or leaves a committed candidate that activates on the
+next start. A selected revision that fails to load remains selected and is
+reported as degraded rather than automatically rolled back.
 
-### Staged updates
+## Revision retention and convergence
 
-An update may also commit with activation deliberately deferred (lifecycle
-result `staged`): the candidate is committed and the durable transition stays
-pending on purpose, and the next start or reload activates the new revision
-and settles the journal through the normal recovery path. At stage time the
-preparing process also releases its journal ownership of the transition row:
-a staged row is not mid-flight, so keeping the preparer's owner fence would
-tie settlement to that process's lifetime and block every other session's
-startup recovery for as long as it lives (immediate operations keep their
-owner fence — their preparer really is mid-flight until settle). This is how
-background automatic updates and sync-now ("update all") apply: they never
-need a reload-capable command context, and one run can stage any number of
-plugins. A committed update that cannot drive activation at all (no reload
-authority, for example an RPC caller) also settles `staged` rather than
-rolling back; genuine activation failures still roll back. Foreground
-single-plugin updates keep immediate activation. To keep staged and stuck
-transitions distinguishable, a pending transition with a clean startup
-recovery sweep reads as "update staged — live next start"; one the sweep
-could not settle reads as recovery-required.
+Updating retains the selected and `previousRevision` content references.
+Other revision records are pruned during convergence; their immutable content
+and projections become grace-period GC candidates. Persistent plugin data is
+outside revision directories and survives updates.
 
-Startup order is load-bearing for staging: runtime reconstruction
-(`reconcileCurrent`/`acceptSuccessor`) runs before the recovery sweep, and
-reconstruction builds the runtime from committed candidates whose transitions
-are still pending, so activation observations exist when pending transitions
-are classified. A committed candidate whose projection now runs finalizes as
-completed; without observations, classification conservatively compensates
-(rolls back). Staged finalization assumes a pi reload is a full host restart
-(session_shutdown → session_start), which the reload broker already relies
-on; a future warm-reload pi would need a finalization hook on that path.
-
-## Revision retention and recovery
-
-Updating does not immediately delete the prior revision. Existing Pi sessions
-may still execute hooks or MCP processes from its path.
-
-Inactive revisions enter a grace period before garbage collection. Persistent
-plugin data remains outside revision directories and survives updates.
-
-At startup, recovery:
-
-1. removes abandoned staging directories;
-2. inspects pending transitions;
-3. finalizes verified activations;
-4. restores previous revisions for failed activations;
-5. reports state corruption without disabling unrelated plugins;
-6. removes expired inactive revisions only when no active state references them.
+Startup performs migration first, runtime reconstruction with session-local
+fallback second, and one bounded convergence sweep third. The sweep replays
+pending-delete markers, removes age-eligible orphan staging/content/projection
+artifacts, prunes unneeded revision records, and retains a category when
+reference evidence is incomplete. The foreground sweep is stat-only and bounded
+by 2 seconds or 128 items; unfinished work is safe to retry on a later pass.
+Corrupt or missing selected content is degraded and repairable, not silently
+rewritten or rolled back. Orphan data directories are retained for an explicit
+doctor action.
 
 ## Runtime activation
 
@@ -669,23 +620,24 @@ MCP activation uses a package-neutral `McpRuntimePort`. A complete plugin-scoped
 source is wrapped in a canonical registration digest and published only through
 an exact absent/current compare-and-replace precondition. Runtime inspection
 returns the exact source identity, registration digest, and redacted local
-server inventory. Replace and remove success includes cleanup of source-owned
-tools, caches, providers, processes or connections, and runtime revision leases.
+server inventory. Replace and remove success includes cleanup of source-owned tools, caches,
+providers, processes, and connections. Launch-time binding validation remains
+available through an in-memory provider; durable revision pinning is replaced
+by the day-scale orphan-GC grace period.
 
 A stateless lifecycle participant consumes exact previous and desired MCP states
-from the whole-plugin transition authority. It performs at most one source
-mutation, independently inspects the result, and contributes strict MCP evidence
-to the existing activation observation. It does not commit state, settle a
-transition, maintain a journal, or choose recovery policy. The existing
-lifecycle reconciler and startup recovery service remain authoritative.
+from runtime reconstruction. It performs at most one source mutation,
+independently inspects the result, and contributes strict MCP evidence to the
+session's degraded report. It does not commit state, settle an operation,
+maintain a journal, or choose rollback policy.
 
 Launch values are resolved only at process or connection creation and disposed
 immediately. Remote credentials require HTTPS; plaintext HTTP is restricted to
 an unauthenticated literal loopback endpoint whose scheme, host, effective port,
 and path are bound into exact install consent. Endpoint authority and path are
-not late-bound. A separate runtime lease provider pins the existing immutable
-plugin and projection artifacts until that execution closes. Registration and
-observation are local and offline-safe; remote connection, authentication,
+not late-bound. Registration and observation are local and offline-safe;
+launch-time binding validation remains available, while day-scale orphan grace
+replaces durable revision pinning. Remote connection, authentication,
 tool-discovery, and launch failures remain redacted per-server health rather
 than activation identity.
 
@@ -730,10 +682,9 @@ sealed read-only, durably synchronized, and published behind an exclusive
 `READY` marker. They can be replaced and rebuilt from authoritative installed
 state; no projection path or active projection pointer is persisted in state.
 
-A projection hash participates in pending-transition verification and trust
-comparison. Persistent plugin data uses a stable scope/plugin reference under
-`data/v1/`, so updates resolve a new immutable content root while retaining the
-same writable data root.
+A projection hash participates in trust comparison. Persistent plugin data
+uses a stable scope/plugin reference under `data/v1/`, so updates resolve a new
+immutable content root while retaining the same writable data root.
 
 ## Trust
 
@@ -803,11 +754,16 @@ The extension factory registers:
 - the hook adapter;
 - the MCP integration;
 - resource discovery;
-- recovery and status reporting.
+- convergence and status reporting.
 
-`session_start` loads local state and performs recovery without blocking on
+`session_start` runs migration, loads local state, performs runtime
+reconstruction, and runs bounded startup convergence without blocking on
 network access. It also schedules update-availability checks after the local
-runtime is ready.
+runtime is ready. After startup settles, the host publishes a short agent
+orientation into session context (installed plugins with version, marketplace,
+and component availability, plus degraded status) and regenerates the
+scope-aware `generated/agent-brief.md` detail files; orientation is
+informational and never blocks or fails startup.
 
 `resources_discover` contributes active skill roots.
 
@@ -860,15 +816,13 @@ registration because its identity cannot be trusted.
 
 ## Concurrency
 
-- `KeyedMutationScheduler` serializes scope-qualified plugin mutations in FIFO order; canonical multi-key acquisition prevents order cycles and its callback cannot recursively acquire another scheduler key.
-- `ScopeLockManager` protects one complete user or project scope across processes; durable root/database markers and live path-identity checks reject replacement.
-- `createGenerationMutationCoordinator` checks generation before its callback, runtime-validates exact scope and expected-plus-one commit responses, and lets `LifecycleStateStore.commit` perform the final compare-and-swap.
-- Different plugin sources may download concurrently, and long-running preparation never runs under the scope lock.
-- SQLite uses one rollback-journal database per scope, a zero native busy timeout, and cancellable application-level retries; local capability failure is fatal.
-- State commits remain short and serialized; cleanup failure after commit carries committed evidence.
+- `runScopedMutation` plans from a validated snapshot and commits with an exact expected-generation CAS; it retries bounded stale generations and never uses last-writer-wins.
+- SQLite `BEGIN IMMEDIATE` is the only cross-session coordination point. Its transaction window has no I/O, awaits, or callbacks; the bounded busy budget returns a typed retryable result when exhausted.
+- Different plugin sources may download concurrently because all slow work occurs before the state transaction.
+- Process death releases the operating-system SQLite transaction; no durable owner, lease, lock, or pending marker can block another session's lifecycle operation.
 - Hook handler concurrency follows the normalized foreign event contract.
 - MCP process lifecycle belongs to the MCP runtime.
-- Abort signals propagate through Git, npm, hook, MCP, scheduler waits, and lock acquisition.
+- Abort signals propagate through Git, npm, hook, MCP, and state-transaction waits.
 
 ## Testing strategy
 
@@ -881,7 +835,8 @@ registration because its identity cannot be trusted.
 - identity and source canonicalization, including malformed-percent and encoded-delimiter vectors;
 - strict source protocols, credential rejection, immutable revision/integrity shapes, and resolved-source hash binding;
 - hook matcher and output mapping;
-- state migration and transaction logic.
+- state migration, CAS transaction, convergence, and degraded fallback/repair
+  logic.
 
 ### Contract fixtures
 
@@ -900,7 +855,7 @@ Fixtures represent:
 ### Integration tests
 
 Integration tests use temporary Git repositories, npm archives, agent homes, and
-project roots. They verify complete lifecycle operations and crash recovery.
+project roots. They verify complete lifecycle operations and crash convergence.
 The committed tooling tests also prove dependency-cruiser rejects domain imports
 from Node built-ins and outer layers, and that the built ESM package exposes only
 its explicit runtime export allowlist.
@@ -921,8 +876,9 @@ Claude or Codex state, one revision-bound production fixture carries a skill,
 ordinary hooks, subagent interception, and canonical MCP through install,
 disable, enable, V1-to-V2 update, restart, and uninstall. Real Pi processes
 observe every runtime surface, the honest `RUNTIME_ALIAS_UNAVAILABLE` omission,
-package-drift rejection before execution, interrupted-transition recovery,
-multiprocess contention, presentation and secret non-retention, offline restart
+package-drift rejection before execution, crash convergence, degraded fallback
+and repair/rollback, multiprocess CAS contention, presentation and secret
+non-retention, offline restart
 without eager MCP launch, explicit post-restart MCP use, SQLite integrity, and
 complete post-uninstall runtime and inventory absence.
 

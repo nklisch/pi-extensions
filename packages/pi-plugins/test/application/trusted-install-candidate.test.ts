@@ -42,7 +42,7 @@ function setup(options: { releaseFails?: boolean; plugin?: ReturnType<typeof dir
       currentProject: { projectKey: `project-v1:sha256:${"44".repeat(32)}`, trust: { kind: "trusted" }, epoch: `sha256:${"55".repeat(32)}` },
       catalogs: [{ scope: { kind: "user" }, registrationId, snapshot: catalogSnapshot, cache: { kind: "ready", validator: { kind: "git-commit", revision: "a".repeat(40) }, etag: { kind: "not-applicable" } } }],
       capability: { status: "ready", digest: `sha256:${"66".repeat(32)}`, capturedBy: "fixture" },
-      runtimeEpoch: `sha256:${"77".repeat(32)}`, recoveryDigest: `sha256:${"88".repeat(32)}`, updateDigest: `sha256:${"99".repeat(32)}`,
+      runtimeEpoch: `sha256:${"77".repeat(32)}`, convergenceDigest: `sha256:${"88".repeat(32)}`, updateDigest: `sha256:${"99".repeat(32)}`,
     },
     states: [],
     currentProject: { identity: { kind: "path-only", canonicalRoot: "file:///project/", limitation: "identity-changes-with-canonical-root" }, projectKey: `project-v1:sha256:${"44".repeat(32)}`, trust: { kind: "trusted" } },

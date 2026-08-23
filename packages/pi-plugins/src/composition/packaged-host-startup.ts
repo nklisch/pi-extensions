@@ -8,7 +8,7 @@ export interface PackagedHostStartup {
 /** Explicit local-only startup order shared by packaged composition tests/adapters. */
 export function createPackagedHostStartup(dependencies: Readonly<{
   open(signal: AbortSignal): Promise<void>;
-  recover(signal: AbortSignal): Promise<Readonly<{ blocked: HostStartupResult["blocked"] }>>;
+  converge(signal: AbortSignal): Promise<Readonly<{ blocked: HostStartupResult["blocked"] }>>;
   reconcile(signal: AbortSignal): Promise<Readonly<{ blocked: HostStartupResult["blocked"] }>>;
   capabilities(signal: AbortSignal): Promise<HostStartupResult["capabilities"]>;
   publish(status: HostStartupResult): void;
@@ -24,12 +24,11 @@ export function createPackagedHostStartup(dependencies: Readonly<{
         signal.throwIfAborted();
         await dependencies.open(signal);
         const capabilities = await dependencies.capabilities(signal);
-        // Runtime reconstruction comes first so activation observations exist
-        // when recovery classifies pending transitions: committed candidates
-        // finalize as completed instead of being rolled back unobserved.
+        // Runtime reconstruction comes first so the startup result reflects
+        // state-authoritative candidates before convergence reports residue.
         const runtime = await dependencies.reconcile(signal);
-        const recovery = await dependencies.recover(signal);
-        const blocked = [...recovery.blocked, ...runtime.blocked];
+        const convergence = await dependencies.converge(signal);
+        const blocked = [...convergence.blocked, ...runtime.blocked];
         const result = HostStartupResultSchema.parse({
           status: blocked.length === 0 ? "ready" : "degraded",
           blocked,

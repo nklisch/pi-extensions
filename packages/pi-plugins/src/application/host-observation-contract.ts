@@ -19,6 +19,10 @@ export type HostCapabilities = z.infer<typeof HostCapabilitiesSchema>;
 
 export const HostBlockedPluginSchema = z.object({
   plugin: z.union([PluginKeySchema, z.string().min(1)]),
+  /** Scope/revision evidence is present for plugin-local degradation. */
+  scope: ScopeReferenceSchema.optional(),
+  selectedRevision: z.string().regex(/^sha256:[0-9a-f]{64}$/).optional(),
+  runningRevision: z.string().regex(/^sha256:[0-9a-f]{64}$/).optional(),
   code: z.string().min(1),
   explanation: z.string().min(1),
 }).strict().readonly();
@@ -37,7 +41,7 @@ export type HostStartupResult = z.infer<typeof HostStartupResultSchema>;
 export const HostStatusSnapshotSchema = z.object({
   status: HostReadinessStatusSchema,
   local: z.object({
-    recovery: z.enum(["settled", "degraded", "blocked"]),
+    convergence: z.enum(["settled", "degraded", "blocked"]),
     runtime: z.enum(["reconciled", "degraded", "blocked"]),
   }).strict().readonly(),
   update: z.object({

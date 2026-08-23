@@ -117,16 +117,10 @@ export async function installFromEmptyRegistrySnapshot(input: Readonly<{
   }
   const packageRoot = join(tree, "@nklisch", "pi-plugins");
   const receiptModule = await import(pathToFileURL(join(packageRoot, "dist", "runtime", "subagents", "pi-subagents-package.js")).href) as {
-    PI_SUBAGENTS_RECEIPT: { packageName: string; version: string; registryIntegrity: string; installedTreeDigest: string };
-  };
-  const treeModule = await import(pathToFileURL(join(packageRoot, "dist", "runtime", "published-package-receipt.js")).href) as {
-    digestPublishedPackageTree(root: string): Promise<string>;
+    PI_SUBAGENTS_RECEIPT: { packageName: string; version: string; registryIntegrity: string };
   };
   const bundledSubagents = join(packageRoot, "node_modules", "@nklisch", "pi-subagents");
   const bundledReceipt = receiptModule.PI_SUBAGENTS_RECEIPT;
-  if (await treeModule.digestPublishedPackageTree(bundledSubagents) !== bundledReceipt.installedTreeDigest) {
-    throw new Error("from-empty bundled subagent tree drifted from its registry receipt");
-  }
   receipts.push({
     name: bundledReceipt.packageName,
     version: bundledReceipt.version,

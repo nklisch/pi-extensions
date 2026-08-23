@@ -32,7 +32,7 @@ export type NativeInstalledHarnessOptions = Readonly<{
   updateFailed?: boolean;
   updatePending?: boolean;
   updateClockRegressed?: boolean;
-  /** Startup recovery sweep already failed to settle the pending transition. */
+  /** Startup reconstruction reported the selected revision as degraded. */
   recoveryBlocked?: boolean;
 }>;
 
@@ -59,7 +59,6 @@ export function createNativeInstalledHarness(options: NativeInstalledHarnessOpti
     activation: options.enabled ? "enabled" : "disabled",
     selectedRevision: revision.revision,
     revisions: [revision],
-    ...(options.pending ? { pendingTransition: `pending-transition-v1:sha256:${"77".repeat(32)}` } : {}),
   } as never;
   const serverKey = options.remote === undefined ? undefined : deriveMcpRuntimeServerKey(component.id);
   const skillIds = options.skill && !options.skillMismatch ? [skill.id] : [];
@@ -120,12 +119,12 @@ export function createNativeInstalledHarness(options: NativeInstalledHarnessOpti
     ? { scope: scopeContext, generation: 0, corruptions: [], project: { scope: {}, plugins: [record], marketplaces: [], marketplaceUpdates: options.updateFailed || options.updatePending ? [updateRecord] : [] } }
     : { scope: scopeContext, generation: 0, corruptions: [], installed: { plugins: [record], marketplaces: [] }, config: { global: { application: "manual", cadence: "balanced" }, scope: {}, records: options.updateFailed || options.updatePending ? [updateRecord] : [] }, trust: { records: [] } };
   const snapshot = {
-    binding: { capturedAt: 1, scopes: [{ scope: scopeReference, generation: 0, status: "ready", corruptionCodes: [] }], currentProject: { projectKey, trust: { kind: options.projectUntrusted ? "untrusted" : "trusted" }, epoch: `sha256:${"66".repeat(32)}` }, catalogs: [], capability: { status: "ready", digest: `sha256:${"88".repeat(32)}`, capturedBy: "fixture" }, runtimeEpoch: `sha256:${"99".repeat(32)}`, recoveryDigest: `sha256:${"aa".repeat(32)}`, updateDigest: `sha256:${"bb".repeat(32)}` },
+    binding: { capturedAt: 1, scopes: [{ scope: scopeReference, generation: 0, status: "ready", corruptionCodes: [] }], currentProject: { projectKey, trust: { kind: options.projectUntrusted ? "untrusted" : "trusted" }, epoch: `sha256:${"66".repeat(32)}` }, catalogs: [], capability: { status: "ready", digest: `sha256:${"88".repeat(32)}`, capturedBy: "fixture" }, runtimeEpoch: `sha256:${"99".repeat(32)}`, convergenceDigest: `sha256:${"aa".repeat(32)}`, updateDigest: `sha256:${"bb".repeat(32)}` },
     states: [{ ok: true, snapshot: stateSnapshot }],
     currentProject: { identity: projectIdentity, projectKey, trust: { kind: options.projectUntrusted ? "untrusted" : "trusted" } },
-    capabilities: capabilities(), runtime: options.noRuntime ? [] : [runtime], recovery: { results: options.recoveryBlocked ? [{ kind: "blocked", scope: scopeReference, plugin: plugin.identity.key, reference: `pending-transition-v1:sha256:${"77".repeat(32)}`, code: "RECOVERY_CONFLICT" }] : [], deferred: false, processed: 0 },
-    startup: { status: "ready", blocked: [], capabilities: { mcp: { status: "available", explanation: "ready" }, subagents: { status: "unavailable", explanation: "none" }, piReload: { status: "available", explanation: "ready" }, secrets: { status: "available", explanation: "ready" } } },
-    ...(options.updatePending ? { hostStatus: { status: "ready", local: { recovery: "settled", runtime: "reconciled" }, update: { state: "running", unreadCount: 1, unresolvedCount: 1, scopes: [] }, blocked: [], capabilities: { mcp: { status: "available", explanation: "ready" }, subagents: { status: "unavailable", explanation: "none" }, piReload: { status: "available", explanation: "ready" }, secrets: { status: "available", explanation: "ready" } } } } : {}),
+    capabilities: capabilities(), runtime: options.noRuntime ? [] : [runtime], convergence: { results: [], deferred: false, processed: 0 },
+    startup: { status: options.recoveryBlocked ? "degraded" : "ready", blocked: options.recoveryBlocked ? [{ plugin: plugin.identity.key, scope: scopeReference, selectedRevision: revision.revision, code: "PLUGIN_DEGRADED", explanation: "the selected revision could not load" }] : [], capabilities: { mcp: { status: "available", explanation: "ready" }, subagents: { status: "unavailable", explanation: "none" }, piReload: { status: "available", explanation: "ready" }, secrets: { status: "available", explanation: "ready" } } },
+    ...(options.updatePending ? { hostStatus: { status: "ready", local: { convergence: "settled", runtime: "reconciled" }, update: { state: "running", unreadCount: 1, unresolvedCount: 1, scopes: [] }, blocked: [], capabilities: { mcp: { status: "available", explanation: "ready" }, subagents: { status: "unavailable", explanation: "none" }, piReload: { status: "available", explanation: "ready" }, secrets: { status: "available", explanation: "ready" } } } } : {}),
   } as any;
   const inspector = createNativeInstalledInspector({
     installed: { load: vi.fn(async () => ({ plugin, compatibility: report, marketplaceSource, content, binding: createMaterializationBinding(plugin.source.hash, content.rootDigest, fixtureSha) })) },

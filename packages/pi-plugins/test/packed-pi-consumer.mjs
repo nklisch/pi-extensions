@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const repository = resolve(project, "../..");
 // macOS exposes the temporary root through /var -> /private/var. Use the
 // canonical path so the packed host's parent-identity checks observe the same
 // directory spelling before and after realpath validation.
@@ -188,7 +189,7 @@ async function waitForMarketplaceIdle(rpc, commandName, timeoutMs = 60_000) {
 }
 
 try {
-  const packed = checked("npm", ["pack", "--json", "--silent", "--pack-destination", root], { cwd: project });
+  const packed = checked(process.execPath, [join(repository, "scripts", "pack-package.mjs"), project, "--out", root], { cwd: repository });
   const [{ filename }] = JSON.parse(packed.stdout);
   const consumer = join(root, "consumer");
   const home = join(root, "empty-home");
@@ -306,7 +307,7 @@ try {
   // production correctly rejects projection before install mutation; successful
   // install/reload handoff remains covered at the strongest injected-platform
   // boundary. This PTY covers host reload, browse, exact trust, public rejection,
-  // manager recovery, and graceful shutdown without pretending the limitation
+  // manager convergence, and graceful shutdown without pretending the limitation
   // is a successful install.
   const transcript = join(root, "real-pi-tui.log");
   const ptyDriver = join(root, "pty-driver.py");

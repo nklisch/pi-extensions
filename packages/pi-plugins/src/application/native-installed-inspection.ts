@@ -80,12 +80,9 @@ function sameIds(left: readonly ComponentId[], right: readonly ComponentId[]): b
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
-function recoveryTransition(subject: InstalledInspectionDetailSubject, snapshot: InspectionEvidenceSnapshot): "none" | "deferred" | "blocked" | "recovery-required" {
-  const matches = snapshot.recovery.results.filter((result) =>
-    sameScope(result.scope, subject.scope) && result.plugin === subject.plugin);
-  if (matches.some((result) => result.kind === "blocked")) return "blocked";
-  if (matches.some((result) => result.kind === "deferred")) return "deferred";
-  return snapshot.startup.blocked.some((entry) => entry.plugin === subject.plugin) ? "recovery-required" : "none";
+function degradedLookup(subject: InstalledInspectionDetailSubject, snapshot: InspectionEvidenceSnapshot) {
+  return snapshot.startup.blocked.find((entry) => entry.plugin === subject.plugin &&
+    (entry.scope === undefined || sameScope(entry.scope, subject.scope)));
 }
 
 function updateState(
@@ -232,22 +229,42 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
       }
 
       let loaded: Awaited<ReturnType<InstalledPluginLoader["load"]>>;
+      let loadedFallback = false;
       try {
         loaded = await dependencies.installed.load({ scope: authority.scope, revision: authority.revision }, signal);
       } catch (error) {
         if (signal.aborted) throw signal.reason ?? error;
-        const diagnostics = compileNativeDiagnostics({ findings: [finding("revisionUnavailable", detailId)] }, dependencies.sha256);
-        const names = parsePluginKey(subject.plugin);
-        const summary = NativeInspectionSummarySchema.parse({
-          detailId, subject: "installed", scope: subject.scope, plugin: subject.plugin,
-          name: safe(names.plugin), marketplace: safe(names.marketplace),
-          revision: { installed: safe(subject.selectedRevision), immutable: subject.selectedRevision, resolution: "exact" },
-          condition: deriveNativeInspectionCondition(diagnostics), freshness: { status: "unavailable", basis: "state" },
-          diagnosticCounts: countNativeDiagnostics(diagnostics),
-        });
-        return NativeInspectionDetailResultSchema.parse({ kind: "unavailable", summary, diagnostics });
+        // A broken selected revision is still an installed, inspectable plugin:
+        // use the session's previous revision as the presentation source while
+        // retaining the selected digest and degraded diagnostics as authority.
+        // Returning `unavailable` here hid the repair/rollback actions exactly
+        // when the user needed them.
+        const previousRevision = authority.record.previousRevision === undefined
+          ? undefined
+          : authority.record.revisions.find((revision) => revision.revision === authority.record.previousRevision);
+        if (previousRevision === undefined) {
+          const diagnostics = compileNativeDiagnostics({ findings: [finding("revisionUnavailable", detailId)] }, dependencies.sha256);
+          const names = parsePluginKey(subject.plugin);
+          const summary = NativeInspectionSummarySchema.parse({
+            detailId, subject: "installed", scope: subject.scope, plugin: subject.plugin,
+            name: safe(names.plugin), marketplace: safe(names.marketplace),
+            revision: { installed: safe(subject.selectedRevision), immutable: subject.selectedRevision, resolution: "exact" },
+            condition: deriveNativeInspectionCondition(diagnostics), freshness: { status: "unavailable", basis: "state" },
+            diagnosticCounts: countNativeDiagnostics(diagnostics),
+          });
+          return NativeInspectionDetailResultSchema.parse({ kind: "unavailable", summary, diagnostics });
+        }
+        try {
+          loaded = await dependencies.installed.load({ scope: authority.scope, revision: previousRevision }, signal);
+          loadedFallback = true;
+        } catch (fallbackError) {
+          if (signal.aborted) throw signal.reason ?? fallbackError;
+          const diagnostics = compileNativeDiagnostics({ findings: [finding("revisionUnavailable", detailId)] }, dependencies.sha256);
+          return NativeInspectionDetailResultSchema.parse({ kind: "unavailable", diagnostics });
+        }
       }
-      if (loaded.plugin.identity.key !== subject.plugin || loaded.binding !== subject.selectedRevision) {
+      const expectedLoadedBinding = loadedFallback ? authority.record.previousRevision : subject.selectedRevision;
+      if (loaded.plugin.identity.key !== subject.plugin || loaded.binding !== expectedLoadedBinding) {
         const diagnostics = compileNativeDiagnostics({ findings: [finding("revisionUnavailable", detailId)] }, dependencies.sha256);
         return NativeInspectionDetailResultSchema.parse({ kind: "unavailable", diagnostics });
       }
@@ -295,17 +312,13 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
       const activeExpected = authority.record.activation === "enabled";
       const skillsStatus = participantStatus({ evidence: runtime, participant: "skills-hooks", expectedSkills, expectedHooks, selectedRevision: subject.selectedRevision, activeExpected });
       const mcpStatus = participantStatus({ evidence: runtime, participant: "mcp", expectedMcp, selectedRevision: subject.selectedRevision, activeExpected });
-      const recovery = recoveryTransition(subject, snapshot);
-      // A pending transition is deliberately staged (live next start) unless
-      // the startup sweep already failed to settle it — then it is stuck.
-      const transition = authority.record.pendingTransition !== undefined
-        ? (recovery === "none" ? "pending" as const : recovery)
-        : recovery;
+      const degraded = degradedLookup(subject, snapshot);
       const update = updateState(subject, snapshot, authority.revision, dependencies.sha256);
       const findings: NativeDiagnosticInput["findings"][number][] = [];
-      if (transition === "pending") findings.push(finding("updateStaged", detailId));
-      else if (transition === "deferred") findings.push(finding("recoveryDeferred", detailId));
-      else if (transition === "blocked" || transition === "recovery-required") findings.push(finding("recoveryRequired", detailId));
+      if (degraded !== undefined) {
+        findings.push(finding("pluginDegraded", detailId));
+        if (degraded.runningRevision !== undefined) findings.push(finding("pluginFallbackActive", detailId));
+      }
       if (trust === "project-untrusted") findings.push(finding("projectUntrusted", detailId));
       if (report === undefined) findings.push(finding("capabilityUnavailable", detailId));
       else {
@@ -334,7 +347,7 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
 
       const configurationReady = !configurationUnavailable && !configuration.some((option) =>
         option.state === "invalid" || option.required && ["missing", "unavailable"].includes(option.state));
-      const runtimeAuthorityEligible = report?.activatable === true && trust === "authorized" && configurationReady && transition === "none";
+      const runtimeAuthorityEligible = report?.activatable === true && trust === "authorized" && configurationReady && degraded === undefined;
       if (runtimeAuthorityEligible) {
         const skillsFinding = runtimeFinding("skills-hooks", skillsStatus);
         const mcpFinding = runtimeFinding("mcp", mcpStatus);
@@ -354,7 +367,6 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
       else if (update.state === "automatic-retryable") findings.push(finding("updateAvailable", detailId));
       else if (update.state === "approval-required") findings.push(finding("updateApprovalRequired", detailId));
       else if (update.state === "manual-required") findings.push(finding("updateManualRequired", detailId));
-      else if (update.state === "recovery-required") findings.push(finding("updateRecoveryRequired", detailId));
       else if (update.state === "failed" || update.stale) findings.push(finding("updateFailed", detailId));
       if (update.schedule?.state === "clock-regressed") findings.push(finding("updateClockRegressed", detailId));
 
@@ -386,7 +398,7 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
           provenance: projectSafeProvenance(assessment.requirement.provenance),
         })).sort((left, right) => compareUtf8(left.id, right.id)),
       });
-      const activationState = transition !== "none" ? (transition === "pending" ? "pending" : "recovery-required")
+      const activationState = degraded !== undefined ? "degraded"
         : condition === "blocked" ? "blocked"
         : !localRuntimeCurrent ? "unavailable"
         : authority.record.activation === "disabled" ? "inactive"
@@ -395,6 +407,7 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
         intent: authority.record.activation,
         state: activationState,
         selectedRevision: subject.selectedRevision,
+        ...(degraded?.runningRevision === undefined ? {} : { runningRevision: degraded.runningRevision }),
         ...(runtime?.projectionDigest === undefined ? {} : { projectionDigest: runtime.projectionDigest }),
         participants: [
           { participant: "skills-hooks", status: skillsStatus, ...(runtime?.skillsHooks.kind === "ready" ? { contributionDigest: runtime.skillsHooks.observation.contributionDigest } : {}) },
@@ -434,7 +447,7 @@ export function createNativeInstalledInspector(dependencies: Readonly<{
           lifecycle: {
             installed: true,
             activationIntent: authority.record.activation,
-            transition,
+            health: degraded === undefined ? condition === "blocked" ? "blocked" : "none" : degraded.runningRevision === undefined ? "degraded" : "fallback-active",
             update: update.state,
             ...(update.policy === undefined ? {} : { policy: update.policy }),
             ...(update.notice === undefined ? {} : { notice: update.notice }),

@@ -1,3 +1,29 @@
+## v0.4.0
+
+### Added
+
+- Agent orientation at session start: agents see installed plugins with
+  version, marketplace, component availability, and degraded status, plus a
+  generated per-plugin brief with an explicitly user-facing command section.
+- MCP candidate-attach failures surface as degraded host status with a
+  doctor finding and remediation instead of silently disabling MCP.
+- Reload broker tickets expire after two minutes, so a successor that never
+  answers cannot hang a reload.
+- Exact public export-surface pinning test.
+
+### Changed
+
+- Complete lifecycle convergence: interrupted installs, updates, and
+  uninstall data deletion converge on the next start without durable recovery
+  state; degraded revisions remain visible with repair and rollback actions.
+- Reconcile the architecture and specification with files-and-pointer state,
+  CAS mutation, mtime-grace cleanup, and live-next-start updates.
+
+### Fixed
+
+- Validate migration against a copy of the real pre-convergence plugin-host
+  state, including the krometrail-class pending marker and journal evidence.
+
 ## v0.3.9
 
 ### Fixed

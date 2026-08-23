@@ -16,7 +16,7 @@ const startup = {
 describe("host status service", () => {
   it("keeps optional absent runtimes ready on a clean host", () => {
     const status = createHostStatusService({ startup });
-    expect(status.snapshot()).toMatchObject({ status: "ready", local: { recovery: "settled", runtime: "reconciled" } });
+    expect(status.snapshot()).toMatchObject({ status: "ready", local: { convergence: "settled", runtime: "reconciled" } });
   });
 
   it("projects the scheduler's safe ownership without lease identifiers", () => {
@@ -31,6 +31,6 @@ describe("host status service", () => {
   it("reports background failure as degraded while preserving local readiness", () => {
     const status = createHostStatusService({ startup });
     status.update({ scheduler: "degraded", unreadCount: 2, unresolvedCount: 3 });
-    expect(status.snapshot()).toMatchObject({ status: "degraded", local: { recovery: "settled", runtime: "reconciled" }, update: { unreadCount: 2, unresolvedCount: 3 } });
+    expect(status.snapshot()).toMatchObject({ status: "degraded", local: { convergence: "settled", runtime: "reconciled" }, update: { unreadCount: 2, unresolvedCount: 3 } });
   });
 });

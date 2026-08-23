@@ -24,7 +24,7 @@ export const NativeControlExitRegistry = Object.freeze({
   conflict: Object.freeze({ classification: "conflict-or-stale", code: 5 }),
   unavailable: Object.freeze({ classification: "unavailable", code: 6 }),
   rejected: Object.freeze({ classification: "rejected-or-blocked", code: 7 }),
-  incomplete: Object.freeze({ classification: "partial-or-recovery-required", code: 8 }),
+  incomplete: Object.freeze({ classification: "partial-or-degraded", code: 8 }),
   cancelled: Object.freeze({ classification: "cancelled-or-timeout", code: 9 }),
   internal: Object.freeze({ classification: "internal", code: 10 }),
   delivery: Object.freeze({ classification: "output-delivery-failed", code: 74 }),
@@ -40,7 +40,7 @@ export const NativeControlExitSchema: z.ZodType<NativeControlExit> = z.union(exi
 
 export const NativeControlStatusSchema = z.enum([
   "ok", "no-change", "input-required", "not-found", "stale", "conflict",
-  "unavailable", "rejected", "partial", "recovery-required", "cancelled",
+  "unavailable", "rejected", "partial", "cancelled",
   "failed", "presentation-required",
 ]);
 export type NativeControlStatus = z.infer<typeof NativeControlStatusSchema>;
@@ -49,7 +49,7 @@ export const NativeControlDiagnosticSchema = z.object({
   code: z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/),
   severity: z.enum(["info", "warning", "error"]),
   field: z.string().regex(/^[a-z][a-zA-Z0-9.\[\]-]*$/).optional(),
-  action: z.enum(["retry", "reparse", "provide-input", "confirm-exact", "refresh", "reinspect", "poll", "run-recovery", "none"]),
+  action: z.enum(["retry", "reparse", "provide-input", "confirm-exact", "refresh", "reinspect", "poll", "repair", "rollback", "none"]),
   safe: SafeDisplayFieldSchema.optional(),
 }).strict().readonly();
 export type NativeControlDiagnostic = z.infer<typeof NativeControlDiagnosticSchema>;
@@ -72,7 +72,6 @@ const statusExit: Readonly<Record<NativeControlStatus, NativeControlExitKey>> = 
   unavailable: "unavailable",
   rejected: "rejected",
   partial: "incomplete",
-  "recovery-required": "incomplete",
   cancelled: "cancelled",
   failed: "internal",
   "presentation-required": "success",
@@ -107,7 +106,7 @@ export const NativeControlEnvelopeSchema = z.object({
   } else if (envelope.exit.classification !== expected.classification || envelope.exit.code !== expected.code) {
     context.addIssue({ code: "custom", path: ["exit"], message: "status and exit classification disagree" });
   }
-  if (envelope.operation !== undefined && !["ok", "input-required", "partial", "recovery-required"].includes(envelope.status)) {
+  if (envelope.operation !== undefined && !["ok", "input-required", "partial"].includes(envelope.status)) {
     context.addIssue({ code: "custom", path: ["operation"], message: "operation handle is not valid for this status" });
   }
   if (envelope.page !== undefined && envelope.data === undefined) {

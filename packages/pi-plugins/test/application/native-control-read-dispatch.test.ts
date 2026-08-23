@@ -34,7 +34,7 @@ function fixture() {
     trustedInstallation: { status: vi.fn(async () => ({ kind: "missing" })), cancel: vi.fn(async () => ({ kind: "missing" })) },
     operations: { status: vi.fn(async () => ({ kind: "missing" })), cancel: vi.fn(async () => ({ kind: "missing" })) },
     updates: { previewPolicy: vi.fn(), status: vi.fn(async () => ({ policy: { global: { application: "manual", cadence: "balanced" }, scopes: [], policies: [], inventoryComplete: true }, scheduler: { state: "standby", scopes: [] }, unreadCount: 0, unresolvedCount: 0 })), notifications: vi.fn(async () => ({ notices: [], unreadCount: 0, unresolvedCount: 0 })) },
-    status: { snapshot: vi.fn(() => ({ status: "ready", local: { recovery: "settled", runtime: "reconciled" }, update: { state: "standby", unreadCount: 0, unresolvedCount: 0, scopes: [] }, blocked: [], capabilities: { mcp: { status: "unavailable", explanation: "not configured" }, subagents: { status: "unavailable", explanation: "not configured" }, piReload: { status: "available", explanation: "available" }, secrets: { status: "available", explanation: "available" } } })) },
+    status: { snapshot: vi.fn(() => ({ status: "ready", local: { convergence: "settled", runtime: "reconciled" }, update: { state: "standby", unreadCount: 0, unresolvedCount: 0, scopes: [] }, blocked: [], capabilities: { mcp: { status: "unavailable", explanation: "not configured" }, subagents: { status: "unavailable", explanation: "not configured" }, piReload: { status: "available", explanation: "available" }, secrets: { status: "available", explanation: "available" } } })) },
     selection,
   };
   return { dispatcher: createNativeControlReadDispatcher(dependencies as never), dependencies };
@@ -79,7 +79,7 @@ describe("native control read dispatch", () => {
     });
     dependencies.status.snapshot.mockReturnValue({
       status: "ready",
-      local: { recovery: "settled", runtime: "reconciled" },
+      local: { convergence: "settled", runtime: "reconciled" },
       update: { state: "running", unreadCount: 1, unresolvedCount: 2, scopes: [{ scope: { kind: "user" }, ownership: "self", nextAt: 500 }] },
       blocked: [],
       capabilities: { mcp: { status: "unavailable", explanation: "not configured" }, subagents: { status: "unavailable", explanation: "not configured" }, piReload: { status: "available", explanation: "available" }, secrets: { status: "available", explanation: "available" } },

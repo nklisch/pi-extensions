@@ -372,8 +372,8 @@ describe("configuration replacement service", () => {
     configurations.failReconciliationRead = true;
 
     const result = await savePluginConfiguration(request({ NAME: "demo", TOKEN: "second" }), deps(configurations, secrets), new AbortController().signal);
-    expect(result.kind).toBe("ambiguous-with-recovery-required");
-    if (result.kind !== "ambiguous-with-recovery-required") return;
+    expect(result.kind).toBe("ambiguous-with-cleanup-required");
+    if (result.kind !== "ambiguous-with-cleanup-required") return;
     expect(result.recovery.code).toBe("CONFIGURATION_RECONCILIATION_REQUIRED");
     expect(JSON.stringify(result)).not.toContain("secret-v1:");
     expect(JSON.stringify(result)).not.toContain("second");
@@ -394,7 +394,7 @@ describe("configuration replacement service", () => {
 
     const result = await savePluginConfiguration(request({ NAME: "demo", TOKEN: "second" }), deps(configurations, secrets), new AbortController().signal);
 
-    expect(result.kind).toBe("ambiguous-with-recovery-required");
+    expect(result.kind).toBe("ambiguous-with-cleanup-required");
     expect(JSON.stringify(result)).not.toContain("second");
     expect(JSON.stringify(result)).not.toContain("CANARY_CONFIG_READ_FAILURE");
     expect(secrets.values.size).toBe(2);
@@ -428,7 +428,7 @@ describe("configuration replacement service", () => {
     if (result.kind !== "stored-with-cleanup-required") return;
     expect(JSON.stringify(result)).not.toContain(oldLocator);
     await expect(result.cleanup.recovery.settle(new AbortController().signal))
-      .resolves.toEqual({ kind: "recovery-required" });
+      .resolves.toEqual({ kind: "unresolved" });
     secrets.failRemove.delete(oldLocator);
     await expect(result.cleanup.recovery.settle(new AbortController().signal))
       .resolves.toEqual({ kind: "settled" });

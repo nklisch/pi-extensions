@@ -140,11 +140,11 @@ An installed revision records authoritative evidence only:
 - the compatibility report;
 - scope-bound logical content, data, and optional configuration references.
 
-Installed records carry activation intent and may carry only an opaque pending
-transition reference. Trust evidence is independently versioned and is not trust
-policy. Physical installation paths, generated projections, expanded
-configuration, secret values, reload observations, and operation or recovery
-payloads are not state-schema fields.
+Installed records carry activation intent and a `previousRevision` fallback
+pointer; no in-flight marker exists in the state schema. Trust evidence is
+independently versioned and is not trust policy. Physical installation paths,
+generated projections, expanded configuration, secret values, reload
+observations, and operation or convergence payloads are not state-schema fields.
 
 ## Manifests
 
@@ -178,7 +178,8 @@ ownership and stale-safe deletion contract. A plugin whose activation requires
 a sensitive value remains inactive with `SECRET_CUSTODY_UNAVAILABLE`.
 Plaintext collected through a masked or headless input boundary is not retained
 in plugin-host state, generated MCP configuration, control or terminal output,
-logs, compatibility reports, projections, recovery artifacts, or process data.
+logs, compatibility reports, projections, convergence queue entries, or
+process data.
 
 Configured values are available through `${user_config.KEY}` substitution and
 `CLAUDE_PLUGIN_OPTION_<KEY>` process environment variables.
@@ -402,8 +403,8 @@ satisfy the store port; the verifier recomputes canonical evidence, logical
 references, scope, and generation bindings before the mutation is accepted. The
 port exposes no storage technology, path layout, lock primitive, transaction
 callback, trust policy, secret store, promotion operation, projection content,
-journal, or recovery payload. Those concerns remain late-bound to their owning
-lifecycle features. Adapters may choose a durable representation without
+journal, or convergence payload. Those concerns remain late-bound to their
+owning lifecycle features. Adapters may choose a durable representation without
 changing this contract.
 
 Portable `.pi/plugins.json` remains an all-or-nothing declaration containing
@@ -457,12 +458,13 @@ trailing `...` is repeatable.
 | `inspection.diagnose` | `/plugins doctor [<plugin-key>] [--scope user\|project] [--snapshot-id <value>] [--detail-id <value>] [--include-adoption]` | `local-read` | `none` | Check plugin host or plugin health |
 | `install.open` | `/plugins install open <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>]` | `mutation` | `none` | Open a trusted installation |
 | `install.apply` | `/plugins install apply <install-token>` | `mutation` | `configuration` | Apply a trusted installation |
-| `install.recover` | `/plugins install recover <install-token>` | `mutation` | `configuration` | Recover a trusted installation |
 | `install.run` | `/plugins add <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>]` | `mutation` | `configuration` | Add a plugin |
 | `lifecycle.enable` | `/plugins enable <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>] [--preview-only] [--yes]` | `mutation` | `confirmation` | Enable a plugin |
 | `lifecycle.disable` | `/plugins disable <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>] [--preview-only] [--yes]` | `mutation` | `confirmation` | Disable a plugin |
 | `lifecycle.update` | `/plugins update <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>] [--preview-only] [--yes] [--candidate-snapshot-id <value>] [--candidate-detail-id <value>]` | `mutation` | `configuration` | Update a plugin |
 | `lifecycle.uninstall` | `/plugins remove <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>] [--preview-only] [--yes] [--keep-data] [--delete-data]` | `mutation` | `confirmation` | Remove a plugin |
+| `lifecycle.rollback` | `/plugins rollback <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>]` | `mutation` | `none` | Run the previous plugin revision |
+| `lifecycle.repair` | `/plugins repair <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>]` | `mutation` | `none` | Repair a degraded plugin |
 | `trust.grant` | `/plugins trust <plugin-key> --scope user\|project [--snapshot-id <value>] [--detail-id <value>] --yes` | `mutation` | `confirmation` | Trust the exact installed plugin revision |
 | `project.sync` | `/plugins project sync --mode apply-intent\|publish-intent\|merge [--preview-only] [--yes]` | `mutation` | `decision` | Synchronize current project intent |
 | `updates.status` | `/plugins updates status [--scope user\|project\|all-current] [--plugin <value>]` | `local-read` | `none` | Show update status |
@@ -471,7 +473,7 @@ trailing `...` is repeatable.
 | `updates.policy.set` | `/plugins updates policy set --kind application\|cadence --target global\|scope\|marketplace\|plugin [--scope user\|project\|all-current] [--marketplace-id <value>] [--plugin <value>] [--mode inherit\|manual\|automatic] [--cadence paused\|conservative\|balanced\|frequent] [--preview-id <value>] [--consent-id <value>]` | `mutation` | `decision` | Set update policy through preview |
 | `updates.notices.list` | `/plugins updates notices list [--scope user\|project\|all-current] [--plugin <value>] [--after <value>] [--limit <integer>]` | `local-read` | `none` | List update notices |
 | `updates.notices.acknowledge` | `/plugins updates notices acknowledge <notice-id>...` | `mutation` | `none` | Acknowledge update notices |
-| `updates.automatic.run` | `/plugins updates automatic run [--notice-id <value>]... [--limit <integer>] [--explicit] [--mode stage\|apply]` | `mutation` | `none` | Run admitted plugin updates |
+| `updates.automatic.run` | `/plugins updates automatic run [--notice-id <value>]... [--limit <integer>] [--explicit] [--mode apply\|defer]` | `mutation` | `none` | Run admitted plugin updates |
 | `config.host-precedence` | `/plugins config host-precedence <order>` | `mutation` | `none` | Set dual-host declaration precedence |
 | `config.hook-visibility` | `/plugins config hook-visibility [<visibility>]` | `mutation` | `none` | Show or set hook context visibility |
 | `status` | `/plugins status` | `local-read` | `none` | Show plugin host status |
@@ -556,31 +558,38 @@ commits successfully.
 
 ## Install transaction
 
-Source materializers do not allocate installed, cache, or marketplace storage. The lifecycle operation supplies an empty private staging slot. Staging ownership uses a PID plus stable process-start evidence from procfs on Linux and native process queries on macOS/BSD and Windows; an unavailable platform probe degrades ownership classification to unknown rather than making legitimate hosts unusable. The Node factory composes Git, npm, bounded HTTPS, archive, filesystem, process, crypto, and credential adapters behind the application ports; those adapter details are not public API. Materialization writes only inside that slot, keeps Git/npm scratch under `<slot>/.work`, and returns an exact `<slot>/content` root, a disk-verified resolved source, a deterministic content manifest, and a source/content binding; cancellation or failure returns no partial result and cleans materializer-owned writes. A cleanup failure is explicit and cannot become a successful handoff. Lifecycle code owns atomic promotion, state and locks, journaling/fsync, rollback, recovery, retention, and garbage collection.
+Source materializers do not allocate installed, cache, or marketplace storage. The lifecycle operation supplies an empty private staging slot. Staging slots are anonymous; convergence uses only a day-scale mtime grace to collect abandoned slots. The Node factory composes Git, npm, bounded HTTPS, archive, filesystem, process, crypto, and credential adapters behind the application ports; those adapter details are not public API. Materialization writes only inside that slot, keeps Git/npm scratch under `<slot>/.work`, and returns an exact `<slot>/content` root, a disk-verified resolved source, a deterministic content manifest, and a source/content binding; cancellation or failure returns no partial result and cleans materializer-owned writes. A cleanup failure is explicit and cannot become a successful handoff. Lifecycle code owns atomic promotion, the state CAS, and convergence garbage collection.
 
-Lifecycle mutation coordination uses a scope-qualified in-process FIFO scheduler plus a cross-process `ScopeLockManager`. The shipped scheduler callback has no nested-acquisition capability. The Node adapter uses one rollback-journal SQLite database per user or project scope and holds `BEGIN IMMEDIATE` only for the guarded promotion/compare-and-commit window; schema first use serializes inside that transaction and a killed holder is released by the OS, so there are no durable root or per-database path-identity markers. The lock root must be private (0o700 leaf, no symlink at the leaf) but the filesystem capability gate is best-effort: `verifyLocalFilesystemCapability` only checks the integer `statfs.f_type` magic number on platforms where it carries one (linux/win32/freebsd); on Darwin and any other platform Node cannot introspect, the gate is a no-op rather than failing closed, because the integer has no signal there and SQLite locking works empirically. SQLite busy code 5 is retried only through the caller's abort signal and bounded application jitter. There is no lock expiry, PID takeover, heartbeat, fairness guarantee, or process-local fallback: process termination releases the operating-system lock, while a paused live owner remains the owner. If a commit response is lost or cancellation arrives after a possible write, the coordinator reconciles authoritative state under the lock and returns committed evidence only for exact expected-generation-plus-one; otherwise it returns explicit failed or ambiguous evidence.
+Lifecycle mutation coordination uses `runScopedMutation` over one SQLite state
+store. It plans from a validated snapshot and commits with an exact
+expected-generation CAS; bounded stale retries preserve conflict semantics and
+are not last-writer-wins. `BEGIN IMMEDIATE` contains no I/O, awaits, or recheck
+callbacks. SQLite busy exhaustion is a typed retryable result, and process
+termination releases the operating-system transaction. No durable owner,
+lease, scheduler, lock, journal, or settlement proof can block another session.
 
 Installation and update follow one transaction:
 
 1. Resolve the marketplace snapshot and plugin source.
-2. Materialize the source into staging.
+2. Materialize the source into private staging.
 3. Determine the immutable source revision.
-4. Parse all applicable manifests and conventional component locations.
-5. Normalize and validate the complete component inventory.
-6. Produce the compatibility report.
-7. Collect required trust.
-8. Prepare skills, hook, and MCP activation state.
-9. Atomically promote the staged revision.
-10. Atomically commit plugin-host state.
-11. Reload Pi resources.
-12. Confirm activation and retain or retire the prior revision.
+4. Parse, normalize, and validate the complete component inventory.
+5. Produce the compatibility report and collect required trust.
+6. Prepare skills, hook, and MCP activation state.
+7. Atomically promote the staged revision.
+8. Commit plugin-host state in one `BEGIN IMMEDIATE` expected-generation CAS.
+9. Reload Pi resources when possible, otherwise report `live-next-start`.
 
-Before state commit, failure removes staging and leaves the current installation
-unchanged. Activation failure restores the prior active revision and reports the
-failed candidate.
+Before state commit, failure leaves the current installation unchanged. A
+committed candidate that fails to load remains selected and is visible as
+degraded; reconstruction runs `previousRevision` for that session when
+available. Repair re-materializes the selected revision, while rollback
+explicitly flips the selected and previous pointers.
 
-Uninstall removes activation first, then cached revisions. Persistent plugin
-data is deleted only after explicit confirmation.
+Uninstall removes the installed record immediately; its cached revisions are
+reported as `collection-deferred` and grace-GC'd days later by convergence.
+Persistent plugin data is deleted only after explicit confirmation; a confirmed deletion is
+recorded by a marker so startup convergence can retry it.
 
 ## Enablement
 
@@ -620,22 +629,22 @@ validate, and activate compatible new revisions from the same trusted
 marketplace and plugin source, including revisions that change hook or MCP
 execution definitions. Source-identity changes still require explicit approval.
 
-Automatic and sync-now updates are staged: the new revision is committed in
-the background and activates on the next Pi start or reload, so update runs
-never require a reload-capable command context and one run can stage every
-eligible plugin. The foreground update-all gesture stages all eligible
-updates, reports one plain-language per-plugin summary, and offers a single
-optional reload to activate immediately. Foreground single-plugin updates
-activate immediately.
+Automatic and sync-now updates commit the new revision and report
+`live-next-start` when the caller cannot reload Pi. The next Pi start or an
+accepted reload reconstructs directly from state; there is no durable staged
+marker or ownership handoff. Foreground single-plugin updates may report
+`applied` after reload. A selected revision that fails to load is degraded and
+visible, with a session-local fallback to `previousRevision`; repair and
+rollback are explicit actions.
 
 Because exact trust grants do not carry across revisions, automatic trust
-continuity records the exact grant for the newly activated revision itself
-whenever the automatic policy, an unchanged source lineage, and a prior grant
-for another installed revision of the same plugin all hold. The chained grant
-is an ordinary trust record and remains individually revocable; an explicit
+continuity records the exact grant for the newly committed revision whenever
+the automatic policy, an unchanged source lineage, and a prior grant for
+another installed revision of the same plugin all hold. The chained grant is
+an ordinary trust record and remains individually revocable; an explicit
 revocation of the exact subject is never overridden, and a plugin with no
 granted lineage still requires interactive consent. Continuity runs with the
-background update cycle, so revisions activated before this mechanism existed
+background update cycle, so revisions committed before this mechanism existed
 are healed without manual re-consent.
 
 Network failure, validation failure, or activation failure never blocks Pi
@@ -710,7 +719,9 @@ The system is accepted when automated tests demonstrate:
 4. User and project scopes remain independent.
 5. Project declarations contain no machine-specific paths.
 6. Enable, disable, update, and uninstall affect all plugin components.
-7. Failed installation and activation preserve the working revision.
+7. Pre-commit installation failure leaves state untouched; a post-commit load
+   failure is visible as degraded and runs the previous revision for the session
+   when available.
 8. Unsupported runtime components produce precise incompatibility reports.
 9. Hook aliases, path variables, blocking, rewriting, and context injection
    behave according to the compatibility contract.
@@ -726,9 +737,9 @@ The system is accepted when automated tests demonstrate:
     canonical MCP list/call, and honest `RUNTIME_ALIAS_UNAVAILABLE` reporting
     through install, disable, enable, and V1-to-V2 update.
 15. Incompatible candidates, package drift, interrupted acquisition and commit,
-    multiprocess contention, cancellation, secret non-retention, and recovery
-    preserve one whole working revision and keep drifted package code from
-    executing.
+    multiprocess contention, cancellation, secret non-retention, and crash
+    convergence preserve whole state, never wedge a lifecycle operation, and keep
+    drifted package code from executing.
 16. V2 restarts offline without Git, a model service, network access, or eager
     MCP launch; an explicit later call remains usable.
 17. Uninstall followed by restart leaves the production skill, ordinary hooks,

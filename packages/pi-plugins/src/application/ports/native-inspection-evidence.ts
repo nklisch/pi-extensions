@@ -10,7 +10,7 @@ import type { ScopeReference } from "../../domain/state/scope.js";
 import type { CurrentProjectRuntimeContext } from "./project-trust.js";
 import type { RuntimeContributionObservation } from "./lifecycle-reload.js";
 import type { McpBridgeTransport, McpRuntimeServerKey, McpSourceStatus } from "./mcp-runtime.js";
-import type { LifecycleRecoveryResult } from "../recovery-contract.js";
+import type { ConvergenceReport } from "../convergence-service.js";
 import type { EpochMilliseconds } from "./lifecycle-clock.js";
 
 export type InspectionSnapshotBinding = Readonly<{
@@ -40,7 +40,7 @@ export type InspectionSnapshotBinding = Readonly<{
     capturedBy?: string;
   }>;
   runtimeEpoch: ContentDigest;
-  recoveryDigest: ContentDigest;
+  convergenceDigest: ContentDigest;
   updateDigest: ContentDigest;
 }>;
 
@@ -80,7 +80,7 @@ export type InspectionEvidenceSnapshot = Readonly<{
   currentProject: CurrentProjectRuntimeContext;
   capabilities?: RuntimeCapabilitySnapshot;
   runtime: readonly InstalledRuntimeEvidence[];
-  recovery: LifecycleRecoveryResult;
+  convergence: ConvergenceReport;
   startup: HostStartupResult;
   hostStatus?: HostStatusSnapshot;
 }>;
@@ -91,7 +91,7 @@ export interface NativeInspectionEvidencePort {
   /**
    * Revalidate install-bearing authority after the workflow's own configuration
    * or trust mutation. Scope generation and notice-only digest changes are
-   * expected there; catalog, capability, project, runtime, and recovery
+   * expected there; catalog, capability, project, runtime, and convergence
    * authority must remain exact.
    */
   validateForInstall?(binding: InspectionSnapshotBinding, signal: AbortSignal): Promise<"current" | "stale">;

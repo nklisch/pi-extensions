@@ -122,7 +122,7 @@ function applyResolutions(base: PortableProjectDeclaration, conflicts: readonly 
 }
 
 function requiredAction(kind: ProjectSyncRequiredAction["kind"], owner: Readonly<{ plugin?: string; marketplace?: string }>, sha256: Sha256): ProjectSyncRequiredAction {
-  const action = kind === "review-trust" ? "review-trust" : kind === "provide-configuration" ? "provide-configuration" : kind === "run-recovery" ? "run-recovery" : kind === "update-plugin" ? "review-update" : "inspect-source";
+  const action = kind === "review-trust" ? "review-trust" : kind === "provide-configuration" ? "provide-configuration" : kind === "repair-plugin" ? "repair" : kind === "update-plugin" ? "review-update" : "inspect-source";
   const evidence = { kind, ...owner, action };
   return { id: deriveProjectSyncActionId(evidence, sha256), kind, ...owner, action } as ProjectSyncRequiredAction;
 }
@@ -150,12 +150,10 @@ function prerequisites(desired: PortableProjectDeclaration, context: Readonly<{ 
     const record = records.get(plugin.plugin);
     if (record === undefined) { const action = requiredAction("install-plugin", { plugin: plugin.plugin }, sha256); required.set(action.id, action); continue; }
     const status = readiness.get(plugin.plugin);
-    if (record.pendingTransition !== undefined || status?.pending) { const action = requiredAction("run-recovery", { plugin: plugin.plugin }, sha256); required.set(action.id, action); }
     if (!constraintMatches(plugin, record, sha256)) { const action = requiredAction("update-plugin", { plugin: plugin.plugin }, sha256); required.set(action.id, action); }
     if (status?.trust === "missing") { const action = requiredAction("review-trust", { plugin: plugin.plugin }, sha256); required.set(action.id, action); }
     if (status?.configuration === "missing") { const action = requiredAction("provide-configuration", { plugin: plugin.plugin }, sha256); required.set(action.id, action); }
   }
-  for (const plugin of context.snapshot.project.plugins) if (plugin.pendingTransition !== undefined) { const action = requiredAction("run-recovery", { plugin: plugin.plugin }, sha256); required.set(action.id, action); }
   return Object.freeze([...required.values()].sort((left, right) => compareUtf8(left.id, right.id)));
 }
 

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -22,6 +22,7 @@ describe("private staging allocator", () => {
       expect(allocation.slot.root.startsWith(layout.stagingRoot)).toBe(true);
       expect(allocation.slot.root).not.toContain(layout.pluginStoreRoot);
       expect(allocation.slot.root).not.toContain(layout.dataRoot);
+      expect((await readdir(layout.stagingRoot)).some((name) => name.endsWith(".owner"))).toBe(false);
       await allocator.discardStaging(allocation, signal);
       await expect(stat(allocation.slot.root)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {

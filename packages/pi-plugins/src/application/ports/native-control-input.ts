@@ -13,7 +13,6 @@ import type { NativeControlInputChannel } from "../native-control-registry.js";
 
 export type NativeControlInputPurpose =
   | "trusted-install"
-  | "trusted-install-recovery"
   | "update"
   | "uninstall"
   | "project-sync-resolution"

@@ -5,7 +5,7 @@ import { MarketplaceRegistrationRecordSchema, UpdateNoticeIdSchema, UpdateNotice
 import type { Sha256 } from "../domain/source.js";
 import { AutomaticUpdateEligibilitySchema, type AutomaticUpdateEligibility, type AutomaticUpdateEligibilityReason } from "./automatic-update-eligibility.js";
 import type { AutomaticTrustContinuity } from "./automatic-trust-continuity.js";
-import type { GenerationMutationCoordinator } from "./generation-mutation-coordinator.js";
+import { runScopedMutation } from "./state-transaction.js";
 import { createMarketplaceUpdateRecordsMutation, marketplaceUpdateRecords } from "./marketplace-update-state.js";
 import { NativeAutomaticUpdateRunRequestSchema, NativeAutomaticUpdateRunResultSchema, type NativeAutomaticUpdateRunRequest, type NativeAutomaticUpdateRunResult } from "./native-update-contract.js";
 import type { AutomaticUpdateLifecyclePort, AutomaticUpdateLifecycleResult } from "./ports/automatic-update-lifecycle.js";
@@ -27,7 +27,7 @@ export interface AutomaticUpdateCoordinator {
 export type AutomaticUpdateCoordinatorDependencies = Readonly<{
   state: LifecycleStateStore;
   inventory: LifecycleStateInventoryPort;
-  mutations: GenerationMutationCoordinator;
+  mutations: LifecycleStateStore;
   policy: UpdatePolicyAuthorityPort;
   lifecycle: AutomaticUpdateLifecyclePort;
   continuity: AutomaticTrustContinuity;
@@ -91,7 +91,6 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
     if (authority.source === "changed") return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "approval-required" });
     if (authority.candidate === "stale" || authority.target === "stale") return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "stale" });
     if (authority.project === "untrusted") return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "project-untrusted" });
-    if (authority.recovery === "required") return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "recovery-required" });
     if (authority.configuration === "required") return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "configuration-required" });
     if (authority.secrets === "unavailable") return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "secret-unavailable" });
     if (authority.capability === "unavailable") return AutomaticUpdateEligibilitySchema.parse({ noticeId, kind: "capability-unavailable" });
@@ -116,15 +115,16 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
       const unchanged = records.every((record) => record.notices.every((notice) =>
         notice.id !== id || JSON.stringify(update(notice)) === JSON.stringify(notice)));
       if (unchanged) return true;
-      const result = await dependencies.mutations.runPreparedMutation(
-        { scope: context, plugins: [], expectedGeneration: loaded.snapshot.generation },
-        async ({ snapshot }) => ({
+      const result = await runScopedMutation(dependencies.mutations,
+        context,
+        (snapshot) => ({
+          kind: "commit" as const,
           mutation: createMarketplaceUpdateRecordsMutation(snapshot, marketplaceUpdateRecords(snapshot).map((record) => MarketplaceRegistrationRecordSchema.parse({
             ...record,
             notices: record.notices.map((notice) => notice.id === id ? update(notice) : notice),
           })), dependencies.sha256),
           value: undefined,
-          beforeCommit: async () => {
+          recheckAuthority: async () => {
             if (!await authorized(context, signal)) throw new Error("PROJECT_AUTHORITY_STALE");
           },
         }),
@@ -151,7 +151,7 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
         case "secret-unavailable": return UpdateNoticeSchema.parse({ ...notice, disposition: "configuration-blocked", automatic: { state: "blocked", reason: "secret-unavailable", attemptedAt } });
         case "capability-unavailable": return UpdateNoticeSchema.parse({ ...notice, disposition: "capability-blocked", automatic: { state: "blocked", reason: "capability-unavailable", attemptedAt } });
         case "project-untrusted": return UpdateNoticeSchema.parse({ ...notice, disposition: "approval-required", automatic: { state: "blocked", reason: "project-untrusted", attemptedAt } });
-        case "recovery-required": return UpdateNoticeSchema.parse({ ...notice, disposition: "recovery-required", automatic: { state: "recovery-required", reason: "recovery-required", attemptedAt } });
+        case "degraded": return UpdateNoticeSchema.parse({ ...notice, disposition: "capability-blocked", automatic: { state: "blocked", reason: "degraded", attemptedAt } });
         case "stale": return UpdateNoticeSchema.parse({ ...notice, disposition: "automatic-retryable", automatic: { state: "blocked", reason: "stale", attemptedAt } });
         case "retryable": return UpdateNoticeSchema.parse({ ...notice, disposition: "automatic-retryable", automatic: { state: "retryable", reason: "retryable", attemptedAt, retryAt: result.retryAt } });
       }
@@ -172,22 +172,19 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
       kind: result.kind === "changed" ? "applied" : "current",
       notice: UpdateNoticeSchema.parse({ ...notice, disposition: "automatic-applied", automatic: { state: "applied", attemptedAt }, resolution: { kind: "installed", at: attemptedAt } }),
     };
-    if (result.kind === "staged") return {
-      kind: "staged",
+    if (result.kind === "live-next-start") return {
+      kind: "live-next-start",
       notice: UpdateNoticeSchema.parse({ ...notice, disposition: "automatic-applied", automatic: { state: "applied", attemptedAt }, resolution: { kind: "installed", at: attemptedAt } }),
     };
-    if (result.kind === "recovery-required") return {
-      kind: "recovery-required",
-      reason: "recovery-required",
-      notice: UpdateNoticeSchema.parse({ ...notice, disposition: "recovery-required", automatic: { state: "recovery-required", reason: "recovery-required", attemptedAt } }),
+    if (result.kind === "degraded") return {
+      kind: "blocked",
+      reason: "degraded",
+      notice: UpdateNoticeSchema.parse({ ...notice, disposition: "capability-blocked", automatic: { state: "blocked", reason: "degraded", attemptedAt } }),
     };
     if (result.kind === "stale") return { kind: "stale", reason: "stale", notice: eligibilityUpdate(notice, AutomaticUpdateEligibilitySchema.parse({ noticeId: notice.id, kind: "stale" })) };
     if (result.kind === "cancelled-before-commit") return { kind: "pending", reason: "cancelled-before-commit", notice: UpdateNoticeSchema.parse({ ...notice, disposition: "automatic-pending", automatic: { state: "pending", attemptedAt } }) };
     const retryAt = attemptedAt + AUTOMATIC_RETRY_BASE_MS;
-    if (result.kind === "rolled-back") {
-      return { kind: "retryable", reason: "rolled-back", notice: eligibilityUpdate(notice, AutomaticUpdateEligibilitySchema.parse({ noticeId: notice.id, kind: "retryable", retryAt })) };
-    }
-    if (result.kind === "rejected" && ["AVAILABLE_REVISION_CHANGED", "CONFIGURATION_STALE", "PROJECTION_FAILED", "PROMOTION_FAILED", "ABORTED"].includes(result.code)) {
+    if (result.kind === "rejected" && ["BUSY", "AVAILABLE_REVISION_CHANGED", "CONFIGURATION_STALE", "PROJECTION_FAILED", "PROMOTION_FAILED", "ABORTED"].includes(result.code)) {
       return { kind: "retryable", reason: result.code, notice: eligibilityUpdate(notice, AutomaticUpdateEligibilitySchema.parse({ noticeId: notice.id, kind: "retryable", retryAt })) };
     }
     const reason: AutomaticUpdateEligibilityReason = result.kind === "rejected" && result.code === "UNCONFIGURED" ? "configuration-required" : result.kind === "rejected" && result.code === "CAPABILITY_UNAVAILABLE" ? "capability-unavailable" : "approval-required";
@@ -220,7 +217,7 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
       const eligibility = await evaluate({ noticeId: candidate.notice.id }, signal, parsed.explicit === true);
       if (eligibility.kind !== "eligible") {
         await updateNotice(candidate.context, candidate.notice.id, (notice) => eligibilityUpdate(notice, eligibility), signal);
-        outcomes.push({ noticeId: candidate.notice.id, plugin: candidate.notice.plugin, display: candidate.notice.display, kind: eligibility.kind === "retryable" ? "retryable" : eligibility.kind === "recovery-required" ? "recovery-required" : eligibility.kind === "stale" ? "stale" : "blocked", reason: eligibility.kind });
+        outcomes.push({ noticeId: candidate.notice.id, plugin: candidate.notice.plugin, display: candidate.notice.display, kind: eligibility.kind === "retryable" ? "retryable" : eligibility.kind === "stale" ? "stale" : "blocked", reason: eligibility.kind });
         continue;
       }
       const latest = await locate(candidate.notice.id, signal);
@@ -228,10 +225,10 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
         outcomes.push({ noticeId: candidate.notice.id, plugin: candidate.notice.plugin, display: candidate.notice.display, kind: "stale", reason: "notice-stale" });
         continue;
       }
-      const result = parsed.mode === "stage"
-        ? await dependencies.lifecycle.stage(latest.notice, signal)
+      const result = parsed.mode === "defer"
+        ? await dependencies.lifecycle.defer(latest.notice, signal)
         : await dependencies.lifecycle.apply(latest.notice, signal);
-      if (result.kind === "changed" || result.kind === "staged") {
+      if (result.kind === "changed" || result.kind === "live-next-start") {
         // Chain the exact trust grant for the just-committed revision within
         // this run so its hooks and MCP servers activate without re-consent.
         // Like ledger settlement, this local write outranks caller
@@ -241,7 +238,7 @@ export function createAutomaticUpdateCoordinator(dependencies: AutomaticUpdateCo
         } catch { /* healed by the next scheduler cycle */ }
       }
       const projected = lifecycleOutcome(latest.notice, result);
-      // Once lifecycle may have committed, rollback/recovery truth outranks the
+      // Once lifecycle may have committed, authoritative state outranks the
       // caller's cancellation. Settle the durable ledger with fresh authority.
       const settlementSignal = new AbortController().signal;
       await updateNotice(latest.context, latest.notice.id, (notice) => lifecycleOutcome(notice, result).notice, settlementSignal);

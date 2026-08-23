@@ -101,13 +101,13 @@ describe("packed project sync, update policy, and offline restart", () => {
       expect.objectContaining({ installed: "2.0.0", available: "3.0.0" }),
     ]);
     const automatic = await journey.rpc.plugin("updates automatic run", "updates.automatic.run");
-    expect(automatic.envelope.data.outcomes).toContainEqual(expect.objectContaining({ kind: "staged", plugin: "core-local@native-e2e-market" }));
-    // An RPC caller has no reload authority: even apply mode settles staged
-    // rather than rolling the committed update back.
+    expect(automatic.envelope.data.outcomes).toContainEqual(expect.objectContaining({ kind: "live-next-start", plugin: "core-local@native-e2e-market" }));
+    // An RPC caller has no reload authority: the committed update activates
+    // from state on the next start.
     await journey.rpc.shutdown();
 
-    // Staged updates activate on the next start: the runtime is reconstructed
-    // from the committed revision and startup recovery settles the journal.
+    // Live-next-start updates activate on the next start: runtime reconstruction
+    // reads the committed revision directly.
     const restarted = await PiRpcProcess.start({ sandbox });
     const [status, afterRestart] = await Promise.all([
       restarted.plugin("--non-interactive status", "status"),

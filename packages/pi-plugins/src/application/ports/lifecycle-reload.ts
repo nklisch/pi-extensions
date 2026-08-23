@@ -5,10 +5,6 @@ import {
 } from "../../domain/content-manifest.js";
 import { ComponentIdSchema } from "../../domain/components.js";
 import {
-  PendingTransitionRefSchema,
-  type PendingTransitionRef,
-} from "../../domain/state/references.js";
-import {
   PluginKeySchema,
   type PluginKey,
 } from "../../domain/identity.js";
@@ -17,6 +13,7 @@ import {
   type ScopeContext,
   type ScopeReference,
 } from "../../domain/state/scope.js";
+import { HostBlockedPluginSchema, type HostBlockedPluginObservation } from "../host-observation-contract.js";
 import type { InstalledPluginRecord } from "../../domain/state/installed-state.js";
 import {
   CurrentProjectRuntimeContextSchema,
@@ -151,8 +148,14 @@ export const McpContributionObservationSchema = z.discriminatedUnion("kind", [
 ]);
 export type McpContributionObservation = z.infer<typeof McpContributionObservationSchema>;
 
+export const SuccessorActivationReportSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("applied"), degraded: z.tuple([]) }).strict().readonly(),
+  z.object({ kind: z.literal("degraded"), degraded: z.array(HostBlockedPluginSchema).min(1).readonly() }).strict().readonly(),
+]);
+export type SuccessorActivationReport = z.infer<typeof SuccessorActivationReportSchema>;
+
 export const LifecycleReloadResultSchemaRegistry = {
-  accepted: z.object({ kind: z.literal("accepted") }).strict().readonly(),
+  accepted: z.object({ kind: z.literal("accepted"), report: SuccessorActivationReportSchema.optional() }).strict().readonly(),
   failed: z.object({ kind: z.literal("failed"), code: z.string().min(1) }).strict().readonly(),
 } as const;
 const lifecycleReloadResultSchemas = Object.values(LifecycleReloadResultSchemaRegistry) as [
@@ -164,7 +167,6 @@ export type LifecycleReloadResult = z.infer<typeof LifecycleReloadResultSchema>;
 
 export const LifecycleReloadRequestSchema = z.object({
   scope: ScopeReferenceSchema,
-  transition: PendingTransitionRefSchema,
 }).strict().readonly();
 export type LifecycleReloadRequest = z.infer<typeof LifecycleReloadRequestSchema>;
 
@@ -261,14 +263,6 @@ export function composeActivationObservation(input: Readonly<{
 /** Runtime reload remains an adapter seam; accepted is never activation proof. */
 export interface LifecycleReloadPort {
   reload(request: LifecycleReloadRequest, signal: AbortSignal): Promise<LifecycleReloadResult>;
-  observe(request: LifecycleObservationRequest, signal: AbortSignal): Promise<ActivationObservation>;
-  /** Startup-only local participant reconciliation; it never invokes Pi reload. */
-  reconcileLocal?(request: Readonly<{
-    scope: ScopeContext;
-    plugin: PluginKey;
-    target: InstalledPluginRecord | null;
-    expectation: ProjectionExpectation;
-  }>, signal: AbortSignal): Promise<ActivationObservation>;
 }
 
 export function verifyActivationObservation(input: unknown): ActivationObservation {
@@ -278,7 +272,7 @@ export function verifyActivationObservation(input: unknown): ActivationObservati
 export type {
   ContentDigest,
   CurrentProjectRuntimeContext,
-  PendingTransitionRef,
+  HostBlockedPluginObservation,
   PluginKey,
   ScopeReference,
 };

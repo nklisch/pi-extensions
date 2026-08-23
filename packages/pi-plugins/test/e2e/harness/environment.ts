@@ -182,7 +182,7 @@ async function auditConsumerLock(
       throw new Error(`production consumer lock row is incomplete: ${lockPath}`);
     }
     if (!canonicalIntegrity(row.integrity)) {
-      // Pi 0.80.8 carries these three exact nested packages inside its own
+      // Pi 0.82.0 carries these three exact nested packages inside its own
       // integrity-bound tarball while npm omits child SRI rows. They are never
       // fetched or resolved independently during the offline replay.
       if (!/^node_modules\/@earendil-works\/pi-coding-agent\/node_modules\/@earendil-works\/pi-(?:agent-core|ai|tui)$/u.test(lockPath) ||
@@ -217,7 +217,14 @@ async function prepare(): Promise<E2ESuiteArtifact> {
     timeoutMs: E2E_TIMEOUTS.lifecycle,
     label: "build packed E2E product",
   });
-  const packed = await runChecked(capabilities.npm, ["pack", "--json", "--silent", "--pack-destination", root], {
+  // npm pack drops workspace-owned bundled dependencies when invoked inside
+  // the workspace. Use the repository's publish-faithful packer so this E2E
+  // exercises the same bundled sibling tree consumers receive.
+  const packed = await runChecked(capabilities.node, [
+    join(E2E_CHECKOUT_ROOT, "..", "..", "scripts", "pack-package.mjs"),
+    E2E_CHECKOUT_ROOT,
+    "--out", root,
+  ], {
     cwd: E2E_CHECKOUT_ROOT,
     env: { ...process.env, NODE_OPTIONS: "" },
     timeoutMs: E2E_TIMEOUTS.lifecycle,
@@ -283,7 +290,7 @@ async function prepare(): Promise<E2ESuiteArtifact> {
   // validates the manifest dependency graph and otherwise sees those rows as
   // missing. Declare the exact public Pi manifest closure in this acceptance
   // consumer so the generated lock is a valid, replayable npm contract. Pi's
-  // own nested 0.80.8 bytes still win Node resolution at runtime.
+  // own nested 0.82.0 bytes still win Node resolution at runtime.
   const piPackage = JSON.parse(await readFile(join(nodeModules, "@earendil-works", "pi-coding-agent", "package.json"), "utf8")) as {
     dependencies?: Record<string, string>;
   };
@@ -299,7 +306,7 @@ async function prepare(): Promise<E2ESuiteArtifact> {
     timeoutMs: E2E_TIMEOUTS.lifecycle * 2,
     label: "complete exact Pi production dependency lock",
   });
-  // Pi 0.80.8 publishes its complete nested runtime dependency closure inside
+  // Pi 0.82.0 publishes its complete nested runtime dependency closure inside
   // its own tarball. npm's lock writer drops those inBundle markers beside a
   // local candidate tarball, although the same installed Pi bytes are marked
   // correctly in an ordinary registry-root lock. Restore that factual marker

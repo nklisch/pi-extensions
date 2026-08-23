@@ -14,6 +14,8 @@ updated: 2026-08-06
 
 # Improve the MCP agent surface
 
+> Workbench version mismatch: stop and offer setup upgrade.
+
 The standalone adapter gains ranked compact discovery, typo recovery, server instructions, parameter-shape rendering, prompts, actionable connection diagnoses, approval brokerage, and bounded multi-call scripting without regressing the maintained programmatic gateway's context efficiency.
 
 The feature owns which upstream agent surfaces are registered, their defaults, model guidance, trace and approval behavior, and transcript presentation. It excludes MCP Apps hosting and programmatic exposure of scripting. In Plugin Host composition, `mcpScript` remains absent unless the later programmatic-parity feature designs an explicit source-qualified opt-in that preserves launch values, cancellation, leases, approvals, output bounds, and trace attribution.

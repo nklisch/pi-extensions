@@ -5,7 +5,6 @@ export type AutomaticUpdateAuthoritySnapshot = Readonly<{
   source: "stable" | "changed";
   target: "current" | "stale";
   project: "trusted" | "untrusted";
-  recovery: "clear" | "required";
   configuration: "valid" | "required";
   secrets: "available" | "unavailable";
   capability: "available" | "unavailable";
@@ -13,10 +12,10 @@ export type AutomaticUpdateAuthoritySnapshot = Readonly<{
 
 export type AutomaticUpdateLifecycleResult =
   | Readonly<{ kind: "changed" | "unchanged" }>
-  | Readonly<{ kind: "staged" }>
-  | Readonly<{ kind: "stale" | "rolled-back" | "cancelled-before-commit" }>
-  | Readonly<{ kind: "recovery-required" }>
-  | Readonly<{ kind: "rejected"; code: "INCOMPATIBLE" | "UNTRUSTED" | "UNCONFIGURED" | "CAPABILITY_UNAVAILABLE" | "AVAILABLE_REVISION_CHANGED" | "CONFIGURATION_STALE" | "PROJECTION_FAILED" | "PROMOTION_FAILED" | "ABORTED" }>;
+  | Readonly<{ kind: "live-next-start" }>
+  | Readonly<{ kind: "degraded" }>
+  | Readonly<{ kind: "stale" | "cancelled-before-commit" }>
+  | Readonly<{ kind: "rejected"; code: "INCOMPATIBLE" | "UNTRUSTED" | "UNCONFIGURED" | "CAPABILITY_UNAVAILABLE" | "AVAILABLE_REVISION_CHANGED" | "CONFIGURATION_STALE" | "PROJECTION_FAILED" | "PROMOTION_FAILED" | "BUSY" | "ABORTED" }>;
 
 /**
  * Narrow adapter over the existing lifecycle authority. Implementations resolve
@@ -27,5 +26,5 @@ export interface AutomaticUpdateLifecyclePort {
   inspect(notice: UpdateNotice, signal: AbortSignal): Promise<AutomaticUpdateAuthoritySnapshot>;
   apply(notice: UpdateNotice, signal: AbortSignal): Promise<AutomaticUpdateLifecycleResult>;
   /** Commit the update with activation deferred to the next start/reload. */
-  stage(notice: UpdateNotice, signal: AbortSignal): Promise<AutomaticUpdateLifecycleResult>;
+  defer(notice: UpdateNotice, signal: AbortSignal): Promise<AutomaticUpdateLifecycleResult>;
 }

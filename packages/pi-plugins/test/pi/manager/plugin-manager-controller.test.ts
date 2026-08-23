@@ -52,7 +52,7 @@ const emptyBrowse = () => report("browse", { candidates: [], observations: [] })
 const emptyNotices = () => report("updates.notices.list", { notices: [], unreadCount: 0, unresolvedCount: 0 });
 const healthStatus = () => report("status", {
   status: "ready",
-  local: { recovery: "settled", runtime: "reconciled" },
+  local: { convergence: "settled", runtime: "reconciled" },
   update: { state: "standby", unresolvedCount: 0, unreadCount: 0, scopes: [] },
   blocked: [],
   capabilities: {
@@ -168,7 +168,7 @@ describe("plugin manager controller", () => {
           envelope: createNativeControlEnvelope({
             executionId, command: "status", status: "ok", data: {
               status: "degraded",
-              local: { recovery: "settled", runtime: "degraded" },
+              local: { convergence: "settled", runtime: "degraded" },
               update: { state: "standby", unresolvedCount: 1, unreadCount: 2, scopes: [] },
               blocked: [],
               capabilities: {

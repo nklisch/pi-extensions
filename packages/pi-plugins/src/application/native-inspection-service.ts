@@ -1,6 +1,6 @@
 import { compareUtf8 } from "../domain/canonical-json.js";
 import { parsePluginKey } from "../domain/identity.js";
-import { toScopeReference } from "../domain/state/scope.js";
+import { ScopeReferenceSchema, toScopeReference } from "../domain/state/scope.js";
 import type { StateCorruption } from "../domain/state/codec.js";
 import { normalizeMarketplaceQuery } from "./marketplace-search.js";
 import type { MarketplaceCatalogService } from "./marketplace-catalog-service.js";
@@ -404,21 +404,37 @@ export function createNativeInspectionService(dependencies: Readonly<{
       }
       if (snapshot.startup.blocked.length > 0) {
         for (const blocked of snapshot.startup.blocked) {
-          findings.push({ key: "startupBlocked", facts: [
-            // Startup observations allow adapter-defined strings. Hashing keeps
-            // distinct owners distinct without publishing a native path/error.
-            { key: "owner-plugin", value: opaqueOwner(blocked.plugin, dependencies.sha256) },
-          ] });
+          if (blocked.code === "MCP_RUNTIME_UNAVAILABLE") {
+            findings.push({ key: "mcpRuntimeUnavailable", facts: [
+              ...(blocked.scope === undefined ? [] : ownerFacts(ScopeReferenceSchema.parse(blocked.scope), blocked.plugin)),
+              { key: "reason", value: safe(blocked.explanation) },
+              { key: "remediation", value: safe("Update pi-plugins and pi-mcp-adapter together; they are released jointly.") },
+            ] });
+          } else if (blocked.scope !== undefined && blocked.code === "PLUGIN_DEGRADED") {
+            findings.push({ key: "pluginDegraded", facts: [
+              ...ownerFacts(ScopeReferenceSchema.parse(blocked.scope), blocked.plugin),
+              { key: "convergence-code", value: safe(blocked.code) },
+            ] });
+            if (blocked.runningRevision !== undefined) findings.push({ key: "pluginFallbackActive", facts: [
+              ...ownerFacts(ScopeReferenceSchema.parse(blocked.scope), blocked.plugin),
+              { key: "running-revision", value: safe(blocked.runningRevision) },
+            ] });
+          } else {
+            findings.push({ key: "startupBlocked", facts: [
+              // Startup observations allow adapter-defined strings. Hashing keeps
+              // distinct owners distinct without publishing a native path/error.
+              { key: "owner-plugin", value: opaqueOwner(blocked.plugin, dependencies.sha256) },
+            ] });
+          }
         }
       }
-      for (const result of snapshot.recovery.results) {
+      for (const result of snapshot.convergence.results) {
         if (result.kind !== "blocked" && result.kind !== "deferred") continue;
         findings.push({
-          key: result.kind === "blocked" ? "recoveryBlocked" : "recoveryDeferred",
+          key: result.kind === "blocked" ? "convergenceBlocked" : "convergenceDeferred",
           facts: [
-            ...ownerFacts(result.scope, result.plugin),
-            { key: "recovery-code", value: safe(result.code) },
-            ...(result.reference === undefined ? [] : [{ key: "transition", value: safe(result.reference) }]),
+            ...(result.scope === undefined ? [] : ownerFacts(ScopeReferenceSchema.parse(result.scope), result.plugin)),
+            { key: "convergence-code", value: safe(result.code) },
           ],
         });
       }

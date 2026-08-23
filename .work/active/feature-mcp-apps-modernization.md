@@ -14,6 +14,8 @@ updated: 2026-08-06
 
 # Modernize MCP Apps
 
+> Workbench version mismatch: stop and offer setup upgrade.
+
 The standalone adapter adopts the complete modern MCP Apps trust and interaction boundary: sandboxed provider documents, restrictive default content policy, separate resource and session authority, validated frame messages and context updates, model/app tool visibility, bounded context handoff, and usable local, remote-terminal, and narrow-viewer journeys.
 
 The UI server remains loopback-only and starts only for an explicit UI-bearing tool call. No listener opens during extension or session startup. Programmatic Plugin Host calls remain UI-disabled until the programmatic-parity feature can preserve source identity and lifecycle ownership. This feature excludes a visual redesign beyond the upstream interaction improvements and excludes broadening network exposure.

@@ -223,10 +223,11 @@ function normalizeRequest(id: NativeControlCommandId, options: ParsedOptionValue
     case "install.open":
     case "install.run": return targetRequest(options, positionals);
     case "inspection.diagnose": return { ...(positionals[0] === undefined ? {} : { plugin: positionals[0], scope: stringValue(options, "scope") }), includeAdoption: boolValue(options, "includeAdoption"), ...(stringValue(options, "snapshotId") === undefined ? {} : { snapshotId: stringValue(options, "snapshotId") }), ...(stringValue(options, "detailId") === undefined ? {} : { detailId: stringValue(options, "detailId") }) };
-    case "install.apply":
-    case "install.recover": return { token: positionals[0] };
+    case "install.apply": return { token: positionals[0] };
     case "lifecycle.enable":
-    case "lifecycle.disable": return { ...targetRequest(options, positionals), previewOnly: boolValue(options, "previewOnly"), confirmed: boolValue(options, "confirmed") };
+    case "lifecycle.disable":
+    case "lifecycle.rollback":
+    case "lifecycle.repair": return { ...targetRequest(options, positionals), ...(id === "lifecycle.enable" || id === "lifecycle.disable" ? { previewOnly: boolValue(options, "previewOnly"), confirmed: boolValue(options, "confirmed") } : {}) };
     case "trust.grant": return { ...targetRequest(options, positionals), confirmed: boolValue(options, "confirmed") };
     case "lifecycle.update": return { ...targetRequest(options, positionals), previewOnly: boolValue(options, "previewOnly"), confirmed: boolValue(options, "confirmed"), ...(stringValue(options, "candidateSnapshotId") === undefined ? {} : { candidateSnapshotId: stringValue(options, "candidateSnapshotId") }), ...(stringValue(options, "candidateDetailId") === undefined ? {} : { candidateDetailId: stringValue(options, "candidateDetailId") }) };
     case "lifecycle.uninstall": return { ...targetRequest(options, positionals), previewOnly: boolValue(options, "previewOnly"), confirmed: boolValue(options, "confirmed"), persistentData: boolValue(options, "deleteData") ? "delete-confirmed" : "keep" };

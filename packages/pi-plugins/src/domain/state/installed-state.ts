@@ -29,7 +29,6 @@ import type { JsonValue } from "../schema.js";
 import { NormalizedPluginSchema, type NormalizedPlugin } from "../plugin.js";
 import {
   MarketplaceContentRefSchema,
-  PendingTransitionRefSchema,
   PluginConfigurationRefSchema,
   PluginContentRefSchema,
   PluginDataRefSchema,
@@ -42,7 +41,6 @@ import {
   verifyPluginContentRef,
   verifyPluginDataRef,
   type MarketplaceContentRef,
-  type PendingTransitionRef,
   type PluginConfigurationRef,
   type PluginContentRef,
   type PluginDataRef,
@@ -193,10 +191,8 @@ export const InstalledPluginRecordSchema = z.object({
   plugin: PluginKeySchema,
   activation: ActivationIntentSchema,
   selectedRevision: ContentDigestSchema,
+  previousRevision: ContentDigestSchema.optional(),
   revisions: z.array(InstalledRevisionRecordSchema).min(1).readonly(),
-  // This is intentionally only an opaque reference. Operation and recovery
-  // payloads belong to their own later state families.
-  pendingTransition: PendingTransitionRefSchema.optional(),
 }).strict().readonly().superRefine((record, context) => {
   addDuplicateIssues(
     record.revisions.map((revision) => revision.revision),
@@ -498,8 +494,8 @@ export function verifyInstalledPluginRecord(input: unknown, sha256: Sha256): Ins
     plugin: PluginKeySchema,
     activation: ActivationIntentSchema,
     selectedRevision: ContentDigestSchema,
+    previousRevision: ContentDigestSchema.optional(),
     revisions: z.array(z.unknown()).min(1),
-    pendingTransition: PendingTransitionRefSchema.optional(),
   }).strict().parse(persistedRevisionValue(value));
   const revisions = record.revisions.map((revision) => verifyPersistedRevision(revision, scope, sha256));
   return InstalledPluginRecordSchema.parse({ ...record, revisions });
@@ -553,8 +549,8 @@ const InstalledPluginInputSchema = z.object({
   plugin: PluginKeySchema,
   activation: ActivationIntentSchema,
   selectedRevision: ContentDigestSchema.optional(),
+  previousRevision: ContentDigestSchema.optional(),
   revisions: z.array(z.unknown()).min(1),
-  pendingTransition: PendingTransitionRefSchema.optional(),
   scope: ScopeReferenceSchema.optional(),
 }).strict();
 
@@ -573,8 +569,8 @@ export function createInstalledPluginRecord(input: unknown, sha256: Sha256): Ins
     plugin: value.plugin,
     activation: value.activation,
     selectedRevision,
+    ...(value.previousRevision === undefined ? {} : { previousRevision: value.previousRevision }),
     revisions,
-    ...(value.pendingTransition === undefined ? {} : { pendingTransition: value.pendingTransition }),
   });
 }
 
@@ -654,7 +650,6 @@ export function decodeInstalledUserPlugins(input: unknown, sha256: Sha256): Inst
 export type { MarketplaceName, ResolvedMarketplaceSource, ResolvedPluginSource };
 export type {
   MarketplaceContentRef,
-  PendingTransitionRef,
   PluginConfigurationRef,
   PluginContentRef,
   PluginDataRef,

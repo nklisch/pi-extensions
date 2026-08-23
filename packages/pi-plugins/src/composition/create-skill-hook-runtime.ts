@@ -4,11 +4,8 @@ import {
   SubagentLifecycleCapabilitiesSchemaV1,
   type SubagentLifecyclePort,
 } from "../application/ports/subagent-lifecycle.js";
-import type { LifecycleClock } from "../application/ports/lifecycle-clock.js";
-import type { RevisionLease, RevisionLeaseStore } from "../application/ports/revision-lease-store.js";
 import type { RegisteredSubagentHookRuntime } from "../application/subagent-hook-runtime.js";
 import { registerSubagentHookRuntime } from "../application/subagent-hook-runtime.js";
-import { createPluginStoreIdentityFromEvidence } from "../domain/content-store.js";
 import type { HookContextVisibility } from "../domain/hook-visibility.js";
 import type { Sha256 } from "../domain/source.js";
 import { createManifestContentReader } from "../infrastructure/filesystem/manifest-content-reader.js";
@@ -45,24 +42,13 @@ export type ComposedSkillHookRuntime = Readonly<{
   hooks: GuardedCommandHookExecutor;
   catalog: SkillHookRuntimeCatalog;
   subagent?: RegisteredSubagentHookRuntime;
+  /** Registration is host-wide, but degradation is reported per plugin by desired-state reconstruction. */
+  subagentRegistrationAvailable: boolean;
   replaceSessionLease(selections: readonly RuntimeSelection[], signal: AbortSignal): Promise<void>;
   quiesce(): void;
   resume(): void;
   close(): Promise<void>;
 }>;
-
-function retainedArtifacts(selections: readonly RuntimeSelection[], sha256: Sha256) {
-  // The store key can be recovered directly from the prepared content
-  // selection without opening the filesystem. Deduplicate exact references.
-  const references = selections.flatMap((selection) => [
-    { kind: "plugin" as const, key: createPluginStoreIdentityFromEvidence({
-      sourceHash: selection.revision.evidence.source.sourceHash,
-      binding: selection.revision.revision,
-    }, sha256).key },
-    { kind: "projection" as const, reference: selection.skillHook.prepared.expectation.projectionRef },
-  ]);
-  return Object.freeze([...new Map(references.map((reference) => [JSON.stringify(reference), reference])).values()]);
-}
 
 /** Compose the existing skill/hook/subagent seams for one exact Pi session. */
 export async function createComposedSkillHookRuntime(input: Readonly<{
@@ -73,8 +59,6 @@ export async function createComposedSkillHookRuntime(input: Readonly<{
   project: PiProjectContextAdapters;
   configuration: HostConfigurationDependencies;
   hookVisibility: () => Promise<HookContextVisibility>;
-  leases: RevisionLeaseStore;
-  clock: LifecycleClock;
   subagents?: SubagentLifecyclePort;
   sha256: Sha256;
   delegates?: PluginHostRuntimeDelegates;
@@ -83,9 +67,9 @@ export async function createComposedSkillHookRuntime(input: Readonly<{
   const runtimeAbort = new AbortController();
   const delegates = input.delegates ?? createPluginHostRuntimeDelegates(input.pi);
   const failureLog = input.failureLog ?? createNullHookFailureLog();
-  let lease: RevisionLease | undefined;
   let subagent: RegisteredSubagentHookRuntime | undefined;
   let coordinator: SubagentHookCoordinator | undefined;
+  let subagentRegistrationAvailable = input.subagents !== undefined;
   let closePromise: Promise<void> | undefined;
   try {
     delegates.bindSession(input.binding);
@@ -142,21 +126,26 @@ export async function createComposedSkillHookRuntime(input: Readonly<{
         continuationBudget: 3,
         failureLog,
       });
-      subagent = await registerSubagentHookRuntime({
-        lifecycle: input.subagents,
-        qualification,
-        coordinator,
-        runtimeSignal: runtimeAbort.signal,
-      });
+      try {
+        subagent = await registerSubagentHookRuntime({
+          lifecycle: input.subagents,
+          qualification,
+          coordinator,
+          runtimeSignal: runtimeAbort.signal,
+        });
+      } catch (error) {
+        if (runtimeAbort.signal.aborted) throw error;
+        // A failed aggregate registration must not prevent ordinary skills and
+        // hooks from starting. Desired-state reconstruction marks only plugins
+        // declaring SubagentStart/SubagentStop as degraded for this session.
+        subagentRegistrationAvailable = false;
+        try { await coordinator.dispose(); } catch { /* preserve degraded startup */ }
+        coordinator = undefined;
+      }
     }
 
-    async function replaceSessionLease(selections: readonly RuntimeSelection[], signal: AbortSignal): Promise<void> {
+    async function replaceSessionLease(_selections: readonly RuntimeSelection[], signal: AbortSignal): Promise<void> {
       signal.throwIfAborted();
-      const artifacts = retainedArtifacts(selections, input.sha256);
-      const at = input.clock.nowEpochMilliseconds();
-      lease = lease === undefined
-        ? await input.leases.acquire({ sessionId: input.binding.current().sessionId, artifacts, at }, signal)
-        : await input.leases.replace(lease, artifacts, at, signal);
     }
 
     async function close(): Promise<void> {
@@ -166,12 +155,7 @@ export async function createComposedSkillHookRuntime(input: Readonly<{
         function* cleanupDisposers() {
           yield () => subagent?.dispose();
           yield () => coordinator?.dispose();
-          if (lease === undefined) return;
-          const sessionLease = lease;
-          yield async () => {
-            try { await input.leases.release(sessionLease, input.clock.nowEpochMilliseconds(), new AbortController().signal); }
-            finally { lease = undefined; }
-          };
+
         }
         await disposeSequentially(cleanupDisposers(), "skill/hook runtime cleanup failed");
       })();
@@ -184,6 +168,7 @@ export async function createComposedSkillHookRuntime(input: Readonly<{
       hooks: executor,
       catalog: source.catalog,
       ...(subagent === undefined ? {} : { subagent }),
+      subagentRegistrationAvailable,
       replaceSessionLease,
       quiesce: delegates.quiesce,
       resume: delegates.resume,
@@ -194,10 +179,6 @@ export async function createComposedSkillHookRuntime(input: Readonly<{
     delegates.clear();
     try { await subagent?.dispose(); } catch { /* preserve construction failure */ }
     try { await coordinator?.dispose(); } catch { /* preserve construction failure */ }
-    if (lease !== undefined) {
-      try { await input.leases.release(lease, input.clock.nowEpochMilliseconds(), new AbortController().signal); }
-      catch { /* preserve construction failure */ }
-    }
     throw error;
   }
 }

@@ -417,7 +417,7 @@ export function createImmutableContentStore(options: ImmutableContentStoreOption
       return "ready-match";
     } catch {
       // A target without a valid marker is inert but cannot be replaced under
-      // the requested identity. Recovery/GC owns abandoned-target decisions.
+      // the requested identity. Convergence/GC owns abandoned-target decisions.
       return "collision";
     }
   }

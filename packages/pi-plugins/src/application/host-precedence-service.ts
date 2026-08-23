@@ -5,7 +5,7 @@ import {
 } from "../domain/host-precedence.js";
 import { HostConfigDocumentSchema } from "../domain/state/config-state.js";
 import type { Sha256 } from "../domain/source.js";
-import type { GenerationMutationCoordinator } from "./generation-mutation-coordinator.js";
+import { runScopedMutation } from "./state-transaction.js";
 import type { LifecycleStateStore } from "./ports/lifecycle-state-store.js";
 import { parseStateMutation } from "./state-contract.js";
 import {
@@ -30,7 +30,7 @@ export interface HostPrecedenceService {
 
 export type HostPrecedenceServiceDependencies = Readonly<{
   state: LifecycleStateStore;
-  mutations: GenerationMutationCoordinator;
+  mutations: LifecycleStateStore;
   sha256: Sha256;
 }>;
 
@@ -74,9 +74,9 @@ export function createHostPrecedenceService(dependencies: HostPrecedenceServiceD
       return NativeHostPrecedenceResultSchema.parse({ kind: "rejected", code: "STATE_UNAVAILABLE" });
     }
     const before = loaded.snapshot.config.global.resolution.hostPrecedence;
-    const result = await dependencies.mutations.runPreparedMutation(
-      { scope: { kind: "user" }, plugins: [], expectedGeneration: loaded.snapshot.generation },
-      async ({ snapshot }) => {
+    const result = await runScopedMutation(dependencies.mutations,
+      { kind: "user" },
+      (snapshot) => {
         if (!("config" in snapshot)) throw new Error("host precedence requires user scope");
         // Same replace pattern as the update policy service: rebuild the
         // whole hostConfig document through its schema so the mutation stays
@@ -87,6 +87,7 @@ export function createHostPrecedenceService(dependencies: HostPrecedenceServiceD
           global: { ...snapshot.config.global, resolution: { hostPrecedence: precedence } },
         });
         return {
+          kind: "commit" as const,
           mutation: parseStateMutation({
             scope: snapshot.scope,
             expectedGeneration: snapshot.generation,

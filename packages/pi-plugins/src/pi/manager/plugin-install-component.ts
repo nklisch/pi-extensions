@@ -51,23 +51,11 @@ function resultLines(result: TrustedInstallActivationResult, theme: Theme): stri
     );
   } else if (result.kind === "current-state") {
     lines.push(`${safe(result.plugin)} already ${safe(result.activation)} · ${safe(result.reason)}`);
-  } else if (result.kind === "recovery-required") {
-    const culprit = "progress" in result
-      ? [...result.progress].reverse().find((event) => event.state === "failed") ?? [...result.progress].reverse().find((event) => event.code !== undefined)
-      : undefined;
-    lines.push(
-      "The plugin was installed, but Pi couldn't confirm it's working yet.",
-      ...(culprit === undefined ? [] : [`It stopped during ${plainLifecyclePhase(culprit.phase)}.`]),
-      result.action === "run-recovery"
-        ? "Press enter to finish setting it up — this is safe to retry."
-        : "Press enter to review its settings and finish setup.",
-      result.session === undefined
-        ? "If this keeps happening, /plugins → Health shows what's pending."
-        : "Leaving this screen won't uninstall anything.",
-    );
-  } else if (result.kind === "rolled-back") {
-    lines.push(`It couldn't be added — ${plainLifecycleFailure(result.failure)}. The change was undone${result.restored ? "" : "; check /plugins → Health"}.`);
-  } else if (result.kind === "rejected" || result.kind === "failed") {
+  } else if (result.kind === "degraded") {
+    lines.push(`The plugin is degraded — ${safe(result.failure.explanation)}. Use /plugins repair or /plugins rollback.`);
+  } else if (result.kind === "failed") {
+    lines.push(`It couldn't be added — ${plainLifecycleFailure(result.code)}.`);
+  } else if (result.kind === "rejected") {
     lines.push(`It couldn't be added — ${plainLifecycleFailure(result.code)}.`);
   } else if (result.kind === "cancelled") {
     lines.push(`Cancelled during ${plainLifecyclePhase(result.phase)} — nothing was installed.`);
@@ -76,9 +64,8 @@ function resultLines(result: TrustedInstallActivationResult, theme: Theme): stri
   } else if (result.kind === "needs-input") {
     lines.push(...result.issues.map((issue) => `${plainLifecycleFailure(issue.code)}${issue.key === undefined ? "" : ` · ${safe(issue.key)}`}`));
   }
-  // The live frames already showed progress while the operation ran, and
-  // only recovery-required reaches this screen now; re-dumping the full
-  // evidence list is the "long unreadable result" users bounce off.
+  // The live frames already showed progress; re-dumping the full evidence
+  // list is the "long unreadable result" users bounce off.
   return lines;
 }
 
@@ -180,21 +167,16 @@ function installContent(state: PluginInstallState, theme: Theme): InstallContent
         ? plain(theme.fg("success", "✓ complete executable disclosure reviewed"))
         : plain(theme.fg("muted", "Disclosure stays available above; it is not required to add.")),
       choice(state, "back", "Back", theme),
-      choice(state, "continue", state.busy
-        ? state.submission === "recover" ? "Finishing setup…" : "Adding…"
-        : state.submission === "recover" ? "Finish setup" : "Add plugin", theme),
+      choice(state, "continue", state.busy ? "Adding…" : "Add plugin", theme),
     );
     return { lines, disclosureOffset, disclosureCount: disclosure.length };
   }
-  const recoverySession = state.result?.kind === "recovery-required" && state.result.action !== "run-recovery"
-    ? state.result.session
-    : undefined;
   return {
     lines: [
       plain(theme.fg("accent", theme.bold("Add plugin · Result"))),
       ...(state.result === undefined ? [plain(theme.fg("warning", "Activation result unavailable"))] : resultLines(state.result, theme).map(plain)),
       plain(""),
-      choice(state, "continue", recoverySession === undefined ? "Return to installed plugins" : "Review recovery configuration", theme),
+      choice(state, "continue", "Return to installed plugins", theme),
     ],
     disclosureOffset: 0,
     disclosureCount: 0,

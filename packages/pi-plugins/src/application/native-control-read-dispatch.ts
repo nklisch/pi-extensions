@@ -125,7 +125,7 @@ export function createNativeControlReadDispatcher(dependencies: NativeControlRea
             : installed;
           if (selected.kind === "unavailable") {
             // The exact detail cannot be reconstructed, but host diagnosis is
-            // still authoritative and includes startup/recovery blocks for the
+            // still authoritative and includes startup/convergence blocks for the
             // requested owner. Do not replace useful corruption evidence with
             // a generic selection failure.
             const result = await dependencies.inspection.diagnose({ target: { kind: "host" }, includeAdoption: request.includeAdoption }, signal);

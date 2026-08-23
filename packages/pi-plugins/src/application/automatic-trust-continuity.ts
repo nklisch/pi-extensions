@@ -12,7 +12,7 @@ import { deriveMarketplaceSourceIdentity } from "../domain/update-policy.js";
 import type { InstalledPluginRecord } from "../domain/state/installed-state.js";
 import { parseStateMutation, type GenerationSnapshot } from "./state-contract.js";
 import { resolveEffectiveUpdatePolicy } from "./update-policy-resolution.js";
-import type { GenerationMutationCoordinator } from "./generation-mutation-coordinator.js";
+import { runScopedMutation } from "./state-transaction.js";
 import type { InstalledPluginLoader } from "./ports/installed-plugin-loader.js";
 import type { LifecycleStateStore } from "./ports/lifecycle-state-store.js";
 import type { ProjectTrustPort } from "./ports/project-trust.js";
@@ -38,7 +38,7 @@ export type AutomaticTrustContinuityResult =
 
 export type AutomaticTrustContinuityDependencies = Readonly<{
   state: LifecycleStateStore;
-  mutations: GenerationMutationCoordinator;
+  mutations: LifecycleStateStore;
   installed: InstalledPluginLoader;
   projectTrust?: ProjectTrustPort;
   sha256: Sha256;
@@ -256,62 +256,43 @@ export function createAutomaticTrustContinuity(dependencies: AutomaticTrustConti
       if (planned.length === 0) return { kind: "ensured", granted: [] };
       const outcome = await (async () => {
         try {
-          return { result: await dependencies.mutations.runPreparedMutation(
-        {
-          scope: { kind: "user" },
-          plugins: planned.map((entry) => entry.plugin),
-          expectedGeneration: userLoaded.snapshot.generation,
-        },
-        async (context) => {
-          if (!("trust" in context.snapshot)) throw new Error("trust authority is not user state");
-          const current = context.snapshot.trust.records;
-          const additions: TrustStateRecord[] = [];
-          for (const entry of planned) {
-            // Re-adjudicate inside the locked snapshot: a concurrent grant or
-            // revocation of the exact subject since planning wins.
-            if (exactRecord(current, entry.candidate.subject, dependencies.sha256) !== undefined) continue;
-            if (!hasGrantedBaseline(current, entry.record, entry.selected, scope, dependencies.sha256)) continue;
-            additions.push(grantTrust(entry.candidate, dependencies.sha256));
-          }
-          // Re-adjudication can remove every planned subject (concurrent
-          // grant or baseline revocation). Never commit a no-op trust
-          // replacement: churning the user generation moves authority under
-          // foreground readers for no semantic change.
-          if (additions.length === 0) throw new NoContinuityGrants();
-          const records = [...current, ...additions].sort((left, right) => compareUtf8(left.subject, right.subject));
-          const trust = createTrustStateDocument({
-            schemaVersion: 1,
-            generation: context.snapshot.generation,
-            records,
-          }, dependencies.sha256);
-          return {
-            mutation: parseStateMutation({
-              scope: { kind: "user" },
-              expectedGeneration: context.snapshot.generation,
-              replace: { trust },
-            }, dependencies.sha256),
-            value: additions.map((record) => record.subject),
-            ...(scope.kind === "project" ? {
-              // The locked snapshot is user state; project authority (trust,
-              // policy, selected revision, baseline) can move underneath the
-              // plan from another session without advancing the user
-              // generation. Re-adjudicate the exact plan against fresh
-              // project authority immediately before commit.
-              beforeCommit: async () => {
-                if (!await projectTrusted(scope, signal)) throw new ProjectAuthorityStale();
-                const fresh = await dependencies.state.read(scope, signal);
-                if (!fresh.ok) throw new ProjectAuthorityStale();
-                const replanned = await planGrants(scope, fresh.snapshot, context.snapshot, signal);
-                if (replanned === undefined) throw new ProjectAuthorityStale();
-                const wanted = planned.map((entry) => entry.candidate.subject).sort(compareUtf8);
-                const current = replanned.map((entry) => entry.candidate.subject).sort(compareUtf8);
-                if (wanted.length !== current.length || wanted.some((subject, index) => subject !== current[index])) {
-                  throw new ProjectAuthorityStale();
-                }
-              },
-            } : {}),
-          };
-        },
+          return { result: await runScopedMutation<readonly string[]>(
+            dependencies.mutations,
+            { kind: "user" },
+            (snapshot) => {
+              if (!("trust" in snapshot)) throw new Error("trust authority is not user state");
+              const current = snapshot.trust.records;
+              const additions: TrustStateRecord[] = [];
+              for (const entry of planned) {
+                // Re-adjudicate against the latest snapshot: a concurrent grant
+                // or revocation of the exact subject since planning wins.
+                if (exactRecord(current, entry.candidate.subject, dependencies.sha256) !== undefined) continue;
+                if (!hasGrantedBaseline(current, entry.record, entry.selected, scope, dependencies.sha256)) continue;
+                additions.push(grantTrust(entry.candidate, dependencies.sha256));
+              }
+              if (additions.length === 0) throw new NoContinuityGrants();
+              const records = [...current, ...additions].sort((left, right) => compareUtf8(left.subject, right.subject));
+              const trust = createTrustStateDocument({ schemaVersion: 1, generation: snapshot.generation, records }, dependencies.sha256);
+              return {
+                kind: "commit" as const,
+                mutation: parseStateMutation({ scope: { kind: "user" }, expectedGeneration: snapshot.generation, replace: { trust } }, dependencies.sha256),
+                value: additions.map((record) => record.subject),
+                ...(scope.kind === "project" ? {
+                  // Project authority does not advance the user generation, so
+                  // recheck it immediately before this user-state commit.
+                  recheckAuthority: async () => {
+                    if (!await projectTrusted(scope, signal)) throw new ProjectAuthorityStale();
+                    const fresh = await dependencies.state.read(scope, signal);
+                    if (!fresh.ok) throw new ProjectAuthorityStale();
+                    const replanned = await planGrants(scope, fresh.snapshot, snapshot, signal);
+                    if (replanned === undefined) throw new ProjectAuthorityStale();
+                    const wanted = planned.map((entry) => entry.candidate.subject).sort(compareUtf8);
+                    const current = replanned.map((entry) => entry.candidate.subject).sort(compareUtf8);
+                    if (wanted.length !== current.length || wanted.some((subject, index) => subject !== current[index])) throw new ProjectAuthorityStale();
+                  },
+                } : {}),
+              };
+            },
             signal,
           ) };
         } catch (error) {
@@ -326,7 +307,7 @@ export function createAutomaticTrustContinuity(dependencies: AutomaticTrustConti
       if ("projectStale" in outcome) continue;
       const result = outcome.result;
       if (result.kind === "committed") return { kind: "ensured", granted: result.value };
-      if (result.kind === "stale-generation") continue;
+      if (result.kind === "stale") continue;
       return { kind: "unavailable" };
     }
     return { kind: "unavailable" };

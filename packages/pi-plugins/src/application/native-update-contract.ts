@@ -145,11 +145,11 @@ export const NativeAutomaticUpdateRunRequestSchema = z.object({
   /** Explicit foreground user intent bypasses automatic-policy eligibility, not safety checks. */
   explicit: z.boolean().optional(),
   /**
-   * "stage" (default) commits updates and activates them on the next
-   * start/reload; "apply" drives activation immediately (one reload per
-   * update, requires a reload-capable context).
+   * "defer" (default) commits updates and activates them on the next
+   * start/reload; "apply" drives activation immediately when a reload
+   * context is available.
    */
-  mode: z.enum(["apply", "stage"]).default("stage"),
+  mode: z.enum(["apply", "defer"]).default("defer"),
 }).strict().readonly();
 export type NativeAutomaticUpdateRunRequest = z.input<typeof NativeAutomaticUpdateRunRequestSchema>;
 
@@ -158,7 +158,7 @@ export const NativeAutomaticUpdateRunResultSchema = z.object({
     noticeId: UpdateNoticeIdSchema,
     plugin: PluginKeySchema,
     display: z.object({ installed: z.string().min(1), available: z.string().min(1) }).strict().readonly(),
-    kind: z.enum(["applied", "staged", "current", "pending", "blocked", "retryable", "recovery-required", "stale"]),
+    kind: z.enum(["applied", "live-next-start", "current", "pending", "blocked", "retryable", "stale"]),
     reason: z.string().optional(),
   }).strict().readonly()).readonly(),
 }).strict().readonly();

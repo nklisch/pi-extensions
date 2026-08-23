@@ -1,11 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHookFailureLog } from "../runtime/hooks/hook-failure-log.js";
 import { VERSION as PI_VERSION, getAgentDir, type ExtensionCommandContext, type ExtensionContext, type SessionShutdownEvent, type SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import { createCompatibilityService } from "../application/compatibility-service.js";
-import { createGenerationMutationCoordinator } from "../application/generation-mutation-coordinator.js";
-import { createLifecycleTransitionReconciler } from "../application/lifecycle-transition-reconciler.js";
 import { createMarketplaceInspectionService } from "../application/marketplace-inspection-service.js";
 import { createMarketplacePluginProbe } from "../application/marketplace-plugin-probe.js";
 import { createPluginLifecycleComposition } from "../application/plugin-lifecycle-service.js";
@@ -15,15 +14,14 @@ import { verifyPluginConfigurationDocument } from "../domain/configured-values.j
 import { createTrustCandidate } from "../domain/trust-policy.js";
 import { toScopeReference } from "../domain/state/scope.js";
 import { createRuntimeProjectionCache } from "../infrastructure/filesystem/runtime-projection-cache.js";
-import { createKeyedMutationScheduler } from "../infrastructure/state/keyed-mutation-scheduler.js";
-import { createSqliteScopeLockManager } from "../infrastructure/state/sqlite-scope-lock.js";
 import { createNodeLifecycleStateAdapters } from "../infrastructure/state/sqlite-lifecycle-state-store.js";
 import { createSqlitePluginConfigurationStore } from "../infrastructure/configuration/sqlite-plugin-configuration-store.js";
 import { createNodeConfigurationPathPort } from "../infrastructure/configuration/node-configuration-path.js";
 import { createNodeHostIdentifiers } from "../infrastructure/node/node-identifiers.js";
 import { createNodeLifecycleClock } from "../infrastructure/node/node-lifecycle-clock.js";
 import { createNodeContentInfrastructure } from "../infrastructure/filesystem/create-content-store.js";
-import { createNodeRecoveryAdapters } from "../infrastructure/recovery/create-node-recovery-adapters.js";
+import { createNodeConvergenceService } from "../infrastructure/convergence/create-node-convergence.js";
+import { createPendingDeleteMarkerStore } from "../infrastructure/cleanup/pending-data-deletion.js";
 import { createPlatformSecretStore } from "../infrastructure/secrets/create-platform-secret-store.js";
 import { createNodeMcpLaunchEnvironment } from "../infrastructure/environment/node-mcp-launch-environment.js";
 import { createNodeHookExecutableResolver } from "../infrastructure/process/hook-executable-resolver.js";
@@ -41,7 +39,6 @@ import { createCandidateContentLeasePort } from "./candidate-content-lease.js";
 import { createNativeInspectionComposition } from "./create-native-inspection-service.js";
 import { createComposedTrustedInstallationService } from "./create-trusted-installation-service.js";
 import { createComposedNativeLifecycleOperationService } from "./create-native-lifecycle-operation-service.js";
-import { createNativeUninstallCleanupService } from "../application/native-uninstall-cleanup.js";
 import { createNodeProjectIntentFilePort } from "../infrastructure/project/node-project-intent-file.js";
 import { deriveInspectionDetailId, deriveInspectionEvidenceSnapshotId } from "../application/native-inspection-identifiers.js";
 import { createHostConfigurationServices } from "./create-host-configuration.js";
@@ -49,6 +46,9 @@ import { createNodePiRuntimeCapabilityProbe } from "./node-pi-runtime-capability
 import { createPublishedSubagentLifecyclePort } from "./create-subagent-lifecycle.js";
 import { buildRuntimeDesiredState, type HostBlockedPlugin, type RuntimeDesiredState } from "./runtime-desired-state.js";
 import { createRuntimeSelectionCatalog } from "./runtime-selection-catalog.js";
+import { createAgentOrientationFactsCollector } from "./agent-orientation-facts.js";
+import { createAgentOrientationPublisher, type AgentOrientationPublisher } from "../pi/agent-orientation-publisher.js";
+import { assembleAgentOrientation, AgentOrientationUnavailableError } from "../application/agent-orientation.js";
 import { createComposedSkillHookRuntime } from "./create-skill-hook-runtime.js";
 import { createComposedMcpRuntime } from "./create-mcp-runtime.js";
 import { createCompletePluginReloadPort } from "./complete-plugin-reload.js";
@@ -82,8 +82,18 @@ import { createNativeControlCurrentProjectPort } from "./create-native-control-c
 import { createNodeControlTimeoutPort } from "../infrastructure/node/node-control-timeout.js";
 import type { NativePluginControlService } from "../application/native-control-service.js";
 import type { SkillResourceDiscoveryPort } from "../runtime/skills/resource-discovery.js";
+import type { SuccessorActivationReport } from "../application/ports/lifecycle-reload.js";
 
 const sha256 = (bytes: Uint8Array): Uint8Array => new Uint8Array(createHash("sha256").update(bytes).digest());
+
+async function readPiPluginsPackageVersion(): Promise<string> {
+  try {
+    const manifest = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8")) as { version?: unknown };
+    return typeof manifest.version === "string" && manifest.version.length > 0 ? manifest.version : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 
 /** Render a compact `A <- B <- C` description of thrown values and their cause chains. */
 function describeErrorChain(errors: readonly unknown[]): string {
@@ -106,19 +116,25 @@ type PiApplicationOperationFrame = {
   reloadContext: ExtensionContext | undefined;
 };
 
-function startupResult(input: Readonly<{
+export function startupResult(input: Readonly<{
   blocked: readonly HostBlockedPlugin[];
+  reconcileReport?: SuccessorActivationReport;
   mcp: RuntimeQualificationStatus;
   subagents: RuntimeQualificationStatus;
   piReload: RuntimeQualificationStatus;
   secrets: "available" | "unavailable";
 }>): HostStartupResult {
+  const blocked = [...input.blocked, ...(input.reconcileReport?.degraded ?? [])];
+  const uniqueBlocked = [...new Map(blocked.map((entry) => [
+    JSON.stringify([entry.scope, entry.plugin, entry.selectedRevision, entry.runningRevision, entry.code]),
+    entry,
+  ])).values()];
   const secrets = input.secrets === "available"
     ? { status: "available" as const, explanation: "encrypted operating-system secret custody is available" }
     : { status: "unavailable" as const, explanation: "encrypted operating-system secret custody is unavailable" };
   return Object.freeze({
-    status: input.blocked.length === 0 ? "ready" : "degraded",
-    blocked: Object.freeze(input.blocked.map((entry) => Object.freeze({ ...entry }))),
+    status: uniqueBlocked.length === 0 ? "ready" : "degraded",
+    blocked: Object.freeze(uniqueBlocked.map((entry) => Object.freeze({ ...entry }))),
     capabilities: Object.freeze({
       mcp: Object.freeze({ status: input.mcp.status, explanation: input.mcp.explanation }),
       subagents: Object.freeze({ status: input.subagents.status, explanation: input.subagents.explanation }),
@@ -167,6 +183,17 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
   let activeResources: SkillResourceDiscoveryPort | undefined;
   let stopBackground: (() => Promise<void>) | undefined;
   let wakeBackground: (() => void) | undefined;
+  let refreshOrientation: (() => Promise<void>) | undefined;
+  let publishUnavailableOrientation: ((error: unknown, context: ExtensionContext) => Promise<void>) | undefined;
+  let orientationPackageVersion = "unknown";
+  let orientationBriefPaths: readonly string[] = [paths.orientationBrief({ kind: "user" })];
+  let orientationPublisher: AgentOrientationPublisher | undefined;
+  try {
+    orientationPublisher = createAgentOrientationPublisher({ pi: options.pi });
+  } catch {
+    // Orientation is advisory. A host without the optional delivery method
+    // still starts and retains every lifecycle capability.
+  }
 
   async function start(_event: SessionStartEvent, context: ExtensionContext): Promise<StartedPackagedPluginHost> {
     if (terminal) throw new PackagedPluginHostError(PackagedPluginHostErrorCode.terminal, "packaged plugin host is terminal");
@@ -185,6 +212,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
       try {
         const binding = createPiSessionBinding(context);
         activeBinding = binding;
+        orientationPackageVersion = await readPiPluginsPackageVersion();
         const startupSignal = new AbortController().signal;
         // The packaged host has one lifecycle package selection. Test fakes
         // exercise the package-neutral port below its composition boundary.
@@ -194,6 +222,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           nodeVersion: process.versions.node,
           piVersion: PI_VERSION,
           ...(options.runtime?.mcp === undefined ? {} : { mcp: options.runtime.mcp }),
+          ...(options.runtime?.mcpUnavailable === undefined ? {} : { mcpUnavailable: options.runtime.mcpUnavailable }),
           ...(subagentLifecycle === undefined ? {} : { subagents: subagentLifecycle }),
           signal: startupSignal,
         });
@@ -205,6 +234,10 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         own(async () => delegates.clear());
 
         const project = await createPiProjectContextAdapters({ binding, sha256, git: createNodeCommandRunner() });
+        orientationBriefPaths = Object.freeze([
+          paths.orientationBrief({ kind: "user" }),
+          paths.orientationBrief(toScopeReference(project.scope)),
+        ]);
         const state = await createNodeLifecycleStateAdapters({ paths, currentProject: project.scope, sha256 });
         own(() => state.close());
         // Host precedence is read through the state store at call time so a
@@ -213,9 +246,8 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         const hookVisibility = createHookContextVisibilityProvider(state.state);
         const configurations = await createSqlitePluginConfigurationStore({ root: paths.configurationRoot });
         own(async () => configurations[Symbol.asyncDispose]());
-        const recoveryAdapters = await createNodeRecoveryAdapters({ hostRoot: paths.hostRoot });
-        own(() => recoveryAdapters.close());
         const content = await createNodeContentInfrastructure({ hostRoot: paths.hostRoot });
+        const manifestContentReader = createManifestContentReader(sha256);
         const secrets = await createPlatformSecretStore();
         own(() => secrets.close());
         const identifiers = createNodeHostIdentifiers();
@@ -261,8 +293,6 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           project,
           configuration: configuration.execution,
           hookVisibility,
-          leases: recoveryAdapters.leases,
-          clock,
           sha256,
           failureLog: createHookFailureLog({ file: join(paths.hostRoot, "logs", "hooks.jsonl") }),
           ...(qualification.subagents.lifecycle === undefined ? {} : { subagents: qualification.subagents.lifecycle }),
@@ -275,9 +305,6 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           project,
           configuration: configuration.execution,
           environment: createNodeMcpLaunchEnvironment(),
-          leases: recoveryAdapters.leases,
-          clock,
-          sessionId: binding.current().sessionId,
           sha256,
         });
         own(() => mcp.close());
@@ -298,10 +325,14 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
               projections,
               project,
               ...(qualification.mcp.runtime === undefined ? {} : { mcp: qualification.mcp.runtime }),
+              ...(qualification.mcp.status === "unavailable" && qualification.mcp.code !== undefined
+                ? { mcpUnavailable: { code: qualification.mcp.code, explanation: qualification.mcp.explanation } }
+                : {}),
               state: state.state,
               content: content.content,
               userBaseDirectory: binding.current().cwd,
               sha256,
+              subagentRegistrationAvailable: skillHook.subagentRegistrationAvailable,
             }, signal, overrides);
             return latestDesired;
           },
@@ -321,26 +352,20 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           selections,
           skillHook,
           mcp,
-          transitions: recoveryAdapters.transitions,
           markDraining: claim.markDraining,
           sha256,
         });
-        const locks = await createSqliteScopeLockManager({
-          lockRoot: paths.lockRoot,
-          retryDelayMs: { minimum: 5, maximum: 100 },
-        });
-        const mutations = createGenerationMutationCoordinator({ scheduler: createKeyedMutationScheduler(), locks, state: state.state });
+        const mutations = state.state;
         const hostPrecedenceConfig = createHostPrecedenceService({ state: state.state, mutations, sha256 });
         const hookVisibilityConfig = createHookVisibilityService({ state: state.state, mutations, sha256 });
-        const reconciler = createLifecycleTransitionReconciler({ mutations, state: state.state, reload, transitions: recoveryAdapters.transitionStore, sha256 });
         const sourceOptions = {
           ...(options.source ?? {}),
           networkPolicy: options.source?.networkPolicy ?? networkEgressPolicyOptionsFromEnvironment(process.env),
         };
         const materializers = createNodeSourceMaterializers(sourceOptions);
+        const pendingDeletes = createPendingDeleteMarkerStore({ root: join(paths.hostRoot, "cleanup", "v1", "pending-deletes") });
         const lifecycleComposition = createPluginLifecycleComposition({
           state: state.state,
-          mutations,
           content: content.content,
           materializer: materializers.plugins,
           inspector: inspection,
@@ -348,28 +373,27 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           installed: content.installed,
           projections,
           reload,
-          transitions: recoveryAdapters.transitionStore,
-          operationIds: identifiers.operationIds,
           projectTrust: project.trust,
           projectRoots: project.authority,
           configurations,
           secrets: secrets.store,
           paths: configurationPaths,
+          pendingDeletes,
+          dataRemoval: content.dataRemoval,
           sha256,
         });
         const lifecycle = lifecycleComposition.application;
-        const uninstallCleanup = createNativeUninstallCleanupService({ transitions: recoveryAdapters.transitions, data: content.dataRemoval, clock });
-        const recovery = recoveryAdapters.createRecoveryService({
+        const convergence = createNodeConvergenceService({
           state: state.state,
           inventory: state.inventory,
-          reconciler,
-          reload,
-          uninstallCleanup,
+          hostRoot: paths.hostRoot,
+          dataRemoval: content.dataRemoval,
+          sha256,
           clock,
+          projectionReferences: () => latestDesired === undefined ? undefined : new Set(latestDesired.selections.flatMap((selection) => selection.skillHook.prepared.expectation.kind === "active" ? [selection.skillHook.prepared.expectation.projectionRef.slice(selection.skillHook.prepared.expectation.projectionRef.lastIndexOf(":") + 1)] : [])),
         });
-        const collection = recoveryAdapters.createCollectionService({ state: state.state, inventory: state.inventory, mutations, clock });
         const marketplaceInspection = createMarketplaceInspectionService({
-          content: createManifestContentReader(sha256),
+          content: manifestContentReader,
           readers: { claude: readClaudeMarketplace, codex: readCodexMarketplace, merge: mergeMarketplaces },
           sha256,
           hostPrecedence,
@@ -403,9 +427,16 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         const marketplace = marketplaceComposition.application;
 
         const runtimeStartupBlocked: HostBlockedPlugin[] = [];
+        let runtimeStartupReport: SuccessorActivationReport | undefined;
+        const recordStartupReport = (report: SuccessorActivationReport): void => {
+          // MCP apply failures are part of the successor report, not the
+          // desired-state snapshot. Keep that report in startup visibility so
+          // a plugin cannot look healthy merely because skills reconstructed.
+          runtimeStartupReport = report;
+        };
         if (successor === undefined) {
           try {
-            await reload.reconcileCurrent(startupSignal);
+            recordStartupReport(await reload.reconcileCurrent(startupSignal));
           } catch (error) {
             if (startupSignal.aborted) throw error;
             runtimeStartupBlocked.push({
@@ -416,39 +447,23 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           }
         } else {
           try {
-            await reload.acceptSuccessor(successor, startupSignal);
+            recordStartupReport(await reload.acceptSuccessor(successor, startupSignal));
             reloadSuccessor = Object.freeze({ ticket: successor, reload });
           } catch (error) {
             reload.failSuccessor(successor, error);
             runtimeStartupBlocked.push({
               plugin: "host-runtime",
               code: "RUNTIME_RECONSTRUCTION_FAILED",
-              explanation: "reload successor reconstruction failed; recovery remains authoritative",
+              explanation: "reload successor reconstruction failed; convergence will retry on the next start",
             });
           }
         }
-        // Recovery runs after runtime reconstruction so activation
-        // observations exist when pending transitions are classified: a
-        // committed candidate whose projection now runs finalizes as
-        // completed. Before this ordering, the sweep ran with an empty
-        // observation map and compensated (rolled back) every interrupted
-        // transition on every start. If reconstruction failed, observations
-        // are absent and recovery keeps the conservative compensate path.
-        const recoveryResult = await recovery.recover({
-          requiredScopes: [{ kind: "user" }, project.scope],
-          ...(successor === undefined ? {} : { reservedTransitions: [successor.transition] }),
-        }, startupSignal);
-        const unresolvedRecovery: HostBlockedPlugin[] = successor === undefined
-          ? recoveryResult.results
-              .filter((result) => result.kind === "blocked" || result.kind === "deferred")
-              .map((result) => ({
-                plugin: result.plugin ?? "host-recovery",
-                code: `RECOVERY_${result.code}`,
-                explanation: "startup recovery did not settle authoritative pending state",
-              }))
-          : [];
+        const convergenceResult = await convergence.sweep({ scopes: [{ kind: "user" }, project.scope], signal: startupSignal });
+        const unresolvedConvergence: HostBlockedPlugin[] = convergenceResult.results.filter((result) => result.kind !== "completed").map((result) => ({ plugin: result.plugin ?? "convergence", code: `CONVERGENCE_${result.code}`, explanation: "startup convergence retained work for a later pass" }));
+        const runtimeBlocked = [...(latestDesired?.degraded ?? []), ...(runtimeStartupReport?.degraded ?? []), ...runtimeStartupBlocked];
         const startup = startupResult({
-          blocked: [...(latestDesired?.blocked ?? []), ...unresolvedRecovery, ...runtimeStartupBlocked],
+          blocked: [...(latestDesired?.degraded ?? []), ...unresolvedConvergence, ...runtimeStartupBlocked],
+          ...(runtimeStartupReport === undefined ? {} : { reconcileReport: runtimeStartupReport }),
           mcp: qualification.mcp,
           subagents: qualification.subagents,
           piReload: qualification.hostApi,
@@ -456,10 +471,49 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         });
         const hostStatus = createHostStatusService({
           startup,
-          recovery: unresolvedRecovery.length === 0 ? "settled" : "degraded",
-          runtime: [...(latestDesired?.blocked ?? []), ...runtimeStartupBlocked].length === 0 ? "reconciled" : "degraded",
+          convergence: unresolvedConvergence.length === 0 ? "settled" : "degraded",
+          runtime: runtimeBlocked.length === 0 ? "reconciled" : "degraded",
           schedulerStatus: marketplaceComposition.updates.schedulerStatus,
         });
+        const orientationFacts = createAgentOrientationFactsCollector({
+          paths,
+          packageVersion: orientationPackageVersion,
+          state: state.state,
+          project,
+          installed: content.installed,
+          content: content.content,
+          contentReader: manifestContentReader,
+          selections,
+          startup,
+          latestDesired: () => latestDesired,
+          sha256,
+        });
+        refreshOrientation = async (): Promise<void> => {
+          if (orientationPublisher === undefined) return;
+          const signal = new AbortController().signal;
+          const collected = await orientationFacts.collect(signal);
+          const orientation = assembleAgentOrientation(collected.input);
+          // Recheck after pure assembly and immediately before the adapter
+          // write. No lock is introduced; a later mutation is picked up by
+          // the next admitted-operation refresh.
+          if (!await orientationFacts.isCurrent(collected, signal)) return;
+          await orientationPublisher.publish(orientation, collected.input.briefPath, context);
+        };
+        publishUnavailableOrientation = async (error: unknown, unavailableContext: ExtensionContext): Promise<void> => {
+          if (orientationPublisher === undefined) return;
+          const code = error instanceof AgentOrientationUnavailableError
+            ? error.code
+            : "ORIENTATION_STATE_UNAVAILABLE";
+          for (const briefPath of orientationBriefPaths) {
+            await orientationPublisher.publishUnavailable({
+              briefPath,
+              code,
+              packageVersion: orientationPackageVersion,
+              sha256,
+              context: unavailableContext,
+            });
+          }
+        };
         const candidateContent = createCandidateContentLeasePort({ content: content.content, materializer: materializers.plugins });
         const nativeInspection = createNativeInspectionComposition({
           state: state.state,
@@ -470,7 +524,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           skillHook: skillHook.participant,
           mcp: mcp.participant,
           capabilities: capabilitySnapshot,
-          recovery: recoveryResult,
+          convergence: convergenceResult,
           startup,
           status: hostStatus,
           configurations,
@@ -579,7 +633,6 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           projectWriteIds: identifiers.projectIntentWriteIds,
           registrations: marketplaceComposition.application.registration,
           lifecycle: lifecycleComposition,
-          uninstallCleanup,
           clock,
           sessionIds: identifiers.operationIds,
           hostEpoch,
@@ -625,6 +678,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           cancel: requireOperationContext(operations.application.cancel),
         });
         const background = createBackgroundUpdateCoordinator({
+          convergence: { sweep: async (signal) => { await convergence.sweep({ scopes: [{ kind: "user" }, project.scope], signal }); } },
           scheduler: marketplaceComposition.updates.scheduler,
           schedulerStatus: marketplaceComposition.updates.schedulerStatus,
           notifications: updates.notifications,
@@ -732,7 +786,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         });
         started = value;
         // Background maintenance is detached: session_start returns from local
-        // recovery/reconciliation even if a remote adapter or publisher hangs.
+        // convergence even if a remote adapter or publisher hangs.
         void background.start();
         return value;
       } catch (error) {
@@ -768,6 +822,9 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
       } finally {
         activeBinding = undefined;
         activeResources = undefined;
+        orientationBriefPaths = [paths.orientationBrief({ kind: "user" })];
+        refreshOrientation = undefined;
+        publishUnavailableOrientation = undefined;
         if (reloadSuccessor !== undefined) {
           try { reloadSuccessor.reload.failSuccessor(reloadSuccessor.ticket); } catch { /* ticket may already be settled */ }
           reloadSuccessor = undefined;
@@ -833,6 +890,11 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
       try {
         return await operationContexts.run(frame, () => use(current.application));
       } finally {
+        // A committed foreground mutation is the completion boundary for the
+        // derived brief. The refresh is advisory, but awaiting it ensures a
+        // successful operation does not return before its orientation write is
+        // attempted. State-generation checks make read-only operations cheap.
+        await refreshOrientation?.().catch(() => undefined);
         // Lifecycle/local operations may settle installed state and notices.
         // Wake the one owner without coupling the foreground result to it.
         wakeBackground?.();
@@ -848,7 +910,33 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
   };
   const target = Object.freeze({
     async sessionStart(event: SessionStartEvent, context: ExtensionContext): Promise<void> {
-      await start(event, context);
+      try {
+        await start(event, context);
+      } catch (error) {
+        // Startup failure must not strand an old brief. Replace it with an
+        // honest marker, then preserve the host's existing startup error.
+        try {
+          if (orientationPublisher !== undefined) {
+            for (const briefPath of orientationBriefPaths) {
+              await orientationPublisher.publishUnavailable({
+                briefPath,
+                code: error instanceof AgentOrientationUnavailableError ? error.code : "ORIENTATION_STATE_UNAVAILABLE",
+                packageVersion: orientationPackageVersion,
+                sha256,
+                context,
+              });
+            }
+          }
+        } catch {
+          // Orientation cannot turn a host startup failure into a second error.
+        }
+        throw error;
+      }
+      try {
+        await refreshOrientation?.();
+      } catch (error) {
+        try { await publishUnavailableOrientation?.(error, context); } catch { /* informational surface only */ }
+      }
       sessionStartDispatch ??= delegates.dispatchSessionStart(event, context);
       await sessionStartDispatch;
     },
@@ -859,10 +947,17 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
       const resources = activeResources as { discover(request: Readonly<{ reason: "startup" | "reload"; projectTrusted: boolean }>, signal: AbortSignal): Promise<Readonly<{ kind: string; skillPaths?: readonly string[] }>> };
       const result = await resources.discover({ reason: _event.reason, projectTrusted: activeBinding?.isProjectTrusted() === true }, new AbortController().signal);
       if (result.kind === "ready" && reloadSuccessor !== undefined) {
-        reloadSuccessor.reload.publishSuccessor(reloadSuccessor.ticket);
-        reloadSuccessor = undefined;
+        const successor = reloadSuccessor;
+        try {
+          successor.reload.publishSuccessor(successor.ticket);
+        } catch (error) {
+          try { successor.reload.failSuccessor(successor.ticket, error); } catch { /* broker may already be settled */ }
+        } finally {
+          reloadSuccessor = undefined;
+        }
       } else if (result.kind !== "ready" && reloadSuccessor !== undefined) {
-        reloadSuccessor.reload.failSuccessor(reloadSuccessor.ticket, new Error("Pi reload resource publication failed"));
+        const successor = reloadSuccessor;
+        try { successor.reload.failSuccessor(successor.ticket, new Error("Pi reload resource publication failed")); } catch { /* broker may already be settled */ }
         reloadSuccessor = undefined;
       }
       return result.kind === "ready" ? { skillPaths: [...(result.skillPaths ?? [])] } : undefined;

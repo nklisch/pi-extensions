@@ -1,5 +1,5 @@
 import { randomBytes as nodeRandomBytes } from "node:crypto";
-import { lstat, mkdir, chmod, realpath, readdir, writeFile, rename, unlink } from "node:fs/promises";
+import { lstat, mkdir, chmod, realpath, readdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { DomainContractError, ErrorCodeRegistry } from "../../domain/errors.js";
 import type { StagingSlot } from "../../application/ports/source-acquisition.js";
@@ -11,7 +11,6 @@ import {
   type ContentStoreLayout,
 } from "./content-store-layout.js";
 import { removePreparedTree, type PreparedTreeIdentity } from "./prepared-tree-cleanup.js";
-import { readProcessStartToken } from "../process/process-identity.js";
 
 export type RandomBytes = (size: number) => Uint8Array | Promise<Uint8Array>;
 
@@ -48,19 +47,6 @@ function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw signal.reason ?? new DOMException("The operation was aborted", "AbortError");
 }
 
-
-export function stagingOwnerSidecarPath(root: string): string { return `${root}.owner`; }
-
-async function writeOwnerSidecar(root: string): Promise<void> {
-  const startToken = readProcessStartToken(process.pid);
-  if (startToken === undefined) throw new Error("staging allocation cannot establish process identity");
-  const sidecar = stagingOwnerSidecarPath(root);
-  const temporary = `${sidecar}.${nodeRandomBytes(8).toString("hex")}.tmp`;
-  await writeFile(temporary, JSON.stringify({ protocol: "pi-plugin-host-staging-owner", version: 1, pid: process.pid, startToken, nonce: nodeRandomBytes(16).toString("hex"), createdAt: Date.now() }), { flag: "wx", mode: 0o600 });
-  try { await rename(temporary, sidecar); } catch (error) { await unlink(temporary).catch(() => undefined); throw error; }
-}
-
-async function removeOwnerSidecar(root: string): Promise<void> { await unlink(stagingOwnerSidecarPath(root)).catch((error: unknown) => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }); }
 
 function allocationIdFromBytes(bytes: Uint8Array): string {
   if (!(bytes instanceof Uint8Array) || bytes.byteLength !== 16) {
@@ -148,7 +134,6 @@ export function createStagingAllocator(
         await assertLayoutRoot(layout, "stagingRoot", "allocateStaging");
         if ((await readdir(root)).length !== 0) throw new Error("staging allocation is not empty");
         await assertOwnedDirectory(root, "allocateStaging", allocationIdentity, layout.rootCapabilities.stagingRoot);
-        await writeOwnerSidecar(canonical);
         const allocation = Object.freeze({
           slot: Object.freeze({ root: canonical }) as StagingSlot,
           allocationId,
@@ -168,7 +153,6 @@ export function createStagingAllocator(
         if (allocationIdentity !== undefined) {
           await removePreparedTree(root, allocationIdentity, layout.rootCapabilities.stagingRoot).catch(() => undefined);
         }
-        await removeOwnerSidecar(root).catch(() => undefined);
         if (signal.aborted) throw signal.reason ?? new DOMException("The operation was aborted", "AbortError");
         throw allocationError("ADAPTER_FAILED", "allocateStaging", "staging allocation could not be verified", error);
       }
@@ -195,12 +179,10 @@ export function createStagingAllocator(
       // A missing path is the one safe idempotent retry. Confirm the parent
       // still has the adapter's canonical identity before forgetting it.
       await assertLayoutRoot(layout, "stagingRoot", "discardStaging");
-      await removeOwnerSidecar(record.root);
       return;
     }
     try {
       await removePreparedTree(record.root, { dev: record.dev, ino: record.ino }, record.parentCapability);
-      await removeOwnerSidecar(record.root);
       await assertLayoutRoot(layout, "stagingRoot", "discardStaging");
     } catch (error) {
       throw allocationError("ADAPTER_FAILED", "discardStaging", "staging allocation cleanup failed", error);

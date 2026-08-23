@@ -46,7 +46,7 @@ function setup() {
       catalogs: [{ scope: { kind: "user" }, registrationId, snapshot: catalogSnapshot, cache: { kind: "ready", validator: { kind: "git-commit", revision: "a".repeat(40) }, etag: { kind: "not-applicable" } } }],
       capability: { status: "ready", digest: `sha256:${"66".repeat(32)}`, capturedBy: "fixture" },
       runtimeEpoch: `sha256:${"77".repeat(32)}`,
-      recoveryDigest: `sha256:${"88".repeat(32)}`,
+      convergenceDigest: `sha256:${"88".repeat(32)}`,
       updateDigest: `sha256:${"99".repeat(32)}`,
     },
     states: [],

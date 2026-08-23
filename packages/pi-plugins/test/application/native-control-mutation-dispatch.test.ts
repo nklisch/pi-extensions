@@ -7,7 +7,7 @@ import { SplitInspectorDetailFixtures, SplitInspectorPageFixture } from "../fixt
 const parser = createNativeControlParser();
 const signal = new AbortController().signal;
 function parsed(argv: string[]) { const value = parser.parseArgv(argv); if (value.kind !== "parsed") throw new Error(JSON.stringify(value)); return value.command; }
-const ready = { status: "ready", local: { recovery: "settled", runtime: "reconciled" }, update: { state: "standby", unresolvedCount: 0, unreadCount: 0, scopes: [] }, blocked: [], capabilities: { mcp: { status: "unavailable", explanation: "none" }, subagents: { status: "unavailable", explanation: "none" }, piReload: { status: "available", explanation: "yes" }, secrets: { status: "available", explanation: "yes" } } } as const;
+const ready = { status: "ready", local: { convergence: "settled", runtime: "reconciled" }, update: { state: "standby", unresolvedCount: 0, unreadCount: 0, scopes: [] }, blocked: [], capabilities: { mcp: { status: "unavailable", explanation: "none" }, subagents: { status: "unavailable", explanation: "none" }, piReload: { status: "available", explanation: "yes" }, secrets: { status: "available", explanation: "yes" } } } as const;
 const context = { executionId: "native-control-execution-v1:123e4567-e89b-42d3-a456-426614174000", input: unavailableNativeControlInput, readiness: ready, progress: { trusted: vi.fn(), lifecycle: vi.fn(), emit: vi.fn() } } as never;
 
 function fixture() {
@@ -99,21 +99,21 @@ describe("native control mutation dispatch", () => {
     expect(result.human.map((field) => field.text).join("\n")).not.toContain("updates.automatic.run");
   });
 
-  it("presents staged updates in plain language with plugin names and next steps", async () => {
+  it("presents deferred updates in plain language with plugin names and next steps", async () => {
     const { dispatcher, dependencies } = fixture();
-    const stagedId = `update-notice-v1:sha256:${"b".repeat(64)}`;
+    const deferredId = `update-notice-v1:sha256:${"b".repeat(64)}`;
     const blockedId = `update-notice-v1:sha256:${"c".repeat(64)}`;
     dependencies.updates.runAutomatic.mockResolvedValue({
       outcomes: [
-        { noticeId: stagedId, plugin: "workbench@nklisch-skills", display: { installed: "1.0.0", available: "1.1.0" }, kind: "staged" },
+        { noticeId: deferredId, plugin: "workbench@nklisch-skills", display: { installed: "1.0.0", available: "1.1.0" }, kind: "live-next-start" },
         { noticeId: blockedId, plugin: "krometrail@nklisch-skills", display: { installed: "1.4.0", available: "1.6.2" }, kind: "blocked", reason: "approval-required" },
       ],
     });
     const result = await dispatcher.dispatch(parsed(["updates", "automatic", "run", "--explicit", "--limit", "100"]), context, signal);
     expect(result.status).toBe("partial");
     const text = result.human.map((field) => field.text).join("\n");
-    expect(text).toContain("1 update installed — live on next start");
-    expect(text).toContain("workbench@nklisch-skills 1.0.0 → 1.1.0 — updated; live on next start");
+    expect(text).toContain("1 update installed — live next start");
+    expect(text).toContain("workbench@nklisch-skills 1.0.0 → 1.1.0 — updated; live next start");
     expect(text).toContain("krometrail@nklisch-skills 1.4.0 → 1.6.2 — needs your approval");
     expect(dependencies.updates.runAutomatic).toHaveBeenCalledWith(expect.objectContaining({ explicit: true, limit: 100 }), signal);
   });

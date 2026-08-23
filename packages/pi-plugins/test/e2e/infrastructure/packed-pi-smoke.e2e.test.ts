@@ -20,7 +20,7 @@ afterEach(async (context) => {
 });
 
 describe("packed clean-environment Pi infrastructure", () => {
-  it("installs the tarball through npm and Pi 0.80.8, discovers /plugin, and shuts down locally", async () => {
+  it("installs the tarball through npm and the package-qualified Pi runtime, discovers /plugin, and shuts down locally", async () => {
     const artifact = await loadSuiteArtifact();
     expect(artifact.packFiles).toContain("dist/pi/extension.js");
     expect(artifact.packFiles).not.toEqual(expect.arrayContaining([
@@ -47,7 +47,7 @@ describe("packed clean-environment Pi infrastructure", () => {
       status: "ok",
       exit: { code: 0 },
       data: {
-        local: { recovery: "settled", runtime: "reconciled" },
+        local: { convergence: "settled", runtime: "reconciled" },
         capabilities: {
           mcp: { status: "available" },
           subagents: { status: "available" },

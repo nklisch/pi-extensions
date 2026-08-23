@@ -99,12 +99,12 @@ describe("plugin manager action runner", () => {
     expect(execute).toHaveBeenLastCalledWith(["marketplace", "add", "/plugins", "--source-kind", "local-git", "--ref", "main"], expect.objectContaining({ sink: expect.any(Object) }), expect.any(AbortSignal));
   });
 
-  it("routes workflow recovery through the public install recover command", async () => {
+  it("routes trusted install continuation through the public install apply command", async () => {
     const token = `trusted-install-session-v1:123e4567-e89b-42d3-a456-426614174000.${"a".repeat(64)}`;
     const execute = vi.fn(async () => ({ envelope: result(), delivery: "complete" as const, deliveredThrough: -1 }));
     const runner = createPluginManagerActionRunner({ execute });
-    await runner.run({ action: "install-recover", token });
-    expect(execute).toHaveBeenCalledWith(["install", "recover", token], expect.objectContaining({ sink: expect.any(Object) }), expect.any(AbortSignal));
+    await runner.run({ action: "install-apply", token });
+    expect(execute).toHaveBeenCalledWith(["install", "apply", token], expect.objectContaining({ sink: expect.any(Object) }), expect.any(AbortSignal));
   });
 
   it("sends one abort and waits for stronger owner cancellation result", async () => {

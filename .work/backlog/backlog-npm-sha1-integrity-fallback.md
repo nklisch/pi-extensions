@@ -14,6 +14,8 @@ updated: 2026-09-14
 
 # Allow npm SHA-1 integrity fallback when SHA-512 is absent
 
+> Workbench version mismatch: stop and offer setup upgrade.
+
 Parked from the pi-plugins filesystem-gate defang. Identified during the
 audit as the next instance of the same anti-pattern
 (`docs/PRINCIPLES.md`: fail-closed guards must defend against a real threat).

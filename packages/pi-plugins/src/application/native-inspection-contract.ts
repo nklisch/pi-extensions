@@ -170,11 +170,11 @@ export const NativeCompatibilityViewSchema = z.object({
 export const NativeLifecycleViewSchema = z.object({
   installed: z.boolean(),
   activationIntent: z.enum(["enabled", "disabled"]).optional(),
-  transition: z.enum(["none", "pending", "recovery-required", "deferred", "blocked"]),
+  health: z.enum(["none", "degraded", "fallback-active", "blocked"]),
   update: z.enum([
     "current", "available", "manual-required", "approval-required", "automatic-pending",
     "automatic-applied", "automatic-retryable", "configuration-blocked", "capability-blocked",
-    "recovery-required", "failed", "unknown", "not-applicable",
+    "failed", "unknown", "not-applicable",
   ]),
   policy: EffectiveUpdatePolicySchema.optional(),
   notice: z.object({
@@ -191,8 +191,9 @@ export const NativeLifecycleViewSchema = z.object({
 
 export const NativeActivationViewSchema = z.object({
   intent: z.enum(["enabled", "disabled"]),
-  state: z.enum(["active", "inactive", "pending", "recovery-required", "blocked", "unavailable"]),
+  state: z.enum(["active", "inactive", "degraded", "blocked", "unavailable"]),
   selectedRevision: ContentDigestSchema,
+  runningRevision: ContentDigestSchema.optional(),
   projectionDigest: ContentDigestSchema.optional(),
   participants: z.array(z.object({
     participant: RuntimeContributionParticipantSchema,

@@ -56,7 +56,7 @@ const detail = {
   summary: { detailId, subject: "marketplace-candidate", scope, plugin, name: safe("bundle"), marketplace: safe("community"), revision: { available: safe("1.0.0"), immutable: revision, resolution: "exact" }, condition: "blocked", freshness: { status: "current", basis: "marketplace" }, diagnosticCounts: { error: 2, warning: 0, info: 0 } },
   source, provenance: [], compatibility: { status: "activatable", reportFingerprint: binding.compatibilityFingerprint, components, requirements: [] },
   trust: "required", configuration: fields.map((field) => ({ key: field.key, label: field.label, valueKind: field.kind, required: field.required, sensitive: field.sensitive, defaultPresent: field.defaultPresent, state: field.state })),
-  lifecycle: { installed: false, transition: "none", update: "not-applicable" }, diagnostics: inspectionDiagnostics,
+  lifecycle: { installed: false, health: "none", update: "not-applicable" }, diagnostics: inspectionDiagnostics,
 } as const;
 const token = `trusted-install-session-v1:2d6737b6-7482-4a50-9310-cd35ce7ddcad.${"f".repeat(64)}` as never;
 const candidateProgress = [{ sequence: 0, phase: "candidate-acquisition", state: "completed", plugin, scope, revision }] as const;
@@ -82,8 +82,8 @@ export const trustedInstallFlowFixture = Object.freeze({
     projectStale: TrustedInstallActivationResultSchema.parse({ kind: "stale", reason: "project", progress: candidateProgress, retained: { configuration: false, trust: false } }),
     conflict: TrustedInstallActivationResultSchema.parse({ kind: "conflict", reason: "concurrent-mutation", progress: completedProgress, retained: { configuration: true, trust: true } }),
     cancelled: TrustedInstallActivationResultSchema.parse({ kind: "cancelled", phase: "trust-decision", progress: completedProgress.slice(0, 4), retained: { configuration: true, trust: false } }),
-    rolledBack: TrustedInstallActivationResultSchema.parse({ kind: "rolled-back", failure: "observation-mismatch", restored: true, progress: completedProgress, retained: { configuration: true, trust: true } }),
-    recoveryRequired: TrustedInstallActivationResultSchema.parse({ kind: "recovery-required", transition: `pending-transition-v1:sha256:${"1".repeat(64)}`, committed: 4, action: "run-recovery", progress: completedProgress, retained: { configuration: true, trust: true } }),
+    degraded: TrustedInstallActivationResultSchema.parse({ kind: "degraded", plugin, scope, failure: { code: "MCP_RUNTIME_UNAVAILABLE", explanation: "the selected revision could not load" }, repairHint: "both", progress: completedProgress, retained: { configuration: true, trust: true } }),
+    failed: TrustedInstallActivationResultSchema.parse({ kind: "failed", code: "ADAPTER_FAILED", progress: completedProgress, retained: { configuration: true, trust: true } }),
     capabilityUnavailable: TrustedInstallActivationResultSchema.parse({ kind: "rejected", code: "INCOMPATIBLE", diagnostics: [], progress: candidateProgress, retained: { configuration: false, trust: false } }),
   }),
 });

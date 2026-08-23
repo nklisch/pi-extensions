@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.0
+
+### Changed
+
+- Bump `@nklisch/pi-plugins` to 0.4.0 (convergent lifecycle, agent orientation,
+  MCP attach visibility) and `@nklisch/pi-mcp-adapter` to 2.21.0-nklisch.0
+  (programmatic entry host-peer-clean fix).
+
 ## v0.1.11
 
 ### Fixed

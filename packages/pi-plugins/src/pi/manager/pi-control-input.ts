@@ -82,7 +82,6 @@ export function createPiControlInputPort(input: Readonly<{
     const plugin = request.expected.plugin === undefined ? undefined : safe(request.expected.plugin);
     if (request.purpose === "update") return plugin === undefined ? "Update plugin?" : `Update ${plugin}?`;
     if (request.purpose === "trusted-install") return plugin === undefined ? "Add plugin?" : `Add ${plugin}?`;
-    if (request.purpose === "trusted-install-recovery") return plugin === undefined ? "Finish setting up?" : `Finish setting up ${plugin}?`;
     return "Confirm plugin action";
   }
 

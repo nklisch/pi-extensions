@@ -2,7 +2,10 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { PI_MCP_ADAPTER_RECEIPT } from "../../src/runtime/mcp/pi-mcp-adapter-package.js";
+import {
+  createVerifiedPiMcpRuntimeCandidate,
+  PI_MCP_ADAPTER_RECEIPT,
+} from "../../src/runtime/mcp/pi-mcp-adapter-package.js";
 import { probePublishedPackage } from "../../src/runtime/published-package-receipt.js";
 import {
   loadVerifiedPiSubagentsExtension,
@@ -50,6 +53,15 @@ describe("runtime sibling contract", () => {
       signal: new AbortController().signal,
     });
     expect(result.kind).toBe("verified");
+  });
+
+  it("returns a structured verified MCP runtime candidate when the receipt and import are healthy", async () => {
+    const candidate = await createVerifiedPiMcpRuntimeCandidate();
+    expect(candidate.kind).toBe("verified");
+    if (candidate.kind === "verified") {
+      expect(candidate.adapter.runtime).toBeDefined();
+      expect(candidate.adapter.extension).toBeTypeOf("function");
+    }
   });
 
   it("loads the complete pi-subagents extension through the packaged peer-module bridge", async () => {

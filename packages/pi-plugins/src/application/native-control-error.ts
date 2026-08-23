@@ -4,7 +4,7 @@ import type { NativeControlStatus } from "./native-control-contract.js";
 export type NativeControlErrorClassification = Readonly<{
   status: NativeControlStatus;
   code: string;
-  action: "retry" | "reparse" | "provide-input" | "confirm-exact" | "refresh" | "reinspect" | "poll" | "run-recovery" | "none";
+  action: "retry" | "reparse" | "provide-input" | "confirm-exact" | "refresh" | "reinspect" | "poll" | "repair" | "rollback" | "none";
 }>;
 
 function stableCode(error: unknown): string | undefined {
@@ -26,7 +26,7 @@ export function classifyNativeControlError(error: unknown): NativeControlErrorCl
   if (code.includes("NOT_FOUND") || code.includes("MISSING") || code.includes("EXPIRED") || code.includes("DISPOSED")) return { status: "not-found", code, action: "reinspect" };
   if (code.includes("UNAVAILABLE") || code.includes("ADAPTER_FAILED") || code.includes("OFFLINE")) return { status: "unavailable", code, action: "retry" };
   if (code.includes("PROJECT_UNTRUSTED") || code.includes("INCOMPATIBLE") || code.includes("REJECTED") || code.includes("BLOCKED")) return { status: "rejected", code, action: "none" };
-  if (code.includes("RECOVERY") || code.includes("AMBIGUOUS") || code.includes("ROLLBACK") || code.includes("CLEANUP_FAILED")) return { status: "recovery-required", code, action: "run-recovery" };
+  if (code.includes("AMBIGUOUS") || code.includes("ROLLBACK") || code.includes("CLEANUP_FAILED")) return { status: "partial", code, action: "repair" };
   if (code.includes("ABORT")) return { status: "cancelled", code, action: "retry" };
   return { status: "failed", code: "CONTROL_INTERNAL", action: "none" };
 }

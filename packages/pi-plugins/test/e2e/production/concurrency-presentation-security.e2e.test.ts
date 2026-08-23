@@ -60,16 +60,8 @@ describe("production concurrency, presentation, and secret non-retention", () =>
       { status: "conflict", kind: "conflict", reason: "target-changed" },
       { status: "stale", kind: "stale", reason: "configuration" },
     ]).toContainEqual(contender);
-    expect(sibling.envelope).toMatchObject({
-      status: "recovery-required",
-      data: {
-        kind: "recovery-required",
-        operation: "disable",
-        code: "PENDING_TRANSITION",
-        action: "run-recovery",
-        committed: expect.any(Number),
-      },
-    });
+    expect(["ok", "no-change", "conflict", "stale"]).toContain(sibling.envelope.status);
+    expect(JSON.stringify(sibling.envelope)).not.toMatch(/RECOVERY_REQUIRED|PENDING_TRANSITION|recovery-required|pending-transition|staged/iu);
     await Promise.all([journey.rpc.shutdown(), peer.shutdown(), siblingOwner.shutdown()]);
 
     const freshA = await PiRpcProcess.start({ sandbox, extraArgs: productionModelArgs });
@@ -89,7 +81,8 @@ describe("production concurrency, presentation, and secret non-retention", () =>
     expect(showA.envelope.data.detail.summary.revision).toEqual(showB.envelope.data.detail.summary.revision);
     expect(JSON.stringify(showA.envelope.data.detail.summary.revision)).toContain("2.0.0");
     expect(coreA.envelope.data.detail.summary).toEqual(coreB.envelope.data.detail.summary);
-    expect(coreA.envelope.data.detail.lifecycle).toMatchObject({ installed: true, activationIntent: "disabled", transition: "none" });
+    expect(coreA.envelope.data.detail.lifecycle).toMatchObject({ installed: true, activationIntent: "disabled", health: expect.any(String) });
+    expect(["none", "degraded", "fallback-active", "blocked"]).toContain(coreA.envelope.data.detail.lifecycle.health);
     expect(coreA.envelope.data.detail.activation).toMatchObject({ intent: "disabled", state: "inactive" });
     for (const commands of [commandsA, commandsB]) {
       expect(commands.data.commands).not.toContainEqual(expect.objectContaining({ name: "skill:core-local" }));
@@ -143,7 +136,7 @@ describe("production concurrency, presentation, and secret non-retention", () =>
       sandbox.piCli, "--offline", "--approve", "--no-prompt-templates", "--no-themes", "--no-context-files",
       "--mode", "text", "--print", "--no-session", "/plugins status",
     ], { cwd: sandbox.project, env: sandbox.env, timeoutMs: 30_000 });
-    expect(`${printed.stdout}${printed.stderr}`).toContain("Host ready · recovery settled · runtime reconciled");
+    expect(`${printed.stdout}${printed.stderr}`).toContain("Host ready · convergence settled · runtime reconciled");
     const json = await runChecked(sandbox.capabilities.node, [
       sandbox.piCli, "--offline", "--approve", "--no-prompt-templates", "--no-themes", "--no-context-files",
       "--mode", "json", "--no-session", "/plugins status",

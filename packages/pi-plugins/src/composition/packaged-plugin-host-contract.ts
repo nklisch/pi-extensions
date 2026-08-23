@@ -41,6 +41,8 @@ export class PackagedPluginHostError extends Error {
 
 export type PackagedPluginHostRuntimeParticipants = Readonly<{
   mcp?: McpRuntimePort;
+  /** Candidate failure is safe to display; native causes never cross this boundary. */
+  mcpUnavailable?: Readonly<{ code: string; explanation: string }>;
 }>;
 
 export type PackagedPluginHostSourceOptions = Readonly<{

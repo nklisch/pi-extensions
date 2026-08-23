@@ -14,7 +14,6 @@ import type { ProjectTrustPort } from "../application/ports/project-trust.js";
 import type { InspectionReadinessPort } from "../application/ports/inspection-readiness.js";
 import type { PluginInspectionService } from "../application/inspection-service.js";
 import type { MarketplaceCatalogService } from "../application/marketplace-catalog-service.js";
-import type { GenerationMutationCoordinator } from "../application/generation-mutation-coordinator.js";
 import type { PluginLifecycleComposition } from "../application/plugin-lifecycle-service.js";
 import type { BoundPluginConfigurationService } from "../application/configuration-service.js";
 import type { HostCapabilityStatus } from "../application/host-observation-contract.js";
@@ -35,7 +34,7 @@ export function createComposedTrustedInstallationService(input: Readonly<{
   secretCustody: HostCapabilityStatus;
   userBaseDirectory: string;
   state: LifecycleStateStore;
-  mutations: GenerationMutationCoordinator;
+  mutations: LifecycleStateStore;
   projectTrust: ProjectTrustPort;
   projectRoots: ProjectRootAuthorityPort;
   lifecycle: PluginLifecycleComposition;

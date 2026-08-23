@@ -24,8 +24,6 @@ export const ErrorCodeRegistry = {
   contentVerificationFailed: "CONTENT_VERIFICATION_FAILED",
   storeIdentityCollision: "STORE_IDENTITY_COLLISION",
   durabilityUnavailable: "DURABILITY_UNAVAILABLE",
-  transitionJournalCorrupt: "TRANSITION_JOURNAL_CORRUPT",
-  recoveryConflict: "RECOVERY_CONFLICT",
   collectionDeferred: "COLLECTION_DEFERRED",
   adapterFailed: "ADAPTER_FAILED",
   foreignStateRootInvalid: "FOREIGN_STATE_ROOT_INVALID",

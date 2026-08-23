@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createNativePluginControlService } from "../../src/application/native-control-service.js";
 
-const status = { status: "ready", local: { recovery: "settled", runtime: "reconciled" }, update: { state: "standby", unreadCount: 0, unresolvedCount: 0, scopes: [] }, blocked: [], capabilities: { mcp: { status: "unavailable", explanation: "none" }, subagents: { status: "unavailable", explanation: "none" }, piReload: { status: "available", explanation: "yes" }, secrets: { status: "available", explanation: "yes" } } } as const;
+const status = { status: "ready", local: { convergence: "settled", runtime: "reconciled" }, update: { state: "standby", unreadCount: 0, unresolvedCount: 0, scopes: [] }, blocked: [], capabilities: { mcp: { status: "unavailable", explanation: "none" }, subagents: { status: "unavailable", explanation: "none" }, piReload: { status: "available", explanation: "yes" }, secrets: { status: "available", explanation: "yes" } } } as const;
 function fixture() {
   let counter = 0;
   const ids = { issue: vi.fn(async () => `native-control-execution-v1:123e4567-e89b-42d3-a456-${String(426614174000 + counter++).padStart(12, "0")}` as never) };

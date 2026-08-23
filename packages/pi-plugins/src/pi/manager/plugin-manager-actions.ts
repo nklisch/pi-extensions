@@ -16,11 +16,11 @@ import { createPiManagerFrameSink } from "./pi-manager-frame-sink.js";
 import type { PluginManagerRow } from "./plugin-manager-model.js";
 
 export type PluginManagerActionIntent =
-  | Readonly<{ action: "enable" | "disable" | "update"; row: PluginManagerRow }>
+  | Readonly<{ action: "enable" | "disable" | "update" | "repair" | "rollback"; row: PluginManagerRow }>
   | Readonly<{ action: "trust"; row: PluginManagerRow }>
   | Readonly<{ action: "uninstall-delete"; row: PluginManagerRow }>
   | Readonly<{ action: "install-open" | "install-run"; row: PluginManagerRow; snapshotId: string; detailId: string }>
-  | Readonly<{ action: "install-apply" | "install-recover"; token: string }>
+  | Readonly<{ action: "install-apply"; token: string }>
   | Readonly<{ action: "marketplace-add"; source: string; sourceKind?: "github" | "git" | "local-git"; ref?: string }>
   | Readonly<{ action: "diagnose-host" }>
   | Readonly<{ action: "marketplace-refresh" | "marketplace-remove"; row: PluginManagerRow }>
@@ -124,7 +124,7 @@ export function pluginManagerActionConfirmation(intent: ConfirmedPluginManagerAc
 }
 
 function actionArgv(intent: PluginManagerActionIntent, confirmed: boolean): readonly string[] {
-  if (intent.action === "enable" || intent.action === "disable" || intent.action === "update") {
+  if (intent.action === "enable" || intent.action === "disable" || intent.action === "update" || intent.action === "repair" || intent.action === "rollback") {
     const row = exactRow(intent.row);
     return nativeControlArgv(`lifecycle.${intent.action}`, [row.plugin], {
       scope: row.scope,
@@ -162,8 +162,8 @@ function actionArgv(intent: PluginManagerActionIntent, confirmed: boolean): read
       detailId: intent.detailId,
     });
   }
-  if (intent.action === "install-apply" || intent.action === "install-recover") {
-    return nativeControlArgv(intent.action === "install-apply" ? "install.apply" : "install.recover", [intent.token]);
+  if (intent.action === "install-apply") {
+    return nativeControlArgv("install.apply", [intent.token]);
   }
   if (intent.action === "diagnose-host") return nativeControlArgv("inspection.diagnose");
   if (intent.action === "marketplace-add") {
@@ -188,13 +188,13 @@ function actionArgv(intent: PluginManagerActionIntent, confirmed: boolean): read
 }
 
 function destination(intent: PluginManagerActionIntent): PluginManagerDestination {
-  return intent.action === "install-apply" || intent.action === "install-recover" || intent.action === "install-run" ? "install-result" : "operation-result";
+  return intent.action === "install-apply" || intent.action === "install-run" ? "install-result" : "operation-result";
 }
 
 function activating(intent: PluginManagerActionIntent): boolean {
-  // Sync-now stages updates and never consumes a reload context, so it opens
-  // no reload handoff; the optional reload offer lives after the run settles.
-  return ["enable", "disable", "update", "uninstall-delete", "install-run", "install-apply", "install-recover", "project-sync"].includes(intent.action);
+  // Deferred updates do not consume a reload handoff; the optional reload
+  // offer lives after the run settles.
+  return ["enable", "disable", "update", "repair", "rollback", "uninstall-delete", "install-run", "install-apply", "project-sync"].includes(intent.action);
 }
 
 /** One foreground facade mutation with fresh confirmation, exact frame, abort, and reload semantics. */

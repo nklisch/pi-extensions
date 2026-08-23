@@ -30,7 +30,7 @@ export type MarketplaceRefreshRequest = z.infer<typeof MarketplaceRefreshRequest
 
 export const UpdateDispositionSchema = z.enum([
   "current", "discovered", "manual-required", "approval-required",
-  "automatic-applied", "automatic-retryable", "recovery-required",
+  "automatic-applied", "automatic-retryable",
   "failed",
 ]);
 export type UpdateDisposition = z.infer<typeof UpdateDispositionSchema>;

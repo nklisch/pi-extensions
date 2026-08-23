@@ -30,6 +30,8 @@ export const PACKAGED_HOST_PI_RANGE = ">=0.80.0 <1.0.0-0";
 export type RuntimeQualificationStatus = Readonly<{
   status: "available" | "unavailable";
   explanation: string;
+  /** Stable runtime-candidate code when an optional participant is absent. */
+  code?: string;
 }>;
 
 export type RuntimeParticipantQualification = Readonly<{
@@ -46,8 +48,12 @@ export type RuntimeParticipantQualification = Readonly<{
   }>;
 }>;
 
-function unavailable(explanation: string): RuntimeQualificationStatus {
-  return Object.freeze({ status: "unavailable", explanation });
+function unavailable(explanation: string, code?: string): RuntimeQualificationStatus {
+  return Object.freeze({
+    status: "unavailable" as const,
+    explanation,
+    ...(code === undefined ? {} : { code }),
+  });
 }
 
 function available(explanation: string): RuntimeQualificationStatus {
@@ -106,12 +112,15 @@ export async function qualifyRuntimeParticipants(input: Readonly<{
   nodeVersion: string;
   piVersion: string;
   mcp?: McpRuntimePort;
+  mcpUnavailable?: Readonly<{ code: string; explanation: string }>;
   subagents?: SubagentLifecyclePort;
   signal: AbortSignal;
 }>): Promise<RuntimeParticipantQualification> {
   input.signal.throwIfAborted();
   const hostApi = hostApiStatus(input.pi, input.nodeVersion, input.piVersion);
-  let mcp: RuntimeParticipantQualification["mcp"] = unavailable("no qualified published MCP runtime is composed");
+  let mcp: RuntimeParticipantQualification["mcp"] = input.mcpUnavailable === undefined
+    ? unavailable("no qualified published MCP runtime is composed")
+    : unavailable(input.mcpUnavailable.explanation, input.mcpUnavailable.code);
   let subagents: RuntimeParticipantQualification["subagents"] = unavailable("no qualified published subagent lifecycle is composed");
 
   if (hostApi.status === "available" && input.mcp !== undefined) {
@@ -127,9 +136,18 @@ export async function qualifyRuntimeParticipants(input: Readonly<{
           capabilities,
           runtime: pinnedMcp(input.mcp, capabilities),
         });
+      } else {
+        mcp = unavailable(
+          "published MCP runtime evidence does not satisfy the complete lifecycle and Node/Pi range contract",
+          "MCP_RUNTIME_QUALIFICATION_FAILED",
+        );
       }
     } catch (error) {
       if (input.signal.aborted) throw input.signal.reason;
+      mcp = unavailable(
+        "published MCP runtime capability evidence could not be read",
+        "MCP_RUNTIME_CAPABILITIES_FAILED",
+      );
     }
   }
 

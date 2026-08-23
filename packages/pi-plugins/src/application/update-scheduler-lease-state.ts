@@ -5,7 +5,7 @@ import { ProjectLocalStateDocumentSchema } from "../domain/state/project-state.j
 import { ScopeContextSchema, toScopeReference, type ScopeContext } from "../domain/state/scope.js";
 import { UpdateSchedulerLeaseIdSchema, UpdateSchedulerLeaseSchema, type UpdateSchedulerLeaseId } from "../domain/update-policy.js";
 import type { Sha256 } from "../domain/source.js";
-import type { GenerationMutationCoordinator } from "./generation-mutation-coordinator.js";
+import { runScopedMutation } from "./state-transaction.js";
 import { marketplaceUpdateRecords } from "./marketplace-update-state.js";
 import type { LifecycleClock } from "./ports/lifecycle-clock.js";
 import type { LifecycleStateInventoryPort } from "./ports/lifecycle-state-inventory.js";
@@ -18,7 +18,7 @@ import { authorizeCurrentScope } from "./current-scope-authority.js";
 export function createStateUpdateSchedulerLeasePort(dependencies: Readonly<{
   state: LifecycleStateStore;
   inventory: LifecycleStateInventoryPort;
-  mutations: GenerationMutationCoordinator;
+  mutations: LifecycleStateStore;
   clock: LifecycleClock;
   sha256: Sha256;
   currentProject?: Extract<ScopeContext, { kind: "project" }>;
@@ -104,16 +104,17 @@ export function createStateUpdateSchedulerLeasePort(dependencies: Readonly<{
         renewedAt: now,
         expiresAt: now + leaseMs,
       });
-      const result = await dependencies.mutations.runPreparedMutation(
-        { scope, plugins: [], expectedGeneration: loaded.snapshot.generation },
-        async ({ snapshot }) => {
+      const result = await runScopedMutation(dependencies.mutations,
+        scope,
+        (snapshot) => {
           const authority = lease(snapshot);
-          if (mode === "acquire" && active(authority, now) && authority?.id !== owner) throw new Error("LEASE_OWNED");
-          if (mode !== "acquire" && authority?.id !== owner) throw new Error("LEASE_LOST");
+          if (mode === "acquire" && active(authority, now) && authority?.id !== owner) return { kind: "reject" as const, value: "other" as const };
+          if (mode !== "acquire" && authority?.id !== owner) return { kind: "reject" as const, value: "other" as const };
           return {
+            kind: "commit" as const,
             mutation: mutation(snapshot, nextLease),
             value: undefined,
-            beforeCommit: async () => {
+            recheckAuthority: async () => {
               if (!await projectAuthorized(scope, signal)) throw new Error("PROJECT_UNTRUSTED");
             },
           };

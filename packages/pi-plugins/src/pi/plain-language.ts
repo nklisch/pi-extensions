@@ -78,6 +78,7 @@ const PLAIN_LIFECYCLE_FAILURES: Readonly<Record<string, string>> = Object.freeze
   DISPOSED: "the plugin runtime was shut down",
   CONFIG_REQUIRED: "a required setting is missing",
   CONSENT_REQUIRED: "the executable disclosure needs a decision",
+  BUSY: "another session is mid-write; retry",
 });
 
 /** Lifecycle failure code → a short plain reason. */

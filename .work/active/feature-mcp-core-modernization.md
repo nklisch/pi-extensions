@@ -14,6 +14,8 @@ updated: 2026-08-06
 
 # Modernize the MCP runtime core
 
+> Workbench version mismatch: stop and offer setup upgrade.
+
 The maintained adapter integrates upstream 2.20.1's generic security, configuration, OAuth, SDK v2, transport, lifecycle, metadata, and reliability improvements while preserving every fork-owned source-qualified runtime contract.
 
 This feature includes the common-base source merge, conflict resolution for core runtime files, credential rebinding, Codex TOML reconciliation, SDK and package updates, runtime ownership, HTTP recovery and fallback behavior, secure standalone OAuth storage, disabled servers, instructions, output-schema validation, Unix-socket support, and the upstream core regression suite. Agent scripting/discovery policy, MCP Apps journey completion, and new programmatic exposure are separate feature outcomes even when their source prerequisites arrive in the merge. Until those features close, `mcpScript`, MCP Apps hosting, OAuth, and other new executable surfaces remain unavailable in programmatic composition.

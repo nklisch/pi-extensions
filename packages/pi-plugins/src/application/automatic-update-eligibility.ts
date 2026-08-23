@@ -7,10 +7,10 @@ export const AutomaticUpdateEligibilityReasonRegistry = Object.freeze({
   approvalRequired: "approval-required",
   stale: "stale",
   projectUntrusted: "project-untrusted",
-  recoveryRequired: "recovery-required",
   configurationRequired: "configuration-required",
   secretUnavailable: "secret-unavailable",
   capabilityUnavailable: "capability-unavailable",
+  degraded: "degraded",
   retryable: "retryable",
 } as const);
 

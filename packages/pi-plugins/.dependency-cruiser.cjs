@@ -116,7 +116,7 @@ module.exports = {
     },
     {
       name: "sqlite-only-state-infrastructure",
-      comment: "The SQLite scope-lock implementation is the only allowed node:sqlite consumer.",
+      comment: "The SQLite state adapter is the only allowed node:sqlite consumer.",
       severity: "error",
       from: { path: "^src/(?!infrastructure/state/)(?:domain|application|formats|composition|runtime|pi)(?:/|$)" },
       to: { path: "^node:sqlite$" },
@@ -147,15 +147,15 @@ module.exports = {
       comment: "Skill and hook runtime projections consume prepared evidence and injected ports, never lifecycle state or transition authorities.",
       severity: "error",
       from: { path: "^src/runtime/skill-hook(?:/|$)" },
-      to: { path: "^src/(?:application/(?:state-contract|ports/(?:lifecycle-state-store|lifecycle-transition-store))(?:/|$)|infrastructure/state)(?:/|$)" },
+      to: { path: "^src/(?:application/(?:state-contract|ports/lifecycle-state-store)(?:/|$)|infrastructure/state)(?:/|$)" },
     },
     {
       name: "mcp-lifecycle-participant-no-transaction-or-host-authority",
       comment: "The package-neutral MCP participant and lease provider consume prepared evidence and ports; they cannot own state, transitions, recovery, host composition, or concrete adapters.",
       severity: "error",
-      from: { path: "^src/runtime/mcp/(?:lifecycle-participant|revision-lease-provider|\\.boundary-regression-fixture)\\.ts$" },
+      from: { path: "^src/runtime/mcp/(?:lifecycle-participant|mcp-runtime-binding-provider|\\.boundary-regression-fixture)\\.ts$" },
       to: {
-        path: "^src/(?:application/(?:plugin-lifecycle-service|lifecycle-transition-reconciler|recovery-service|state-contract|ports/(?:lifecycle-state-store|lifecycle-transition-store))(?:\\.ts)?$|infrastructure|composition|pi)(?:/|$)",
+        path: "^src/(?:application/(?:state-contract|ports/lifecycle-state-store)(?:\\.ts)?$|infrastructure|composition|pi)(?:/|$)",
       },
     },
     {
@@ -164,13 +164,6 @@ module.exports = {
       severity: "error",
       from: { path: "^src/infrastructure(?:/|$)" },
       to: { path: "^src/(?:formats|runtime|pi)(?:/|$)" },
-    },
-    {
-      name: "recovery-deletion-adapters-stay-in-recovery",
-      comment: "Ordinary filesystem, source, and runtime adapters cannot reach recovery-only deletion capabilities.",
-      severity: "error",
-      from: { path: "^src/infrastructure/(?:archive|filesystem|git|http|npm|process|source|state)(?:/|$)" },
-      to: { path: "^src/infrastructure/recovery/(?:revision-artifact-store|process-revision-leases)\\.ts$" },
     },
     {
       name: "formats-no-infrastructure-imports",
