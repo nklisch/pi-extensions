@@ -1205,12 +1205,10 @@ export {
   PENDING_DELETE_GRACE_MS,
   pendingDeleteMarkerFilename,
   createPendingDeleteMarkerStore,
-  replayPendingDeleteMarkers,
 } from "./infrastructure/cleanup/pending-data-deletion.js";
 export type {
   PendingDeleteMarker,
   PendingDeleteMarkerStore,
-  PendingDeleteReplayResult,
 } from "./infrastructure/cleanup/pending-data-deletion.js";
 
 export type { LifecycleStateInventoryPort } from "./application/ports/lifecycle-state-inventory.js";

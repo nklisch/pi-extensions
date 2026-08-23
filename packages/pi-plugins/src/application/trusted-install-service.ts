@@ -210,7 +210,12 @@ export function createTrustedInstallationService(dependencies: TrustedInstallati
       });
     }
     if (result.kind === "current") return finish(entry, { kind: "current-state", plugin: entry.candidate.binding.plugin, scope: entry.candidate.binding.scope, revision: entry.candidate.binding.immutableRevision, activation: "enabled", reason: "already-active", progress: entry.progress, retained: safeRetained(entry) });
-    if (result.kind === "degraded") return finish(entry, { kind: "degraded", plugin: entry.candidate.binding.plugin, scope: entry.candidate.binding.scope, failure: result.failure, repairHint: result.runningRevision === undefined ? "repair" : "both", progress: entry.progress, retained: safeRetained(entry) });
+    if (result.kind === "degraded") {
+      const record = ("installed" in result.snapshot ? result.snapshot.installed.plugins : result.snapshot.project.plugins).find((candidate) => candidate.plugin === result.failure.plugin);
+      const hasLivePreviousRevision = record?.previousRevision !== undefined && record.revisions.some((revision) => revision.revision === record.previousRevision);
+      const repairHint = result.runningRevision !== undefined ? "both" : hasLivePreviousRevision ? "rollback" : "repair";
+      return finish(entry, { kind: "degraded", plugin: entry.candidate.binding.plugin, scope: entry.candidate.binding.scope, failure: result.failure, repairHint, progress: entry.progress, retained: safeRetained(entry) });
+    }
     if (result.kind === "stale") return finish(entry, conflict(entry, "concurrent-mutation"));
     if (result.code === "ABORTED") return finish(entry, cancelled(entry, "activation-transaction"));
     if (result.code === "AVAILABLE_REVISION_CHANGED") return finish(entry, stale(entry, "candidate"));

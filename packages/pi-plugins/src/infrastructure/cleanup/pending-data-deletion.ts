@@ -1,10 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalJson } from "../../domain/canonical-json.js";
-import { EpochMillisecondsSchema, type EpochMilliseconds } from "../../application/ports/lifecycle-clock.js";
-import { PendingDeleteMarkerSchema, PENDING_DELETE_GRACE_MS, type PendingDeleteMarker, type PendingDeleteMarkerStore, type PendingDeleteReplayResult, type PluginKey, type ScopeReference, type PluginDataRef } from "../../application/ports/pending-data-deletion.js";
-import type { PersistentDataRemovalPort } from "../../application/ports/persistent-data-removal.js";
+import { PendingDeleteMarkerSchema, type PendingDeleteMarker, type PendingDeleteMarkerStore, type PluginKey, type ScopeReference, type PluginDataRef } from "../../application/ports/pending-data-deletion.js";
 
 function assertSignal(signal: AbortSignal | undefined): void {
   signal?.throwIfAborted();
@@ -26,6 +24,10 @@ export function pendingDeleteMarkerFilename(markerInput: PendingDeleteMarker): s
 function isMissing(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === "ENOENT";
 }
+
+// A writer can legitimately keep a temp file around for a short interval. A
+// crash can strand it forever, so the marker pass removes only older temps.
+const PENDING_DELETE_TEMP_GRACE_MS = 5 * 60_000;
 
 async function ensureRoot(root: string): Promise<void> {
   await mkdir(root, { recursive: true, mode: 0o700 });
@@ -67,6 +69,18 @@ export function createPendingDeleteMarkerStore(options: Readonly<{ root: string 
     let names: string[];
     try { names = await readdir(root); }
     catch (error) { if (isMissing(error)) return Object.freeze([]); throw error; }
+    const now = Date.now();
+    for (const name of names) {
+      assertSignal(signal);
+      if (!name.endsWith(".tmp")) continue;
+      try {
+        const info = await stat(join(root, name));
+        if (now - info.mtimeMs >= PENDING_DELETE_TEMP_GRACE_MS) await unlink(join(root, name));
+      } catch {
+        // An active writer or an already-removed temp is left alone; the next
+        // marker pass can reassess it without hiding a real marker failure.
+      }
+    }
     const markers: PendingDeleteMarker[] = [];
     for (const name of names.sort()) {
       assertSignal(signal);
@@ -85,54 +99,5 @@ export function createPendingDeleteMarkerStore(options: Readonly<{ root: string 
   return Object.freeze({ root, path: (marker: PendingDeleteMarker) => join(root, pendingDeleteMarkerFilename(marker)), create, remove, list });
 }
 
-/**
- * Replay pending deletion work. A marker for an absent plugin is immediate;
- * a marker for an installed plugin is only residue after the 60-minute
- * kill-window age gate and is discarded only then.
- */
-export async function replayPendingDeleteMarkers(input: Readonly<{
-  markers: PendingDeleteMarkerStore;
-  isInstalled(scope: ScopeReference, plugin: PluginKey, signal: AbortSignal): Promise<boolean>;
-  data: PersistentDataRemovalPort;
-  now?: EpochMilliseconds;
-  signal: AbortSignal;
-}>): Promise<readonly PendingDeleteReplayResult[]> {
-  if (input === null || typeof input !== "object" || input.markers === undefined || typeof input.isInstalled !== "function" || input.data === undefined) {
-    throw new TypeError("pending-delete replay dependencies are required");
-  }
-  const signal = input.signal;
-  signal.throwIfAborted();
-  const now = EpochMillisecondsSchema.parse(input.now ?? Date.now());
-  const results: PendingDeleteReplayResult[] = [];
-  for (const marker of await input.markers.list(signal)) {
-    signal.throwIfAborted();
-    const installed = await input.isInstalled(marker.scope, marker.plugin, signal);
-    if (installed) {
-      if (now - marker.requestedAt < PENDING_DELETE_GRACE_MS) {
-        results.push({ marker, outcome: "retained" });
-        continue;
-      }
-      await input.markers.remove(marker);
-      results.push({ marker, outcome: "discarded-installed" });
-      continue;
-    }
-    try {
-      await input.data.remove({
-        scope: marker.scope,
-        plugin: marker.plugin,
-        dataRef: marker.dataRef,
-        confirmation: "delete-confirmed",
-        capability: {},
-      }, signal);
-      await input.markers.remove(marker);
-      results.push({ marker, outcome: "deleted" });
-    } catch (error) {
-      if (signal.aborted) throw signal.reason ?? error;
-      results.push({ marker, outcome: "retained" });
-    }
-  }
-  return Object.freeze(results);
-}
-
 export { PendingDeleteMarkerSchema, PENDING_DELETE_GRACE_MS } from "../../application/ports/pending-data-deletion.js";
-export type { PendingDeleteMarker, PendingDeleteMarkerStore, PendingDeleteReplayResult, PluginDataRef, ScopeReference, PluginKey } from "../../application/ports/pending-data-deletion.js";
+export type { PendingDeleteMarker, PendingDeleteMarkerStore, PluginDataRef, ScopeReference, PluginKey } from "../../application/ports/pending-data-deletion.js";

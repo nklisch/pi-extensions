@@ -81,4 +81,32 @@ describe("artifact GC contract", () => {
 
     await expect(stat(staging)).rejects.toMatchObject({ code: "ENOENT" });
   });
+
+  it("applies separate staging and orphan policy grace periods", async () => {
+    const previous = process.env.PI_PLUGINS_CONVERGENCE_GRACE_DAYS;
+    delete process.env.PI_PLUGINS_CONVERGENCE_GRACE_DAYS;
+    try {
+      const root = await fixture();
+      const now = Date.now();
+      const staging = join(root, "staging", "v1", digest("a"));
+      const revision = join(root, "stores", "v1", "plugins", digest("b"));
+      await directory(staging, oldAge, now);
+      await directory(revision, oldAge, now);
+      const gc = createArtifactGc({
+        hostRoot: root,
+        maxItems: 100,
+        budgetMs: 10_000,
+        stagingGraceMs: 9 * 86_400_000,
+        orphanGraceMs: 7 * 86_400_000,
+      });
+
+      await gc.sweep({ referenced: new Set(), signal: new AbortController().signal, now });
+
+      await expect(stat(staging)).resolves.toBeTruthy();
+      await expect(stat(revision)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      if (previous === undefined) delete process.env.PI_PLUGINS_CONVERGENCE_GRACE_DAYS;
+      else process.env.PI_PLUGINS_CONVERGENCE_GRACE_DAYS = previous;
+    }
+  });
 });

@@ -78,6 +78,7 @@ import { createNativeControlCurrentProjectPort } from "./create-native-control-c
 import { createNodeControlTimeoutPort } from "../infrastructure/node/node-control-timeout.js";
 import type { NativePluginControlService } from "../application/native-control-service.js";
 import type { SkillResourceDiscoveryPort } from "../runtime/skills/resource-discovery.js";
+import type { SuccessorActivationReport } from "../application/ports/lifecycle-reload.js";
 
 const sha256 = (bytes: Uint8Array): Uint8Array => new Uint8Array(createHash("sha256").update(bytes).digest());
 
@@ -102,19 +103,25 @@ type PiApplicationOperationFrame = {
   reloadContext: ExtensionContext | undefined;
 };
 
-function startupResult(input: Readonly<{
+export function startupResult(input: Readonly<{
   blocked: readonly HostBlockedPlugin[];
+  reconcileReport?: SuccessorActivationReport;
   mcp: RuntimeQualificationStatus;
   subagents: RuntimeQualificationStatus;
   piReload: RuntimeQualificationStatus;
   secrets: "available" | "unavailable";
 }>): HostStartupResult {
+  const blocked = [...input.blocked, ...(input.reconcileReport?.degraded ?? [])];
+  const uniqueBlocked = [...new Map(blocked.map((entry) => [
+    JSON.stringify([entry.scope, entry.plugin, entry.selectedRevision, entry.runningRevision, entry.code]),
+    entry,
+  ])).values()];
   const secrets = input.secrets === "available"
     ? { status: "available" as const, explanation: "encrypted operating-system secret custody is available" }
     : { status: "unavailable" as const, explanation: "encrypted operating-system secret custody is unavailable" };
   return Object.freeze({
-    status: input.blocked.length === 0 ? "ready" : "degraded",
-    blocked: Object.freeze(input.blocked.map((entry) => Object.freeze({ ...entry }))),
+    status: uniqueBlocked.length === 0 ? "ready" : "degraded",
+    blocked: Object.freeze(uniqueBlocked.map((entry) => Object.freeze({ ...entry }))),
     capabilities: Object.freeze({
       mcp: Object.freeze({ status: input.mcp.status, explanation: input.mcp.explanation }),
       subagents: Object.freeze({ status: input.subagents.status, explanation: input.subagents.explanation }),
@@ -386,9 +393,16 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         const marketplace = marketplaceComposition.application;
 
         const runtimeStartupBlocked: HostBlockedPlugin[] = [];
+        let runtimeStartupReport: SuccessorActivationReport | undefined;
+        const recordStartupReport = (report: SuccessorActivationReport): void => {
+          // MCP apply failures are part of the successor report, not the
+          // desired-state snapshot. Keep that report in startup visibility so
+          // a plugin cannot look healthy merely because skills reconstructed.
+          runtimeStartupReport = report;
+        };
         if (successor === undefined) {
           try {
-            await reload.reconcileCurrent(startupSignal);
+            recordStartupReport(await reload.reconcileCurrent(startupSignal));
           } catch (error) {
             if (startupSignal.aborted) throw error;
             runtimeStartupBlocked.push({
@@ -399,7 +413,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
           }
         } else {
           try {
-            await reload.acceptSuccessor(successor, startupSignal);
+            recordStartupReport(await reload.acceptSuccessor(successor, startupSignal));
             reloadSuccessor = Object.freeze({ ticket: successor, reload });
           } catch (error) {
             reload.failSuccessor(successor, error);
@@ -412,8 +426,10 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         }
         const convergenceResult = await convergence.sweep({ scopes: [{ kind: "user" }, project.scope], signal: startupSignal });
         const unresolvedConvergence: HostBlockedPlugin[] = convergenceResult.results.filter((result) => result.kind !== "completed").map((result) => ({ plugin: result.plugin ?? "convergence", code: `CONVERGENCE_${result.code}`, explanation: "startup convergence retained work for a later pass" }));
+        const runtimeBlocked = [...(latestDesired?.degraded ?? []), ...(runtimeStartupReport?.degraded ?? []), ...runtimeStartupBlocked];
         const startup = startupResult({
           blocked: [...(latestDesired?.degraded ?? []), ...unresolvedConvergence, ...runtimeStartupBlocked],
+          ...(runtimeStartupReport === undefined ? {} : { reconcileReport: runtimeStartupReport }),
           mcp: qualification.mcp,
           subagents: qualification.subagents,
           piReload: qualification.hostApi,
@@ -422,7 +438,7 @@ export function createPackagedPluginHost(options: PackagedPluginHostOptions): Pa
         const hostStatus = createHostStatusService({
           startup,
           convergence: unresolvedConvergence.length === 0 ? "settled" : "degraded",
-          runtime: [...(latestDesired?.degraded ?? []), ...runtimeStartupBlocked].length === 0 ? "reconciled" : "degraded",
+          runtime: runtimeBlocked.length === 0 ? "reconciled" : "degraded",
           schedulerStatus: marketplaceComposition.updates.schedulerStatus,
         });
         const candidateContent = createCandidateContentLeasePort({ content: content.content, materializer: materializers.plugins });

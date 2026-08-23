@@ -14,5 +14,4 @@ export type PendingDeleteMarkerStore = Readonly<{
   remove(marker: PendingDeleteMarker): Promise<void>;
   list(signal?: AbortSignal): Promise<readonly PendingDeleteMarker[]>;
 }>;
-export type PendingDeleteReplayResult = Readonly<{ marker: PendingDeleteMarker; outcome: "deleted" | "discarded-installed" | "retained" | "invalid" }>;
 export type { EpochMilliseconds, PluginDataRef, PluginKey, ScopeReference };

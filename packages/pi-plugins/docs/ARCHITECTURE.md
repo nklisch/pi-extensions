@@ -523,7 +523,7 @@ revision for that session. Repair re-materializes the selected revision and
 rollback flips the selected/previous pointers explicitly; neither operation
 silently rewrites state during startup.
 
-### Staged updates
+### Committed updates
 
 Automatic and update-all runs commit the candidate and report
 `live-next-start`; there is no durable staged state or ownership handoff. The

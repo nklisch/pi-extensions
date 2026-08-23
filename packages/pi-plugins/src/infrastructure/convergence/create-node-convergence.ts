@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { createConvergenceService, type ConvergenceService } from "../../application/convergence-service.js";
+import { createConvergenceService, DefaultConvergencePolicy, type ConvergenceService } from "../../application/convergence-service.js";
 import type { LifecycleStateStore } from "../../application/ports/lifecycle-state-store.js";
 import type { LifecycleStateInventoryPort } from "../../application/ports/lifecycle-state-inventory.js";
 import type { PersistentDataRemovalPort } from "../../application/ports/persistent-data-removal.js";
@@ -8,7 +8,12 @@ import type { Sha256 } from "../../domain/source.js";
 import { createPendingDeleteMarkerStore } from "../cleanup/pending-data-deletion.js";
 import { createArtifactGc } from "./artifact-gc.js";
 
-export function createNodeConvergenceService(input: Readonly<{ state: LifecycleStateStore; hostRoot: string; dataRemoval?: PersistentDataRemovalPort; inventory: LifecycleStateInventoryPort; sha256: Sha256; clock?: LifecycleClock; projectionReferences?: () => ReadonlySet<string> | undefined }>): ConvergenceService {
+export function createNodeConvergenceService(input: Readonly<{ state: LifecycleStateStore; hostRoot: string; dataRemoval?: PersistentDataRemovalPort; inventory: LifecycleStateInventoryPort; sha256: Sha256; clock?: LifecycleClock; policy?: Partial<typeof DefaultConvergencePolicy>; projectionReferences?: () => ReadonlySet<string> | undefined }>): ConvergenceService {
   const pendingDeletes = createPendingDeleteMarkerStore({ root: join(input.hostRoot, "cleanup", "v1", "pending-deletes") });
-  return createConvergenceService({ ...input, pendingDeletes, artifacts: createArtifactGc({ hostRoot: input.hostRoot }) });
+  const policy = { ...DefaultConvergencePolicy, ...(input.policy ?? {}) };
+  return createConvergenceService({ ...input, policy, pendingDeletes, artifacts: createArtifactGc({
+    hostRoot: input.hostRoot,
+    stagingGraceMs: policy.stagingGraceMs,
+    orphanGraceMs: policy.orphanGraceMs,
+  }) });
 }

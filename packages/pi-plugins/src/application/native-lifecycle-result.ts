@@ -7,6 +7,10 @@ import { deriveLifecycleTargetDigest, type VerifiedNativeLifecycleTarget } from 
 import type { PluginLifecycleResult } from "./plugin-lifecycle-service.js";
 
 function targetRecord(snapshot: GenerationSnapshot, plugin: string) { return ("installed" in snapshot ? snapshot.installed.plugins : snapshot.project.plugins).find((record) => record.plugin === plugin); }
+function hasLivePreviousRevision(snapshot: GenerationSnapshot, plugin: string): boolean {
+  const record = targetRecord(snapshot, plugin);
+  return record?.previousRevision !== undefined && record.revisions.some((revision) => revision.revision === record.previousRevision);
+}
 function observedTarget(before: VerifiedNativeLifecycleTarget, snapshot: GenerationSnapshot, sha256: Sha256) {
   const record = targetRecord(snapshot, before.binding.plugin);
   if (record === undefined) return undefined;
@@ -37,7 +41,12 @@ export function projectPluginLifecycleResult(input: Readonly<{
     const reason = result.operation === "enable" ? "already-enabled" : result.operation === "disable" ? "already-disabled" : result.operation === "update" ? "revision-current" : result.operation === "uninstall" ? "already-uninstalled" : "revision-current";
     return NativeLifecycleOperationResultSchema.parse({ kind: "current-state", ...base, reason, target: observedTarget(input.target, result.snapshot, input.sha256) ?? input.target.binding, effects: effects("unchanged", result.snapshot.generation) });
   }
-  if (result.kind === "degraded") return NativeLifecycleOperationResultSchema.parse({ kind: "degraded", ...base, failure: result.failure, repairHint: result.runningRevision === undefined ? "repair" : "both", effects: effects("changed", result.snapshot.generation) });
+  if (result.kind === "degraded") {
+    const repairHint = result.runningRevision !== undefined
+      ? "both"
+      : hasLivePreviousRevision(result.snapshot, result.failure.plugin) ? "rollback" : "repair";
+    return NativeLifecycleOperationResultSchema.parse({ kind: "degraded", ...base, failure: result.failure, repairHint, effects: effects("changed", result.snapshot.generation) });
+  }
   if (result.kind === "stale") return NativeLifecycleOperationResultSchema.parse({ kind: "conflict", ...base, reason: "target-changed", effects: effects("unchanged", result.actual) });
   if (result.code === "ABORTED") return NativeLifecycleOperationResultSchema.parse({ kind: "cancelled", ...base, phase: input.cancellationPhase ?? "lifecycle-transaction", effects: effects("unchanged") });
   if (result.code === "AVAILABLE_REVISION_CHANGED" || result.code === "CONFIGURATION_STALE") return NativeLifecycleOperationResultSchema.parse({ kind: "stale", ...base, reason: result.code === "CONFIGURATION_STALE" ? "configuration" : "candidate", effects: effects("unchanged") });

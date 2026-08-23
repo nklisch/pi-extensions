@@ -396,6 +396,7 @@ function createPluginLifecycleImplementation(dependencies: PluginLifecycleServic
       await discardCandidate(dependencies, prepared).catch(() => undefined);
       if (signal.aborted) return rejected(operation, "ABORTED");
       if (error instanceof Error && error.message === "CONFIGURATION_STALE") return rejected(operation, "CONFIGURATION_STALE");
+      if (error instanceof Error && error.message === "CONFIGURATION_UNAVAILABLE") return rejected(operation, "UNCONFIGURED");
       if (error instanceof Error && error.message.includes("promotion")) return rejected(operation, "PROMOTION_FAILED");
       return rejected(operation, "MALFORMED");
     }

@@ -586,8 +586,9 @@ degraded; reconstruction runs `previousRevision` for that session when
 available. Repair re-materializes the selected revision, while rollback
 explicitly flips the selected and previous pointers.
 
-Uninstall removes activation first, then cached revisions. Persistent plugin
-data is deleted only after explicit confirmation; a confirmed deletion is
+Uninstall removes the installed record immediately; its cached revisions are
+reported as `collection-deferred` and grace-GC'd days later by convergence.
+Persistent plugin data is deleted only after explicit confirmation; a confirmed deletion is
 recorded by a marker so startup convergence can retry it.
 
 ## Enablement

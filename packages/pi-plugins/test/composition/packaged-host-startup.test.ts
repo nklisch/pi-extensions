@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createPackagedHostStartup } from "../../src/composition/packaged-host-startup.js";
+import { startupResult } from "../../src/composition/create-packaged-plugin-host.js";
+import { SuccessorActivationReportSchema } from "../../src/application/ports/lifecycle-reload.js";
 
 const capabilities = {
   mcp: { status: "unavailable" as const, explanation: "optional" },
@@ -9,6 +11,29 @@ const capabilities = {
 };
 
 describe("explicit packaged host startup", () => {
+  it("publishes an MCP apply failure from the startup reconcile report as plugin degradation", () => {
+    const report = SuccessorActivationReportSchema.parse({
+      kind: "degraded",
+      degraded: [{
+        plugin: "demo@community",
+        scope: { kind: "user" },
+        selectedRevision: `sha256:${"a".repeat(64)}`,
+        code: "MCP_MUTATION_OUTCOME_UNKNOWN",
+        explanation: "MCP source registration could not be activated for this session",
+      }],
+    });
+    const result = startupResult({
+      blocked: [],
+      reconcileReport: report,
+      mcp: capabilities.mcp,
+      subagents: capabilities.subagents,
+      piReload: capabilities.piReload,
+      secrets: "unavailable",
+    });
+
+    expect(result).toMatchObject({ status: "degraded", blocked: [expect.objectContaining({ plugin: "demo@community", code: "MCP_MUTATION_OUTCOME_UNKNOWN" })] });
+  });
+
   it("is construction inert and orders local reconciliation before convergence and background", async () => {
     const calls: string[] = [];
     const startup = createPackagedHostStartup({

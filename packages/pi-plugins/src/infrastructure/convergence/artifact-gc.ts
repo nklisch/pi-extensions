@@ -6,11 +6,22 @@ export const DEFAULT_CONVERGENCE_GRACE_DAYS = 7;
 export const CONVERGENCE_FOREGROUND_BUDGET_MS = 2_000;
 export const CONVERGENCE_FOREGROUND_ITEM_BUDGET = 128;
 
-
 function missing(error: unknown): boolean { return typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === "ENOENT"; }
-function graceDays(): number {
-  const configured = Number.parseInt(process.env.PI_PLUGINS_CONVERGENCE_GRACE_DAYS ?? String(DEFAULT_CONVERGENCE_GRACE_DAYS), 10);
+function environmentGraceDays(): number | undefined {
+  const raw = process.env.PI_PLUGINS_CONVERGENCE_GRACE_DAYS;
+  if (raw === undefined) return undefined;
+  const configured = Number.parseInt(raw, 10);
   return Number.isFinite(configured) && configured >= 0 ? configured : DEFAULT_CONVERGENCE_GRACE_DAYS;
+}
+function policyGraceMs(value: number | undefined, fallback: number): number {
+  return value !== undefined && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+function graceMs(kind: ArtifactGcKind, input: Readonly<{ stagingGraceMs?: number; orphanGraceMs?: number }>): number {
+  const environment = environmentGraceDays();
+  if (environment !== undefined) return environment * 86_400_000;
+  return kind === "staging"
+    ? policyGraceMs(input.stagingGraceMs, DEFAULT_CONVERGENCE_GRACE_DAYS * 86_400_000)
+    : policyGraceMs(input.orphanGraceMs, DEFAULT_CONVERGENCE_GRACE_DAYS * 86_400_000);
 }
 
 /**
@@ -18,7 +29,7 @@ function graceDays(): number {
  * directory cannot be inspected: an incomplete filesystem listing cannot
  * prove that a live state reference is absent.
  */
-export function createArtifactGc(input: Readonly<{ hostRoot: string; maxItems?: number; budgetMs?: number }>): ArtifactGc {
+export function createArtifactGc(input: Readonly<{ hostRoot: string; maxItems?: number; budgetMs?: number; stagingGraceMs?: number; orphanGraceMs?: number }>): ArtifactGc {
   if (input === null || typeof input !== "object" || typeof input.hostRoot !== "string" || input.hostRoot.length === 0) throw new TypeError("artifact GC host root is required");
   const maxItems = input.maxItems ?? CONVERGENCE_FOREGROUND_ITEM_BUDGET;
   const budgetMs = input.budgetMs ?? CONVERGENCE_FOREGROUND_BUDGET_MS;
@@ -36,7 +47,12 @@ export function createArtifactGc(input: Readonly<{ hostRoot: string; maxItems?: 
     request.signal.throwIfAborted();
     const now = request.now ?? Date.now();
     const retainKinds = new Set(request.retainKinds ?? []);
-    const grace = graceDays() * 86_400_000;
+    const graceByKind = new Map<ArtifactGcKind, number>([
+      ["staging", graceMs("staging", input)],
+      ["marketplace", graceMs("marketplace", input)],
+      ["revision", graceMs("revision", input)],
+      ["projection", graceMs("projection", input)],
+    ]);
     const started = Date.now();
     let removed = 0;
     let retained = 0;
@@ -66,7 +82,7 @@ export function createArtifactGc(input: Readonly<{ hostRoot: string; maxItems?: 
         }
         if (info.isSymbolicLink() || !info.isDirectory() && !info.isFile()) { categoryIncomplete = true; retained += 1; continue; }
         const key = `${root.kind}:${name}`;
-        if (request.referenced.has(key) || now - info.mtimeMs < grace) { retained += 1; continue; }
+        if (request.referenced.has(key) || now - info.mtimeMs < graceByKind.get(root.kind)!) { retained += 1; continue; }
         candidates.push(path);
       }
       if (categoryIncomplete) {

@@ -1,12 +1,8 @@
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  PENDING_DELETE_GRACE_MS,
-  createPendingDeleteMarkerStore,
-  replayPendingDeleteMarkers,
-} from "../../src/infrastructure/cleanup/pending-data-deletion.js";
+import { createPendingDeleteMarkerStore } from "../../src/infrastructure/cleanup/pending-data-deletion.js";
 import type { PendingDeleteMarker } from "../../src/infrastructure/cleanup/pending-data-deletion.js";
 
 const roots: string[] = [];
@@ -22,7 +18,7 @@ afterEach(async () => {
 });
 
 describe("pending-delete markers", () => {
-  it("creates one atomically named file and replays it", async () => {
+  it("creates one atomically named file and reads it", async () => {
     const root = await mkdtemp(join(tmpdir(), "pending-delete-"));
     roots.push(root);
     const markers = createPendingDeleteMarkerStore({ root: join(root, "cleanup", "v1", "pending-deletes") });
@@ -36,33 +32,22 @@ describe("pending-delete markers", () => {
     expect(await markers.list()).toHaveLength(0);
   });
 
-  it("retains a marker for an installed plugin until the 60-minute gate", async () => {
+  it("removes stale atomic-write leftovers but leaves recent writers alone", async () => {
     const root = await mkdtemp(join(tmpdir(), "pending-delete-"));
     roots.push(root);
     const markers = createPendingDeleteMarkerStore({ root });
-    const now = 10_000_000;
-    const pending = marker(now - PENDING_DELETE_GRACE_MS + 1);
-    await markers.create(pending);
-    const data = { async remove() { throw new Error("must not delete installed data"); } };
-    const beforeGate = await replayPendingDeleteMarkers({ markers, data, now, isInstalled: async () => true, signal: new AbortController().signal });
-    expect(beforeGate[0]?.outcome).toBe("retained");
-    expect(await markers.list()).toHaveLength(1);
+    await markers.create(marker(Date.now()));
+    const stale = join(markers.root, "stale.tmp");
+    const recent = join(markers.root, "recent.tmp");
+    await writeFile(stale, "stale", "utf8");
+    await writeFile(recent, "recent", "utf8");
+    const old = new Date(Date.now() - 6 * 60_000);
+    await utimes(stale, old, old);
 
-    const atGate = await replayPendingDeleteMarkers({ markers, data, now: now + 1, isInstalled: async () => true, signal: new AbortController().signal });
-    expect(atGate[0]?.outcome).toBe("discarded-installed");
-    expect(await markers.list()).toHaveLength(0);
-  });
+    await markers.list();
 
-  it("deletes data and unlinks the marker when the plugin is absent", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pending-delete-"));
-    roots.push(root);
-    const markers = createPendingDeleteMarkerStore({ root });
-    await markers.create(marker(1));
-    const removed: string[] = [];
-    const data = { async remove(plan: { plugin: string }) { removed.push(plan.plugin); return "removed" as const; } };
-    const result = await replayPendingDeleteMarkers({ markers, data, isInstalled: async () => false, signal: new AbortController().signal });
-    expect(result[0]?.outcome).toBe("deleted");
-    expect(removed).toEqual(["demo@local"]);
-    expect(await markers.list()).toHaveLength(0);
+    await expect(stat(stale)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(recent)).resolves.toBeTruthy();
+    await unlink(recent);
   });
 });
