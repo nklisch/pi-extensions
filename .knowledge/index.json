@@ -1000,17 +1000,6 @@
       "relationships": []
     },
     {
-      "path": ".work/active/feature-extension-error-containment.md",
-      "namespace": "work",
-      "kind": "feature",
-      "id": "feature-extension-error-containment",
-      "title": "Contain extension-originated failures",
-      "summary": null,
-      "updated": "2026-08-23",
-      "status": "active",
-      "relationships": []
-    },
-    {
       "path": ".work/completed/feature-agent-plugin-orientation.md",
       "namespace": "work",
       "kind": "feature",
@@ -1052,6 +1041,17 @@
       "summary": null,
       "updated": "2026-08-22",
       "status": "completed",
+      "relationships": []
+    },
+    {
+      "path": ".work/releases/extension-error-containment-2026-08-23.md",
+      "namespace": "work",
+      "kind": "release",
+      "id": "releases/extension-error-containment-2026-08-23",
+      "title": "Extension error containment — 2026-08-23",
+      "summary": null,
+      "updated": null,
+      "status": null,
       "relationships": []
     },
     {

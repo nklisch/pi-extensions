@@ -10,7 +10,7 @@ The package lives in the `nklisch/pi-extensions` monorepo under `packages/pi-mcp
 - Release commit and tag: `1dbdef96f674410ac37067de70f10a3de3d48d98` (`v2.20.1`)
 - Reviewed post-release fixes integrated through: `08fe82be1d55036d3960c4bb3fa77ed8707f2bca`
 - Common ancestry used for three-way integration: `82724dccc13a49310530898f922bafff12b7f3fe` (`v2.11.0`)
-- npm package: `@nklisch/pi-mcp-adapter`, published through `2.11.0-nklisch.9`
+- npm package: `@nklisch/pi-mcp-adapter`, published through `2.21.0-nklisch.1`
 - Security reports: the private GitHub security-advisory channel for the maintained package
 - License: MIT
 
