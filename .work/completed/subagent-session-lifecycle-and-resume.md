@@ -1,7 +1,8 @@
 ---
 owner: workbench
-status: active
+status: completed
 created: 2026-08-24
+completed: 2026-08-24
 package: packages/pi-subagents
 ---
 
@@ -53,3 +54,18 @@ terminal.
 - Focused `pi-subagents` tests and typecheck/build.
 - Repository `npm run check`.
 - Different-model review of lifecycle ordering and resume concurrency.
+
+## Closure evidence
+
+- `@nklisch/pi-subagents` focused suite: 191 tests passed; full package suite:
+  1,001 tests passed with typecheck and declaration build.
+- Repository `npm run check` passed after synchronized release versioning,
+  including 1,539 pi-plugins tests, packed-consumer verification, and all
+  workspace tarball inspections.
+- Kimi K3 cross-model review found no material defects; it confirmed Pi root
+  lifecycle parity, once-only teardown, idle-boundary correctness, synchronous
+  resume reservation, and retention-race closure.
+- Trusted-publishing workflow run 32732403164 succeeded from commit `8a7fb47`.
+- Registry and packed-bundle verification confirmed:
+  `@nklisch/pi-subagents@18.1.0-nklisch.3`,
+  `@nklisch/pi-plugins@0.4.2`, and `@nklisch/pi-enhanced@0.2.3`.
