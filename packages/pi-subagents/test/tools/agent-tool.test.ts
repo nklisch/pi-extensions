@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { SubagentBusyError } from "#src/lifecycle/subagent";
 import { AgentTool } from "#src/tools/agent-tool";
 import { createToolDeps, createToolDepsWithDisabledBuiltInAgents } from "#test/helpers/make-deps";
 import { makeModel } from "#test/helpers/make-model";
@@ -124,6 +125,24 @@ describe("AgentTool — resume path", () => {
 			resume: "agent-1",
 		});
 		expect(result.content[0].text).toContain("no active session");
+	});
+
+	it("reports a genuine concurrent resume without leaking Pi's prompt error", async () => {
+		const deps = createToolDeps();
+		const resumeRecord = createTestSubagent();
+		resumeRecord.subagentSession = toSubagentSession(createSubagentSessionStub(createMockSession()));
+		deps.manager.getRecord = vi.fn().mockReturnValue(resumeRecord);
+		deps.manager.resume = vi.fn().mockRejectedValue(new SubagentBusyError("agent-1"));
+
+		const result = await execute(deps, {
+			prompt: "continue",
+			description: "resume",
+			subagent_type: "general-purpose",
+			resume: "agent-1",
+		});
+
+		expect(result.content[0].text).toContain("still processing a turn");
+		expect(result.content[0].text).not.toContain("Specify streamingBehavior");
 	});
 
 	it("returns result text on successful resume", async () => {

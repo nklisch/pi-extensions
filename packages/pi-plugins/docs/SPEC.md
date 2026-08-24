@@ -731,7 +731,7 @@ The system is accepted when automated tests demonstrate:
 13. From an empty consumer dependency tree, the packed product installs from a
     replayed lock/SRI registry snapshot with exact receipts for
     `@nklisch/pi-mcp-adapter@2.21.0-nklisch.1` and
-    `@nklisch/pi-subagents@18.1.0-nklisch.2`.
+    `@nklisch/pi-subagents@18.1.0-nklisch.3`.
 14. One complete revision-bound production bundle proves skill discovery,
     ordinary hooks, subagent prompt injection and same-session continuation,
     canonical MCP list/call, and honest `RUNTIME_ALIAS_UNAVAILABLE` reporting

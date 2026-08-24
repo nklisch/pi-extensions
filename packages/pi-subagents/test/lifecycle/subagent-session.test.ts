@@ -26,6 +26,8 @@ function createSession(finalText: string) {
     abort: vi.fn(),
     steer: vi.fn().mockResolvedValue(undefined),
     dispose: vi.fn(),
+    extensionRunner: { emit: vi.fn().mockResolvedValue(undefined) },
+    isIdle: true,
     getSessionStats: vi.fn(() => ({
       tokens: { input: 100, output: 50, cacheWrite: 10 },
       contextUsage: { percent: 42 },
@@ -298,6 +300,38 @@ describe("SubagentSession — runTurnLoop lifecycle events", () => {
   });
 });
 
+describe("SubagentSession — idle boundary", () => {
+  it("waits for agent_settled when Pi is still finishing post-run work", async () => {
+    const { session, listeners } = createSession("X");
+    session.isIdle = false;
+    const { sub } = makeSubagentSession(session);
+
+    const waiting = sub.waitUntilIdle();
+    let settled = false;
+    void waiting.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    session.isIdle = true;
+    for (const listener of listeners) listener({ type: "agent_settled" });
+    await waiting;
+    expect(settled).toBe(true);
+  });
+
+  it("cancels an idle wait without starting another prompt", async () => {
+    const { session } = createSession("X");
+    session.isIdle = false;
+    const { sub } = makeSubagentSession(session);
+    const controller = new AbortController();
+
+    const waiting = sub.waitUntilIdle(controller.signal);
+    controller.abort(new Error("caller stopped waiting"));
+
+    await expect(waiting).rejects.toThrow("caller stopped waiting");
+    expect(session.prompt).not.toHaveBeenCalled();
+  });
+});
+
 describe("SubagentSession — resumeTurnLoop", () => {
   it("re-prompts the session and returns the final assistant text", async () => {
     const { session } = createSession("RESUMED");
@@ -426,22 +460,44 @@ describe("SubagentSession — turn-loop cleanup containment", () => {
 });
 
 describe("SubagentSession — dispose", () => {
-  it("disposes the session and emits disposed with the child session id", () => {
+  it("awaits extension shutdown before invalidating and unregistering the child", async () => {
     const { session } = createSession("X");
+    const shutdown = Promise.withResolvers<void>();
+    const order: string[] = [];
+    session.extensionRunner.emit.mockImplementation(async () => {
+      order.push("session_shutdown");
+      await shutdown.promise;
+    });
+    session.dispose.mockImplementation(() => { order.push("session.dispose"); });
+    lifecycle.disposed.mockImplementation(() => { order.push("child.disposed"); });
     const { sub } = makeSubagentSession(session, { sessionId: "child-session-abc", lifecycle });
-    sub.dispose();
-    expect(session.dispose).toHaveBeenCalledOnce();
-    expect(lifecycle.disposed).toHaveBeenCalledOnce();
+
+    const disposing = sub.dispose();
+    expect(session.extensionRunner.emit).toHaveBeenCalledWith({
+      type: "session_shutdown",
+      reason: "quit",
+    });
+    expect(session.dispose).not.toHaveBeenCalled();
+
+    shutdown.resolve();
+    await disposing;
+
+    expect(order).toEqual(["session_shutdown", "session.dispose", "child.disposed"]);
     expect(lifecycle.disposed).toHaveBeenCalledWith({ sessionId: "child-session-abc" });
   });
 
-  it("contains subscriber failure and makes disposal idempotent", () => {
+  it("contains teardown failures and makes disposal idempotent", async () => {
     const { session } = createSession("X");
+    session.extensionRunner.emit.mockRejectedValue(new Error("extension failed"));
+    session.dispose.mockImplementation(() => { throw new Error("session failed"); });
     lifecycle.disposed.mockImplementation(() => { throw new Error("listener failed"); });
     const { sub } = makeSubagentSession(session, { sessionId: "child-session-abc", lifecycle });
 
-    expect(() => sub.dispose()).not.toThrow();
-    expect(() => sub.dispose()).not.toThrow();
+    const first = sub.dispose();
+    const second = sub.dispose();
+    expect(second).toBe(first);
+    await expect(first).resolves.toBeUndefined();
+    expect(session.extensionRunner.emit).toHaveBeenCalledOnce();
     expect(session.dispose).toHaveBeenCalledOnce();
     expect(lifecycle.disposed).toHaveBeenCalledOnce();
   });

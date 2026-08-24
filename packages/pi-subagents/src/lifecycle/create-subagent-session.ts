@@ -242,9 +242,10 @@ export async function createSubagentSession(
     // are included in the post-bind active set.
     applyRecursionGuard(session);
   } catch (err) {
-    // Binding failed after session-created — dispose (emit disposed +
-    // session.dispose()) before rethrowing so registration is never leaked.
-    subagentSession.dispose();
+    // Binding failed after session-created — shut extensions down, dispose the
+    // SDK session, and unregister the child before rethrowing. Awaiting keeps a
+    // partially-bound extension from escaping with detached work.
+    await subagentSession.dispose();
     throw err;
   }
 

@@ -162,7 +162,7 @@ describe("AgentWidget lifecycle read model", () => {
 
       historicalWidget.dispose();
     } finally {
-      manager.dispose();
+      await manager.dispose();
     }
   });
 

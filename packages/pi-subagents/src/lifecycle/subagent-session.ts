@@ -74,7 +74,7 @@ export interface SubagentSessionMeta {
  * One child AgentSession plus its turn-driving and teardown — born complete.
  */
 export class SubagentSession {
-  private disposed = false;
+  private disposalPromise?: Promise<void>;
 
   constructor(
     private readonly _session: AgentSession,
@@ -309,6 +309,52 @@ export class SubagentSession {
     });
   }
 
+  /** Whether Pi has fully settled the child, including post-run continuation. */
+  get isIdle(): boolean {
+    return this._session.isIdle;
+  }
+
+  /**
+   * Wait for Pi's authoritative idle boundary before starting another prompt.
+   * A record can already look terminal while AgentSession is still finishing an
+   * extension-driven continuation, so domain status alone is insufficient.
+   */
+  async waitUntilIdle(signal?: AbortSignal): Promise<void> {
+    if (this._session.isIdle) return;
+    signal?.throwIfAborted();
+
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let unsubscribe: () => void = () => {};
+      const cleanup = (): void => {
+        signal?.removeEventListener("abort", onAbort);
+        unsubscribe();
+      };
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+      const onAbort = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(signal?.reason ?? new Error("Resume wait aborted"));
+      };
+
+      unsubscribe = this._session.subscribe((event: AgentSessionEvent) => {
+        if (event.type === "agent_settled" || this._session.isIdle) finish();
+      });
+      signal?.addEventListener("abort", onAbort, { once: true });
+
+      // Close the check/subscribe race: Pi may have settled between the first
+      // isIdle read and listener registration.
+      if (this._session.isIdle) finish();
+      else if (signal?.aborted) onAbort();
+    });
+  }
+
   /** Deliver a steer to the live session. */
   async steer(message: string): Promise<void> {
     await this._session.steer(message);
@@ -349,14 +395,32 @@ export class SubagentSession {
     return this._session.getToolDefinition(name);
   }
 
-  /** Tear down: session.dispose() + emit `disposed` (registry unregister). */
-  dispose(): void {
-    if (this.disposed) return;
-    this.disposed = true;
+  /**
+   * Tear down the child session exactly once.
+   *
+   * AgentSession.dispose() revokes extension contexts immediately but does not
+   * emit the extension lifecycle event. Child-owned extensions need the same
+   * awaited shutdown boundary as root-session replacement so they can cancel
+   * detached work before their Pi API is invalidated.
+   */
+  dispose(): Promise<void> {
+    this.disposalPromise ??= this.disposeOnce();
+    return this.disposalPromise;
+  }
+
+  private async disposeOnce(): Promise<void> {
+    try {
+      await this._session.extensionRunner.emit({
+        type: "session_shutdown",
+        reason: "quit",
+      });
+    } catch (error) {
+      // A faulty extension must not prevent the SDK session from being revoked.
+      debugLog("child extension session_shutdown", error);
+    }
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- dispose may not exist on all session implementations
-      this._session.dispose?.();
+      this._session.dispose();
     } catch (error) {
       debugLog("child session dispose", error);
     }

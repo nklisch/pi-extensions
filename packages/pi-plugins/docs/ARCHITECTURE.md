@@ -592,7 +592,7 @@ does not reinterpret raw manifest JSON.
 ### Subagent adapter
 
 The subagent adapter integrates with the pinned published
-`@nklisch/pi-subagents@18.1.0-nklisch.2` lifecycle contract; Plugin Host does
+`@nklisch/pi-subagents@18.1.0-nklisch.3` lifecycle contract; Plugin Host does
 not implement its own subagent runtime. Faithful `SubagentStart` and
 `SubagentStop` hooks run before the exact child prompt and before final
 completion, so hooks can inject context, deny a turn, replace a result, or
@@ -871,7 +871,7 @@ Final acceptance starts with an empty consumer `node_modules` tree, installs the
 packed `@nklisch/pi-plugins` candidate from the replayed lock/SRI registry
 snapshot, and verifies exact receipts for
 `@nklisch/pi-mcp-adapter@2.21.0-nklisch.1` and
-`@nklisch/pi-subagents@18.1.0-nklisch.2`. In a clean Pi environment with no
+`@nklisch/pi-subagents@18.1.0-nklisch.3`. In a clean Pi environment with no
 Claude or Codex state, one revision-bound production fixture carries a skill,
 ordinary hooks, subagent interception, and canonical MCP through install,
 disable, enable, V1-to-V2 update, restart, and uninstall. Real Pi processes

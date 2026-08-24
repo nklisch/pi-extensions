@@ -30,6 +30,8 @@ function createSession(results = ["result"]) {
     abort: vi.fn(),
     steer: vi.fn().mockResolvedValue(undefined),
     dispose: vi.fn(),
+    extensionRunner: { emit: vi.fn().mockResolvedValue(undefined) },
+    isIdle: true,
     getSessionStats: vi.fn(() => ({ tokens: { input: 0, output: 0, cacheWrite: 0 } })),
     getToolDefinition: vi.fn(),
   };
@@ -363,7 +365,7 @@ describe("SubagentSession lifecycle interception", () => {
       expect.objectContaining({ phase: "resume", origin: "service", mode: "background", admission: "immediate" }),
     ]));
     expect(completions).toHaveLength(4);
-    manager.dispose();
+    await manager.dispose();
   });
 
   it("fails before finalization when a completion interceptor rejects", async () => {

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.3
+
+### Fixed
+
+- Rebundle `@nklisch/pi-plugins` 0.4.2 with clean child-session shutdown and serialized, Pi-idle-aware subagent resume.
+
 ## v0.2.2
 
 ### Fixed

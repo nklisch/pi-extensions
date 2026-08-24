@@ -111,8 +111,8 @@ describe("SubagentManager — Bug 1 race condition (consumed state vs onComplete
     vi.useFakeTimers();
   });
 
-  afterEach(() => {
-    manager.dispose();
+  afterEach(async () => {
+    await manager.dispose();
     vi.useRealTimers();
   });
 
@@ -154,8 +154,8 @@ describe("SubagentManager — Bug 1 race condition (consumed state vs onComplete
 describe("SubagentManager — completion callbacks", () => {
   let manager: SubagentManager;
 
-  afterEach(() => {
-    manager.dispose();
+  afterEach(async () => {
+    await manager.dispose();
   });
 
   it("does not let onComplete errors turn a completed agent into a failed run", async () => {
@@ -183,8 +183,8 @@ describe("SubagentManager — completion callbacks", () => {
 describe("SubagentManager — cleanup timer", () => {
   let manager: SubagentManager;
 
-  afterEach(() => {
-    manager.dispose();
+  afterEach(async () => {
+    await manager.dispose();
   });
 
   it("does not keep the process alive on its own", () => {
@@ -197,8 +197,8 @@ describe("SubagentManager — cleanup timer", () => {
 describe("SubagentManager — Bug 3 clearCompleted", () => {
   let manager: SubagentManager;
 
-  afterEach(() => {
-    manager.dispose();
+  afterEach(async () => {
+    await manager.dispose();
   });
 
   it("clearCompleted removes completed records", async () => {
@@ -208,7 +208,7 @@ describe("SubagentManager — Bug 3 clearCompleted", () => {
     await manager.getRecord(id)!.promise;
 
     expect(manager.listAgents()).toHaveLength(1);
-    manager.clearCompleted();
+    await manager.clearCompleted();
     expect(manager.listAgents()).toHaveLength(0);
   });
 
@@ -223,7 +223,7 @@ describe("SubagentManager — Bug 3 clearCompleted", () => {
     expect(manager.getRecord(id1)!.status).toBe("running");
     expect(manager.getRecord(id2)!.status).toBe("queued");
 
-    manager.clearCompleted();
+    await manager.clearCompleted();
 
     // Both should still be present
     expect(manager.getRecord(id1)).toBeDefined();
@@ -243,7 +243,7 @@ describe("SubagentManager — Bug 3 clearCompleted", () => {
     const id = spawnBg(manager);
     await manager.getRecord(id)!.promise;
 
-    manager.clearCompleted();
+    await manager.clearCompleted();
 
     expect(disposeSpy).toHaveBeenCalledOnce();
   });
@@ -257,7 +257,7 @@ describe("SubagentManager — Bug 3 clearCompleted", () => {
     await manager.getRecord(id)!.promise;
     expect(manager.getRecord(id)!.status).toBe("error");
 
-    manager.clearCompleted();
+    await manager.clearCompleted();
     expect(manager.getRecord(id)).toBeUndefined();
   });
 
@@ -269,7 +269,7 @@ describe("SubagentManager — Bug 3 clearCompleted", () => {
     await manager.getRecord(id)!.promise;
     const record = manager.getRecord(id)!;
 
-    manager.clearCompleted();
+    await manager.clearCompleted();
 
     expect(onCleared).toHaveBeenCalledOnce();
     expect(onCleared).toHaveBeenCalledWith(record);
@@ -279,9 +279,9 @@ describe("SubagentManager — Bug 3 clearCompleted", () => {
 describe("SubagentManager — consumption-aware session retention", () => {
   let manager: SubagentManager;
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks();
-    manager.dispose();
+    await manager.dispose();
   });
 
   async function spawnCompleted(): Promise<Subagent> {
@@ -327,9 +327,38 @@ describe("SubagentManager — consumption-aware session retention", () => {
     expect(manager.getRecord(record.id)).toBe(record);
   });
 
+  it("does not release a session reserved by a resume waiting for Pi idle", async () => {
+    const idle = Promise.withResolvers<void>();
+    const { factory, stub } = createSessionFactory(createMockSession(), "/tasks/agent.jsonl");
+    stub.waitUntilIdle.mockImplementation(async () => idle.promise);
+    ({ manager } = createManager({
+      createSubagentSession: factory,
+      getRunConfig: () => ({
+        defaultMaxTurns: undefined,
+        graceTurns: 5,
+        consumedSessionRetentionMinutes: 0,
+        unconsumedSessionRetentionMinutes: 0,
+      }),
+    }));
+    const id = spawnBg(manager);
+    const record = manager.getRecord(id)!;
+    await record.promise;
+    record.markConsumed(record.completedAt);
+
+    const resumed = manager.resume(id, "continue");
+    await Promise.resolve();
+    await (manager as any).cleanup();
+
+    expect(record.isSessionReady()).toBe(true);
+    expect(stub.dispose).not.toHaveBeenCalled();
+
+    idle.resolve();
+    await resumed;
+  });
+
   it("clearCompleted removes retained records for the prior parent session", async () => {
     const record = await spawnCompleted();
-    manager.clearCompleted();
+    await manager.clearCompleted();
     expect(manager.getRecord(record.id)).toBeUndefined();
   });
 });
@@ -339,8 +368,8 @@ describe("SubagentManager — consumption-aware session retention", () => {
 describe("SubagentManager — lifetime usage + compaction count are eagerly initialized", () => {
   let manager: SubagentManager;
 
-  afterEach(() => {
-    manager.dispose();
+  afterEach(async () => {
+    await manager.dispose();
   });
 
   it("spawn initializes lifetimeUsage to zeros and compactionCount to 0", () => {
@@ -432,8 +461,8 @@ describe("SubagentManager — lifetime usage + compaction count are eagerly init
 describe("SubagentManager — getRunConfig threads defaultMaxTurns and graceTurns into the turn loop", () => {
   let manager: SubagentManager;
 
-  afterEach(() => {
-    manager.dispose();
+  afterEach(async () => {
+    await manager.dispose();
   });
 
   it("passes defaultMaxTurns and graceTurns from getRunConfig to runTurnLoop", async () => {
@@ -465,8 +494,8 @@ describe("SubagentManager — getRunConfig threads defaultMaxTurns and graceTurn
 describe("SubagentManager — parent session threading", () => {
   let manager: SubagentManager;
 
-  afterEach(() => {
-    manager.dispose();
+  afterEach(async () => {
+    await manager.dispose();
   });
 
   it("threads parentSession from AgentSpawnConfig to the factory params", async () => {
@@ -490,8 +519,8 @@ describe("SubagentManager — parent session threading", () => {
 describe("SubagentManager — dependency injection via options bag", () => {
   let manager: SubagentManager;
 
-  afterEach(() => {
-    manager.dispose();
+  afterEach(async () => {
+    await manager.dispose();
   });
 
   it("calls the injected factory when spawning an agent", async () => {
@@ -543,8 +572,8 @@ describe("SubagentManager — dependency injection via options bag", () => {
 describe("SubagentManager — queueing and concurrency with injected stubs", () => {
   let manager: SubagentManager;
 
-  afterEach(() => {
-    manager.dispose();
+  afterEach(async () => {
+    await manager.dispose();
   });
 
   it("queues excess background agents and drains them in order", async () => {
@@ -676,8 +705,8 @@ describe("SubagentManager — queueing and concurrency with injected stubs", () 
 describe("SubagentManager — subagent session state", () => {
   let manager: SubagentManager;
 
-  afterEach(() => {
-    manager.dispose();
+  afterEach(async () => {
+    await manager.dispose();
   });
 
   it("sets record.subagentSession with session and outputFile after session creation", async () => {
@@ -708,8 +737,8 @@ describe("SubagentManager — subagent session state", () => {
 describe("SubagentManager — onSubagentCreated observer", () => {
   let manager: SubagentManager;
 
-  afterEach(() => {
-    manager.dispose();
+  afterEach(async () => {
+    await manager.dispose();
   });
 
   it("fires onSubagentCreated when a background agent is spawned", () => {
@@ -760,8 +789,8 @@ describe("SubagentManager — onSubagentCreated observer", () => {
 describe("SubagentManager — lifecycle observer forwarding", () => {
   let manager: SubagentManager;
 
-  afterEach(() => {
-    manager.dispose();
+  afterEach(async () => {
+    await manager.dispose();
   });
 
   it("forwards onSessionCreated from spawn options observer to Agent", async () => {
@@ -808,8 +837,8 @@ describe("SubagentManager — lifecycle observer forwarding", () => {
 describe("SubagentManager — toolCallId notification wiring", () => {
   let manager: SubagentManager;
 
-  afterEach(() => {
-    manager.dispose();
+  afterEach(async () => {
+    await manager.dispose();
   });
 
   it("wires toolCallId on spawn when provided", () => {
@@ -839,8 +868,8 @@ describe("SubagentManager — toolCallId notification wiring", () => {
 describe("SubagentManager — registerWorkspaceProvider", () => {
   let manager: SubagentManager;
 
-  afterEach(() => {
-    manager.dispose();
+  afterEach(async () => {
+    await manager.dispose();
   });
 
   function makeProvider(): WorkspaceProvider {

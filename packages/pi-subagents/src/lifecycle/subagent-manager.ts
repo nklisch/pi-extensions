@@ -8,7 +8,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
-import { debugLog, runSafely } from "#src/debug";
+import { debugLog, runDetached, runSafely } from "#src/debug";
 import type { ConcurrencyLimiter } from "#src/lifecycle/concurrency-limiter";
 import type { CreateSubagentSessionParams } from "#src/lifecycle/create-subagent-session";
 import {
@@ -89,6 +89,7 @@ export class SubagentManager {
   private getRunConfig?: () => RunConfig;
   private _workspaceProvider?: WorkspaceProvider;
   private readonly lifecycleInterceptors = new LifecycleInterceptorRegistry();
+  private disposalPromise?: Promise<void>;
 
   /** The registered workspace provider, or undefined when none is registered. */
   get workspaceProvider(): WorkspaceProvider | undefined {
@@ -105,11 +106,7 @@ export class SubagentManager {
     // Timer callbacks sit outside Pi's extension runner, so a malformed setting
     // or disposal failure must remain diagnostic rather than escape into Node.
     this.cleanupInterval = setInterval(() => {
-      try {
-        this.cleanup();
-      } catch (error) {
-        debugLog("retention cleanup", error);
-      }
+      runDetached("retention cleanup", () => this.cleanup());
     }, 60_000);
     this.cleanupInterval.unref();
   }
@@ -293,17 +290,20 @@ export class SubagentManager {
   }
 
   /** Dispose a record's session and remove it from the map. */
-  private removeRecord(id: string, record: Subagent): void {
-    record.disposeSession();
+  private async removeRecord(id: string, record: Subagent): Promise<void> {
+    // Remove first so no caller can acquire a record while its extensions are
+    // shutting down asynchronously.
     this.agents.delete(id);
+    await record.disposeSession();
   }
 
-  private cleanup() {
+  private async cleanup(): Promise<void> {
     const now = Date.now();
     const config = this.getRunConfig?.();
     const consumedMinutes = config?.consumedSessionRetentionMinutes ?? 10;
     const unconsumedMinutes = config?.unconsumedSessionRetentionMinutes ?? 720;
 
+    const releases: Promise<void>[] = [];
     for (const record of this.agents.values()) {
       if (record.isActive() || !record.isSessionReady()) continue;
       const anchor = record.consumed
@@ -314,33 +314,33 @@ export class SubagentManager {
       if (anchor + retentionMinutes * 60_000 > now) continue;
       // Keep the lightweight terminal record and result for the whole parent
       // session; only release the heavy in-memory child session.
-      record.releaseSession();
+      releases.push(record.releaseSession());
     }
+    await Promise.all(releases);
   }
 
   /**
    * Remove all completed/stopped/errored records immediately.
    * Called on session start/switch so tasks from a prior session don't persist.
    */
-  clearCompleted(): void {
+  async clearCompleted(): Promise<void> {
+    const disposals: Promise<void>[] = [];
     for (const [id, record] of this.agents) {
-      if (record.status === "running" || record.status === "queued") continue;
+      if (record.isActive()) continue;
       try {
         this.observer?.onSubagentCleared?.(record);
       } catch (err) {
         debugLog("onSubagentCleared observer", err);
       }
-      this.removeRecord(id, record);
+      disposals.push(this.removeRecord(id, record));
     }
-
+    await Promise.all(disposals);
   }
 
   /** Whether any agents are still running or queued. */
   // fallow-ignore-next-line unused-class-member
   hasRunning(): boolean {
-    return [...this.agents.values()].some(
-      r => r.status === "running" || r.status === "queued",
-    );
+    return [...this.agents.values()].some((record) => record.isActive());
   }
 
   /** Abort all running and queued agents immediately. */
@@ -376,22 +376,31 @@ export class SubagentManager {
   /** Promises of all running/queued agents that have one. */
   private pendingPromises(): Promise<void>[] {
     return [...this.agents.values()]
-      .filter(r => r.status === "running" || r.status === "queued")
+      .filter((record) => record.isActive())
       .map(r => r.promise)
       .filter((p): p is Promise<void> => p != null);
   }
 
-  dispose() {
+  dispose(): Promise<void> {
+    this.disposalPromise ??= this.disposeOnce();
+    return this.disposalPromise;
+  }
+
+  private async disposeOnce(): Promise<void> {
     clearInterval(this.cleanupInterval);
     // Lifecycle callbacks observe the shutdown signal before their registration
-    // disposer runs. Existing no-provider teardown stays synchronous. Consume
-    // async disposer failures because manager disposal is intentionally sync.
-    void this.lifecycleInterceptors.dispose().catch((error) => debugLog("lifecycle interceptor shutdown", error));
-    // Drop pending thunks
-    this.limiter.clear();
-    for (const record of this.agents.values()) {
-      record.disposeSession();
+    // disposer runs. Await their finalizers before child extension teardown.
+    try {
+      await this.lifecycleInterceptors.dispose();
+    } catch (error) {
+      debugLog("lifecycle interceptor shutdown", error);
     }
+
+    // Drop pending thunks and make every record unreachable before awaiting
+    // extension shutdown. No new resume can race teardown from this point.
+    this.limiter.clear();
+    const records = [...this.agents.values()];
     this.agents.clear();
+    await Promise.all(records.map((record) => record.disposeSession()));
   }
 }

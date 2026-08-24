@@ -1,3 +1,9 @@
+## v0.4.2
+
+### Fixed
+
+- Rebundle `@nklisch/pi-subagents` 18.1.0-nklisch.3 so child teardown emits and awaits `session_shutdown`, and resume waits for Pi idle while rejecting concurrent resume admission deterministically.
+
 ## v0.4.1
 
 ### Fixed

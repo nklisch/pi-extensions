@@ -11,6 +11,8 @@ export interface MockSession {
 	subscribe: Mock<(fn: (event: unknown) => void) => () => void>;
 	emit(event: unknown): void;
 	dispose: Mock<() => void>;
+	extensionRunner: { emit: Mock<(event: unknown) => Promise<unknown>> };
+	isIdle: boolean;
 	steer: Mock<(...args: unknown[]) => Promise<unknown>>;
 	sessionManager: { getSessionFile: Mock<() => unknown> };
 	getToolDefinition: Mock<(name: string) => unknown>;
@@ -56,8 +58,10 @@ export function createSubagentSessionStub(
 		outputFile,
 		runTurnLoop: vi.fn().mockResolvedValue({ responseText: "done", aborted: false, steered: false }),
 		resumeTurnLoop: vi.fn().mockResolvedValue("resumed"),
+		get isIdle(): boolean { return session.isIdle; },
+		waitUntilIdle: vi.fn().mockResolvedValue(undefined),
 		steer: vi.fn((message: string): Promise<void> => session.steer(message) as Promise<void>),
-		dispose: vi.fn((): void => {
+		dispose: vi.fn(async (): Promise<void> => {
 			session.dispose();
 		}),
 		getConversation: vi.fn((): string => ""),
@@ -113,6 +117,8 @@ export function createMockSession(overrides: Record<string, unknown> = {}): Mock
 			for (const fn of subscribers) fn(event);
 		},
 		dispose: vi.fn(),
+		extensionRunner: { emit: vi.fn().mockResolvedValue(undefined) },
+		isIdle: true,
 		steer: vi.fn().mockResolvedValue(undefined),
 		sessionManager: { getSessionFile: vi.fn() },
 		getToolDefinition: vi.fn((_name: string): unknown => undefined),

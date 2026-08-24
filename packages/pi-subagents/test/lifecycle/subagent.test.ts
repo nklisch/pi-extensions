@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CreateSubagentSessionParams } from "#src/lifecycle/create-subagent-session";
-import { Subagent, type SubagentExecution, type SubagentLifecycleObserver } from "#src/lifecycle/subagent";
+import { Subagent, SubagentBusyError, type SubagentExecution, type SubagentLifecycleObserver } from "#src/lifecycle/subagent";
 import type { SubagentSession, TurnLoopResult } from "#src/lifecycle/subagent-session";
 import { SubagentState, type SubagentStateInit } from "#src/lifecycle/subagent-state";
 import type { Workspace, WorkspaceProvider } from "#src/lifecycle/workspace";
@@ -438,17 +438,19 @@ describe("Subagent — failRun", () => {
 });
 
 describe("Subagent — disposeSession", () => {
-	it("disposes the wrapped SubagentSession", () => {
+	it("detaches and disposes the wrapped SubagentSession", async () => {
 		const record = makeSubagent();
 		const stub = createSubagentSessionStub();
 		record.subagentSession = toSubagentSession(stub);
-		record.disposeSession();
+		const disposing = record.disposeSession();
+		expect(record.isSessionReady()).toBe(false);
+		await disposing;
 		expect(stub.dispose).toHaveBeenCalledOnce();
 	});
 
-	it("is a no-op when no session was created", () => {
+	it("is a no-op when no session was created", async () => {
 		const record = makeSubagent();
-		expect(() => record.disposeSession()).not.toThrow();
+		await expect(record.disposeSession()).resolves.toBeUndefined();
 	});
 });
 
@@ -769,6 +771,50 @@ describe("Subagent.resume() — happy path", () => {
 		const resumed = agent.resume("continue");
 		expect(agent.promise).toBe(resumed);
 		await resumed;
+	});
+
+	it("rejects a concurrent resume before it reaches AgentSession.prompt", async () => {
+		const gate = Promise.withResolvers<void>();
+		const stub = createSubagentSessionStub();
+		stub.resumeTurnLoop.mockImplementation(async () => {
+			await gate.promise;
+			return "first resume";
+		});
+		const { agent } = createResumableAgent({ stub });
+
+		const first = agent.resume("first");
+		await expect(agent.resume("second")).rejects.toBeInstanceOf(SubagentBusyError);
+		expect(stub.resumeTurnLoop).toHaveBeenCalledOnce();
+
+		gate.resolve();
+		await first;
+		expect(agent.result).toBe("first resume");
+	});
+
+	it("waits for a stopped invocation to wind down before resuming", async () => {
+		const initialGate = Promise.withResolvers<void>();
+		const stub = createSubagentSessionStub();
+		stub.runTurnLoop.mockImplementation(async () => {
+			await initialGate.promise;
+			return { responseText: "stopped initial", aborted: false, steered: false };
+		});
+		stub.resumeTurnLoop.mockResolvedValue("resumed after wind-down");
+		const agent = createRunnableAgent({
+			createSubagentSession: async () => toSubagentSession(stub),
+		});
+		agent.start();
+		await vi.waitFor(() => expect(agent.isSessionReady()).toBe(true));
+		expect(agent.abort()).toBe(true);
+
+		const resumed = agent.resume("continue");
+		expect(stub.resumeTurnLoop).not.toHaveBeenCalled();
+
+		initialGate.resolve();
+		await resumed;
+		expect(stub.waitUntilIdle).toHaveBeenCalledOnce();
+		expect(stub.resumeTurnLoop).toHaveBeenCalledWith("continue", expect.any(AbortSignal));
+		expect(agent.status).toBe("completed");
+		expect(agent.result).toBe("resumed after wind-down");
 	});
 
 	it("combines parent cancellation with the resumed run's abort signal", async () => {

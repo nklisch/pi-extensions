@@ -55,6 +55,14 @@ export type SteerOutcome =
 	| { kind: "buffered" }
 	| { kind: "rejected"; status: SubagentStatus };
 
+/** A second prompt was requested while this record already owned an execution. */
+export class SubagentBusyError extends Error {
+	constructor(agentId: string) {
+		super(`Subagent "${agentId}" is still processing a turn. Wait for it to settle before resuming.`);
+		this.name = "SubagentBusyError";
+	}
+}
+
 /**
  * The execution machinery a Subagent needs to run. A single mandatory
  * collaborator: production (SubagentManager.spawn) always supplies it, so run()
@@ -140,6 +148,11 @@ export class Subagent {
 	private _effectiveThinkingLevel: ThinkingLevel;
 	private readonly listeners = new RunListeners();
 	private readonly workspaceBracket: WorkspaceBracket;
+	/** True while run()/runResume() owns the child prompt boundary. */
+	private executionInFlight = false;
+	/** Synchronous admission lease spanning wind-down, Pi idle, and resume. */
+	private resumeReserved = false;
+	private pendingResumeAbort?: AbortController;
 
 	subagentSession?: SubagentSession;
 	private releasedOutputFile?: string;
@@ -167,7 +180,7 @@ export class Subagent {
 	}
 
 	isActive(): boolean {
-		return this.status === "queued" || this.status === "running";
+		return this.status === "queued" || this.status === "running" || this.resumeReserved;
 	}
 
 	isRunning(): boolean {
@@ -263,6 +276,7 @@ export class Subagent {
 	 * captured internally).
 	 */
 	async run(): Promise<void> {
+		this.executionInFlight = true;
 		this.markRunning(Date.now());
 		try {
 			// Observer callbacks are extension-owned sinks, not part of the agent's
@@ -322,6 +336,8 @@ export class Subagent {
 			// One outer failure path guarantees terminal state, listener release,
 			// workspace cleanup, and the manager's completion funnel.
 			this.failRun(err);
+		} finally {
+			this.executionInFlight = false;
 		}
 	}
 
@@ -371,8 +387,65 @@ export class Subagent {
 					: "Subagent not configured for resume — missing session",
 			));
 		}
-		this._promise = this.runResume(subagentSession, prompt, signal);
-		return this._promise;
+		if (this.status === "queued" || this.status === "running" || this.resumeReserved) {
+			return Promise.reject(new SubagentBusyError(this.id));
+		}
+
+		// Reserve synchronously before the first await. This closes both the
+		// concurrent-resume race and retention's release-while-waiting race.
+		this.resumeReserved = true;
+		const previousExecution = this.executionInFlight ? this._promise : undefined;
+		const resumeAbort = new AbortController();
+		this.pendingResumeAbort = resumeAbort;
+		const resumed = this.resumeWhenReady(
+			subagentSession,
+			previousExecution,
+			prompt,
+			resumeAbort,
+			signal,
+		);
+		this._promise = resumed;
+		return resumed;
+	}
+
+	private async resumeWhenReady(
+		subagentSession: SubagentSession,
+		previousExecution: Promise<void> | undefined,
+		prompt: string,
+		resumeAbort: AbortController,
+		signal?: AbortSignal,
+	): Promise<void> {
+		const waitSignal = signal
+			? AbortSignal.any([resumeAbort.signal, signal])
+			: resumeAbort.signal;
+		let started = false;
+		try {
+			// abort() marks a record stopped before AgentSession.prompt() necessarily
+			// settles. Wait for both the record-owned invocation and Pi's stronger
+			// idle boundary instead of racing a new prompt into the old one.
+			if (previousExecution) await previousExecution;
+			waitSignal.throwIfAborted();
+			await subagentSession.waitUntilIdle(waitSignal);
+			waitSignal.throwIfAborted();
+			if (this.subagentSession !== subagentSession) {
+				throw new Error("Subagent session was released while waiting to resume");
+			}
+
+			started = true;
+			this.executionInFlight = true;
+			this.resetForResume(Date.now(), resumeAbort);
+			await this.runResume(subagentSession, prompt, signal);
+		} catch (error) {
+			if (waitSignal.aborted) this.markStopped();
+			else this.markError(error);
+			if (!started) {
+				runSafely("subagent onResumedFinished observer", () => this.execution.observer?.onResumedFinished?.(this));
+			}
+		} finally {
+			if (started) this.executionInFlight = false;
+			if (this.pendingResumeAbort === resumeAbort) this.pendingResumeAbort = undefined;
+			this.resumeReserved = false;
+		}
 	}
 
 	private async runResume(
@@ -380,7 +453,6 @@ export class Subagent {
 		prompt: string,
 		signal?: AbortSignal,
 	): Promise<void> {
-		this.resetForResume(Date.now());
 		const executionSignal = signal
 			? AbortSignal.any([this.abortController.signal, signal])
 			: this.abortController.signal;
@@ -420,7 +492,7 @@ export class Subagent {
 	/** Wait for the current queued, running, or resumed execution without cancelling it. */
 	async waitUntilSettled(signal: AbortSignal): Promise<void> {
 		const run = this._promise;
-		if (!run || !this.isActive() || signal.aborted) return;
+		if (!run || (!this.executionInFlight && !this.resumeReserved) || signal.aborted) return;
 		await settleOrAbort(run, signal);
 	}
 
@@ -535,8 +607,9 @@ export class Subagent {
 	 * then no-ops on the queued-status guard.
 	 */
 	abort(): boolean {
-		if (this.status !== "running") return false;
+		if (this.status !== "running" && !this.resumeReserved) return false;
 		this.abortController.abort();
+		this.pendingResumeAbort?.abort();
 		this.markStopped();
 		return true;
 	}
@@ -561,8 +634,8 @@ export class Subagent {
 	}
 
 	/** Reset for resume: running status, new startedAt, clear completedAt/result/error/listeners. */
-	resetForResume(startedAt: number): void {
-		this.abortController = new AbortController();
+	resetForResume(startedAt: number, controller = new AbortController()): void {
+		this.abortController = controller;
 		this.state.resetForResume(startedAt);
 		this.listeners.release();
 	}
@@ -598,18 +671,25 @@ export class Subagent {
 	}
 
 	/** Dispose the wrapped session, firing the `disposed` lifecycle event. */
-	disposeSession(): void {
-		this.subagentSession?.dispose();
+	async disposeSession(): Promise<void> {
+		const session = this.subagentSession;
+		if (!session) return;
+		// Detach first: callers must not admit a resume while asynchronous
+		// extension shutdown is in progress.
+		this.subagentSession = undefined;
+		await session.dispose();
 	}
 
 	/** Release heavy session state while preserving the transcript pointer and record. */
-	releaseSession(): void {
+	async releaseSession(): Promise<void> {
 		const session = this.subagentSession;
 		if (!session) return;
 		this.releasedOutputFile = session.outputFile;
-		session.dispose();
+		// The record becomes non-resumable atomically at release admission, not
+		// after extension shutdown finishes.
 		this.subagentSession = undefined;
 		this._sessionReleased = true;
+		await session.dispose();
 	}
 
 	/** Fail a run: mark error, release listeners, best-effort workspace dispose, notify observer. */

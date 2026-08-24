@@ -9,9 +9,9 @@ import type { SessionContext } from "#src/types";
 
 /** Narrow manager interface — only the methods lifecycle handlers call. */
 export interface LifecycleManager {
-  clearCompleted(): void;
+  clearCompleted(): Promise<void>;
   abortAll(): void;
-  dispose(): void;
+  dispose(): Promise<void>;
 }
 
 /** Narrow runtime interface — only the methods lifecycle handlers call. */
@@ -37,13 +37,13 @@ export class SessionLifecycleHandler {
     private readonly unpublishService: () => void,
   ) {}
 
-  handleSessionStart(_event: unknown, ctx: unknown): void {
+  async handleSessionStart(_event: unknown, ctx: unknown): Promise<void> {
     this.runtime.setSessionContext(ctx as SessionContext);
-    this.manager.clearCompleted();
+    await this.manager.clearCompleted();
   }
 
-  handleSessionBeforeSwitch(): void {
-    this.manager.clearCompleted();
+  async handleSessionBeforeSwitch(): Promise<void> {
+    await this.manager.clearCompleted();
   }
 
   // Cleanup order matters:
@@ -52,12 +52,11 @@ export class SessionLifecycleHandler {
   // 3. Dispose notifications — prevent terminal transitions from enqueueing follow-ups
   // 4. Abort all agents — stop running and queued work
   // 5. Dispose manager — final cleanup
-  handleSessionShutdown(): Promise<void> {
+  async handleSessionShutdown(): Promise<void> {
     this.unpublishService();
     this.runtime.clearSessionContext();
     this.disposeNotifications();
     this.manager.abortAll();
-    this.manager.dispose();
-    return Promise.resolve();
+    await this.manager.dispose();
   }
 }

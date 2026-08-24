@@ -14,7 +14,7 @@ import {
 
 export const PI_SUBAGENTS_RECEIPT: PublishedPackageReceipt = Object.freeze({
   packageName: "@nklisch/pi-subagents",
-  version: "18.1.0-nklisch.2",
+  version: "18.1.0-nklisch.3",
   license: "MIT",
   nodeEngine: ">=22",
   piPeerRange: ">=0.80.5",

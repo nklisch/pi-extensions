@@ -126,9 +126,11 @@ classDiagram
         +subscribeToUpdates(fn): unsub | undefined
         +messages: readonly unknown[]
         +effectiveThinkingLevel: ThinkingLevel
+        -executionInFlight: boolean
+        -resumeReserved: boolean
         +completeRun(result)
         +failRun(err)
-        +disposeSession()
+        +disposeSession(): Promise~void~
     }
 
     class SubagentState {
@@ -216,10 +218,12 @@ stateDiagram-v2
     running --> stopped : max turns reached
     running --> steered : steer message injected
     steered --> running : continues with message
-    completed --> running : resetForResume
-    stopped --> running : resetForResume
-    error --> running : resetForResume
-    aborted --> running : resetForResume
+    completed --> resume_wait : reserve resume
+    stopped --> resume_wait : reserve after abort
+    error --> resume_wait : reserve resume
+    aborted --> resume_wait : reserve resume
+    resume_wait --> running : prior execution settled + Pi idle
+    resume_wait --> stopped : abort resume wait
     completed --> [*]
     error --> [*]
     aborted --> [*]
@@ -233,11 +237,13 @@ stateDiagram-v2
 ```
 
 Note: `markStopped` always succeeds regardless of current status.
-Other terminal transitions guard against overwriting `stopped` — once an agent is stopped, only `resetForResume` can return it to `running`.
+Other terminal transitions guard against overwriting `stopped` — once an agent is stopped, only an admitted resume can return it to `running`.
 
-Terminal outcomes also carry orthogonal consumption state. Foreground delivery, `get_subagent_result`, and a queued completion notification mark the outcome consumed. Records remain available for the parent session; only their heavy live child sessions are released after the configured consumed or unconsumed retention window. Released records keep their result and persisted transcript pointer but cannot resume.
+Resume admission is a record-owned lease. A genuinely running or already-reserved record rejects a second resume before reaching Pi. A stopped record may still own a winding-down prompt, and Pi may still be finishing post-run continuation after the domain result looks terminal; the lease therefore spans the prior execution promise and Pi's authoritative `agent_settled`/`isIdle` boundary. Retention, abort, result waiting, and manager shutdown all treat the lease as active.
 
-Completion notifications are held while the parent agent run is active and flushed on `agent_settled`, rechecking consumption before enqueueing a follow-up. Child session creation shares the parent model runtime and leaves extension-tool registration open; a denylist removes disallowed built-ins and recursive orchestration tools across registry refreshes.
+Terminal outcomes also carry orthogonal consumption state. Foreground delivery, `get_subagent_result`, and a queued completion notification mark the outcome consumed. Records remain available for the parent session; only their heavy live child sessions are released after the configured consumed or unconsumed retention window. Released records keep their result and persisted transcript pointer but cannot resume. Release detaches the session synchronously before awaiting teardown, so it cannot race a new resume.
+
+Completion notifications are held while the parent agent run is active and flushed on `agent_settled`, rechecking consumption before enqueueing a follow-up. Child session creation shares the parent model runtime and leaves extension-tool registration open; a denylist removes disallowed built-ins and recursive orchestration tools across registry refreshes. Child teardown mirrors Pi's managed root lifecycle: it emits and awaits `session_shutdown` before `AgentSession.dispose()` revokes extension contexts, then publishes the child `disposed` event.
 
 ## Execution flow
 
@@ -391,7 +397,7 @@ They declare this package as an optional peer dependency and use dynamic import 
 - `SubagentManager` — spawn, abort, resume, collection management, observer wiring.
 - `ConcurrencyLimiter` — background admission gate: schedules run thunks FIFO against a configurable concurrency limit.
 - `createSubagentSession` — assembly factory: session creation and extension binding; returns a born-complete `SubagentSession`.
-- `SubagentSession` — the born-complete child session: drives the turn loop (`runTurnLoop`/`resumeTurnLoop`), steers, and disposes (firing `disposed` at true session disposal, so resume executions are registry-detected).
+- `SubagentSession` — the born-complete child session: drives turn loops, exposes Pi's idle boundary, steers, and performs idempotent asynchronous teardown (`session_shutdown` → `AgentSession.dispose()` → child `disposed`).
 - `child-lifecycle` — publishes the child-execution lifecycle (`spawning`, `session-created` before `bindExtensions()`, `completed`, `disposed`) on `pi.events`.
   Reactive consumers subscribe: `@gotgenes/pi-permission-system` registers each child session on `session-created` and unregisters it on `disposed`.
   This replaced the former outbound `permission-bridge` (#261, [ADR-0002]) — the core no longer looks up a named consumer.

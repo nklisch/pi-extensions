@@ -268,9 +268,11 @@ Excess agents are automatically queued and start as running agents complete. The
 
 Foreground agents bypass the queue — they block the parent anyway. Completion nudges are held while the parent is running and flushed at the parent run boundary, preventing a pulled result from also arriving as a duplicate notification.
 
+Resume requests are serialized per retained session. A second request while a turn is genuinely active gets a deterministic busy result; after an abort or extension-driven continuation, resume waits for both the prior invocation and Pi's authoritative idle boundary instead of racing `AgentSession.prompt()`. Session teardown likewise emits and awaits `session_shutdown` before Pi revokes child extension contexts, allowing child-owned processes and timers to stop cleanly.
+
 ## Persistent Settings
 
-Runtime tuning values set via `/subagents:settings` persist across pi restarts. Terminal records remain available for the whole parent session. Their heavy live sessions are released after the consumed or unconsumed retention window; the result and persisted transcript pointer remain available.
+Runtime tuning values set via `/subagents:settings` persist across pi restarts. Terminal records remain available for the whole parent session. Their heavy live sessions are released after the consumed or unconsumed retention window; the result and persisted transcript pointer remain available, but a released session cannot resume without starting a new subagent. A completion notification, foreground result, or `get_subagent_result` collection marks a result consumed, so the shorter consumed window normally governs after delivery.
 Two files, merged on load:
 
 - **Global:** `~/.pi/agent/subagents.json` — your machine-wide defaults.

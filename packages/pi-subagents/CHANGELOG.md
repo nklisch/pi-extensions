@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [18.1.0-nklisch.3] - 2026-08-24
+
+### Fixed
+
+- Emit and await child `session_shutdown` before disposing `AgentSession`, so child extensions cancel detached work before Pi invalidates their contexts.
+- Serialize resume admission and wait through aborted-turn wind-down and Pi's authoritative idle boundary, preventing false `Agent is already processing` failures and concurrent resume races.
+
 ## [18.1.0-nklisch.2] - 2026-08-23
 
 ### Fixed

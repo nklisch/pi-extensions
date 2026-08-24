@@ -7,6 +7,7 @@ import { AgentTypeRegistry } from "#src/config/agent-types";
 import { THINKING_LEVELS_DESCRIPTION } from "#src/config/thinking-levels";
 import type { ParentSnapshot } from "#src/lifecycle/parent-snapshot";
 import type { AgentSpawnConfig } from "#src/lifecycle/subagent-manager";
+import { SubagentBusyError } from "#src/lifecycle/subagent";
 import { spawnBackground } from "#src/tools/background-spawner";
 import { runForeground } from "#src/tools/foreground-runner";
 import { buildAgentGuidelines, buildDetails, buildTypeListText, textResult } from "#src/tools/helpers";
@@ -97,11 +98,17 @@ export class AgentTool {
 						: `Agent "${params.resume}" has no active session to resume.`,
 				);
 			}
-			const record = await this.manager.resume(
-				params.resume as string,
-				params.prompt as string,
-				signal ?? new AbortController().signal,
-			);
+			let record: Subagent | undefined;
+			try {
+				record = await this.manager.resume(
+					params.resume as string,
+					params.prompt as string,
+					signal ?? new AbortController().signal,
+				);
+			} catch (error) {
+				if (error instanceof SubagentBusyError) return textResult(error.message);
+				throw error;
+			}
 			if (!record) {
 				return textResult(`Failed to resume agent "${params.resume}".`);
 			}
