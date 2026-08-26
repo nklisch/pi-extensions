@@ -4,7 +4,7 @@ import type { DirectToolSpec, McpAdapterOptions, McpConfig, PromptMetadata } fro
 import type { McpOAuthRuntime } from "./mcp-auth-flow.ts";
 import { Type, type TSchema } from "typebox";
 import { showStatus, showTools, showPrompts, reconnectServer, reconnectServers, authenticateServer, logoutServer, openMcpAuthPanel, openMcpPanel, openMcpSetup } from "./commands.ts";
-import { cloneMcpConfig, loadMcpConfig, writeProjectServerDisabledOverride } from "./config.ts";
+import { cloneMcpConfig, loadMcpConfig, mergeMcpConfigs, writeProjectServerDisabledOverride } from "./config.ts";
 import { buildProxyDescription, createDirectToolExecutor, getMissingConfiguredDirectToolServers, resolveDirectTools } from "./direct-tools.ts";
 import { flushMetadataCache, initializeMcp, updateStatusBar } from "./init.ts";
 import { loadMetadataCache, type MetadataCache } from "./metadata-cache.ts";
@@ -63,6 +63,7 @@ function optionalNumber(options: { minimum?: number; description: string }): TSc
 
 function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
   const sessionConfig = options.config !== undefined ? cloneMcpConfig(options.config) : undefined;
+  const sessionOverlay = options.configOverlay !== undefined ? cloneMcpConfig(options.configOverlay) : undefined;
   const programmaticConfig = sessionConfig !== undefined;
   let state: McpExtensionState | null = null;
   let initPromise: Promise<McpExtensionState> | null = null;
@@ -112,9 +113,12 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
   const earlyConfigPath = programmaticConfig
     ? undefined
     : options.configPath ?? getConfigPathFromArgv();
-  const earlyConfig = programmaticConfig
+  const discoveredEarlyConfig = programmaticConfig
     ? cloneMcpConfig(sessionConfig)
     : loadMcpConfig(earlyConfigPath);
+  const earlyConfig = sessionOverlay === undefined
+    ? discoveredEarlyConfig
+    : mergeMcpConfigs(discoveredEarlyConfig, cloneMcpConfig(sessionOverlay));
   const earlyCache = loadMetadataCache();
   const envRaw = process.env.MCP_DIRECT_TOOLS;
   const envDirectToolOverride = envRaw?.split(",").map(s => s.trim()).filter(Boolean);
@@ -273,10 +277,11 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
 
   function startInitialization(ctx: ExtensionContext, owner: McpRuntimeOwner, oauthRuntime: McpOAuthRuntime, generation: number, staleReason: string): Promise<void> {
     const promise = initializeMcp(pi, ctx, owner, {
-      ...(programmaticConfig || options.configPath !== undefined
+      ...(programmaticConfig || sessionOverlay !== undefined || options.configPath !== undefined
         ? {
             ...(earlyConfigPath !== undefined ? { configPath: earlyConfigPath } : {}),
             ...(sessionConfig !== undefined ? { config: sessionConfig } : {}),
+            ...(sessionOverlay !== undefined ? { configOverlay: sessionOverlay } : {}),
           }
         : {}),
       oauthRuntime,
@@ -866,11 +871,16 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
 }
 
 export function createMcpAdapter(options: McpAdapterOptions = {}) {
+  if (options.config !== undefined && options.configOverlay !== undefined) {
+    throw new TypeError("config and configOverlay are mutually exclusive");
+  }
   const factoryConfig = options.config !== undefined ? cloneMcpConfig(options.config) : undefined;
+  const factoryOverlay = options.configOverlay !== undefined ? cloneMcpConfig(options.configOverlay) : undefined;
   return function mcpAdapter(pi: ExtensionAPI) {
     installMcpAdapter(pi, {
       ...(options.configPath !== undefined ? { configPath: options.configPath } : {}),
       ...(factoryConfig !== undefined ? { config: cloneMcpConfig(factoryConfig) } : {}),
+      ...(factoryOverlay !== undefined ? { configOverlay: cloneMcpConfig(factoryOverlay) } : {}),
     });
   };
 }

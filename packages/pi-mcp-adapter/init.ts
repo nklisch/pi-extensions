@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { McpExtensionState } from "./state.ts";
 import { isServerDisabled, type McpAdapterOptions, type PromptMetadata, type ToolMetadata } from "./types.ts";
 import { existsSync } from "node:fs";
-import { cloneMcpConfig, loadMcpConfig } from "./config.ts";
+import { cloneMcpConfig, loadMcpConfig, mergeMcpConfigs } from "./config.ts";
 import { ConsentManager } from "./consent-manager.ts";
 import { McpLifecycleManager } from "./lifecycle.ts";
 import {
@@ -111,9 +111,12 @@ export async function initializeMcp(
   const initialSignal = ctx.signal;
   const ui = rawUi ? createOwnedUi(rawUi, owner) : undefined;
   const runtimeSignal = combineAbortSignals(owner.signal, initialSignal);
-  const config = options.config !== undefined
+  const discoveredConfig = options.config !== undefined
     ? cloneMcpConfig(options.config)
     : loadMcpConfig(configPath, cwd);
+  const config = options.configOverlay === undefined
+    ? discoveredConfig
+    : mergeMcpConfigs(discoveredConfig, cloneMcpConfig(options.configOverlay));
   const authStorageOptions = getAuthStorageOptions(config.settings?.oauthDir, cwd);
 
   const ownsOAuthRuntime = options.oauthRuntime === undefined;

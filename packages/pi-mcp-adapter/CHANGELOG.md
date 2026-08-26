@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.21.0-nklisch.2] - 2026-08-26
+
+### Added
+
+- Add `configOverlay` to the standalone adapter factory. Integrations can add in-memory MCP servers while retaining the user's normal global/project file discovery, settings, imports, and management behavior; complete isolated `config` remains available and is mutually exclusive with the overlay.
+
 ## [2.21.0-nklisch.1] - 2026-08-23
 
 ### Fixed

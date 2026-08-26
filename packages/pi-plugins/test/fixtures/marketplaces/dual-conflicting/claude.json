@@ -1,7 +1,0 @@
-{
-  "name": "shared-catalog",
-  "plugins": [
-    { "name": "shared", "source": "./plugins/one", "version": "1" },
-    { "name": "claude-only", "source": "./plugins/claude-only" }
-  ]
-}

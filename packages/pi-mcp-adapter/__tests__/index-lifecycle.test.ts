@@ -10,6 +10,11 @@ const mocks = vi.hoisted(() => ({
   shutdownOAuth: vi.fn().mockResolvedValue(undefined),
   loadMcpConfig: vi.fn(() => ({ mcpServers: {} })),
   cloneMcpConfig: vi.fn((config: unknown) => structuredClone(config)),
+  mergeMcpConfigs: vi.fn((base: any, overlay: any) => ({
+    ...base,
+    ...overlay,
+    mcpServers: { ...base.mcpServers, ...overlay.mcpServers },
+  })),
   loadMetadataCache: vi.fn(() => null),
   buildProxyDescription: vi.fn(() => "MCP gateway"),
   createDirectToolExecutor: vi.fn(() => vi.fn()),
@@ -58,6 +63,7 @@ vi.mock("../mcp-auth-flow.ts", () => ({
 vi.mock("../config.ts", () => ({
   loadMcpConfig: mocks.loadMcpConfig,
   cloneMcpConfig: mocks.cloneMcpConfig,
+  mergeMcpConfigs: mocks.mergeMcpConfigs,
   writeProjectServerDisabledOverride: mocks.writeProjectServerDisabledOverride,
 }));
 
@@ -173,6 +179,11 @@ describe("mcpAdapter session lifecycle", () => {
     mocks.shutdownOAuth.mockResolvedValue(undefined);
     mocks.loadMcpConfig.mockReturnValue({ mcpServers: {} });
     mocks.cloneMcpConfig.mockImplementation((config: unknown) => structuredClone(config));
+    mocks.mergeMcpConfigs.mockImplementation((base: any, overlay: any) => ({
+      ...base,
+      ...overlay,
+      mcpServers: { ...base.mcpServers, ...overlay.mcpServers },
+    }));
     mocks.loadMetadataCache.mockReturnValue(null);
     mocks.buildProxyDescription.mockReturnValue("MCP gateway");
     mocks.createDirectToolExecutor.mockReturnValue(vi.fn());
@@ -701,6 +712,32 @@ describe("mcpAdapter session lifecycle", () => {
       mcpServers: { first: { url: "https://first.example.com/mcp" } },
     });
     expect(mocks.resolveDirectTools.mock.calls.at(-1)?.[0]).toEqual(secondConfig);
+  });
+
+  it("overlays factory servers on normal file discovery without entering isolated config mode", async () => {
+    mocks.initializeMcp.mockResolvedValue(createState());
+    const discovered = { mcpServers: { user: { command: "user" } }, settings: { disableProxyTool: false } };
+    mocks.loadMcpConfig.mockReturnValue(discovered);
+    const { createMcpAdapter } = await import("../index.ts");
+    const { api, handlers } = createPi();
+    createMcpAdapter({ configOverlay: { mcpServers: { plugin: { command: "plugin" } } } })(api);
+
+    expect(mocks.resolveDirectTools.mock.calls.at(-1)?.[0]).toMatchObject({
+      mcpServers: { user: { command: "user" }, plugin: { command: "plugin" } },
+      settings: { disableProxyTool: false },
+    });
+    await handlers.get("session_start")?.({}, { hasUI: false });
+    expect(mocks.initializeMcp).toHaveBeenCalledWith(
+      api,
+      expect.any(Object),
+      expect.any(Object),
+      expect.objectContaining({ configOverlay: { mcpServers: { plugin: { command: "plugin" } } } }),
+    );
+  });
+
+  it("rejects a complete config combined with an overlay", async () => {
+    const { createMcpAdapter } = await import("../index.ts");
+    expect(() => createMcpAdapter({ config: { mcpServers: {} }, configOverlay: { mcpServers: {} } })).toThrow(/mutually exclusive/iu);
   });
 
   it("gives configPath precedence without changing the default argv path", async () => {

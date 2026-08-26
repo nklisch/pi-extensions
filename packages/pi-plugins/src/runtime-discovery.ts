@@ -1,0 +1,279 @@
+import { lstat, mkdir, readFile, readdir, realpath } from "node:fs/promises";
+import { join } from "node:path";
+import { assertNoSymlinks, assertSafeName, resolveContainedExistingPath } from "./paths.js";
+import type {
+  DiscoveredPlugin,
+  InstalledPluginInfo,
+  PluginDiagnostic,
+  PluginHookCommand,
+  PluginHostPaths,
+  RuntimeSnapshot,
+  SupportedHookEvent,
+} from "./types.js";
+import { SUPPORTED_HOOK_EVENTS } from "./types.js";
+
+function record(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function diagnostic(scope: string, error: unknown): PluginDiagnostic {
+  return Object.freeze({ scope, message: error instanceof Error ? error.message : String(error), cause: error });
+}
+
+async function optionalJson(path: string): Promise<{ value?: unknown; error?: unknown }> {
+  try {
+    return { value: JSON.parse(await readFile(path, "utf8")) as unknown };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    return { error };
+  }
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    const stat = await lstat(path);
+    return stat.isDirectory() && !stat.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+async function isFile(path: string): Promise<boolean> {
+  try {
+    const stat = await lstat(path);
+    return stat.isFile() && !stat.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+async function containsSkillFile(root: string): Promise<boolean> {
+  if (!await isDirectory(root)) return false;
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) continue;
+    const child = join(root, entry.name);
+    if (entry.isFile() && entry.name === "SKILL.md") return true;
+    if (entry.isDirectory() && !entry.name.startsWith(".") && await containsSkillFile(child)) return true;
+  }
+  return false;
+}
+
+function timeoutMilliseconds(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return 10_000;
+  // Claude hook metadata expresses timeout in seconds. Keep a practical upper
+  // bound so a malformed catalog cannot make Pi wait indefinitely.
+  return Math.min(Math.max(value * 1_000, 100), 10 * 60 * 1_000);
+}
+
+function hookEvent(value: string): value is SupportedHookEvent {
+  return (SUPPORTED_HOOK_EVENTS as readonly string[]).includes(value);
+}
+
+function parseHooks(value: unknown, scope: string): { hooks: PluginHookCommand[]; diagnostics: PluginDiagnostic[] } {
+  const diagnostics: PluginDiagnostic[] = [];
+  if (!record(value)) throw new Error("hooks document must be an object");
+  const declaration = record(value.hooks) ? value.hooks : value;
+  const hooks: PluginHookCommand[] = [];
+  for (const [eventName, groupsValue] of Object.entries(declaration)) {
+    if (!hookEvent(eventName)) {
+      diagnostics.push(diagnostic(`${scope}.${eventName}`, new Error(`unsupported hook event: ${eventName}`)));
+      continue;
+    }
+    const groups = Array.isArray(groupsValue) ? groupsValue : [groupsValue];
+    for (const [groupIndex, groupValue] of groups.entries()) {
+      if (!record(groupValue)) {
+        diagnostics.push(diagnostic(`${scope}.${eventName}[${groupIndex}]`, new Error("hook group must be an object")));
+        continue;
+      }
+      const matcher = typeof groupValue.matcher === "string" ? groupValue.matcher : undefined;
+      const commands = Array.isArray(groupValue.hooks) ? groupValue.hooks : [groupValue.hooks];
+      for (const [commandIndex, commandValue] of commands.entries()) {
+        if (!record(commandValue) || commandValue.type !== "command" || typeof commandValue.command !== "string" || commandValue.command.trim().length === 0) {
+          diagnostics.push(diagnostic(`${scope}.${eventName}[${groupIndex}].hooks[${commandIndex}]`, new Error("only non-empty command hooks are supported")));
+          continue;
+        }
+        hooks.push(Object.freeze({
+          event: eventName,
+          ...(matcher === undefined ? {} : { matcher }),
+          command: commandValue.command,
+          timeoutMs: timeoutMilliseconds(commandValue.timeout),
+        }));
+      }
+    }
+  }
+  return { hooks, diagnostics };
+}
+
+async function declaredPath(root: string, value: unknown, scope: string): Promise<string | undefined> {
+  if (typeof value !== "string") return undefined;
+  return resolveContainedExistingPath(root, value, scope);
+}
+
+async function readManifest(root: string, relativePath: string, diagnostics: PluginDiagnostic[]): Promise<Record<string, unknown> | undefined> {
+  const path = join(root, relativePath);
+  const result = await optionalJson(path);
+  if (result.error !== undefined) {
+    diagnostics.push(diagnostic(`${relativePath}`, result.error));
+    return undefined;
+  }
+  if (result.value === undefined) return undefined;
+  if (!record(result.value)) {
+    diagnostics.push(diagnostic(relativePath, new Error("plugin manifest must be an object")));
+    return undefined;
+  }
+  return result.value;
+}
+
+async function discoverPlugin(root: string, marketplace: string, name: string, data: string): Promise<DiscoveredPlugin> {
+  const diagnostics: PluginDiagnostic[] = [];
+  try {
+    await assertNoSymlinks(root);
+  } catch (error) {
+    diagnostics.push(diagnostic("bundle", error));
+    return Object.freeze({
+      info: Object.freeze({ marketplace, name, root, data, enabled: false }),
+      skillPaths: [],
+      hooks: [],
+      diagnostics: Object.freeze(diagnostics),
+    });
+  }
+  const receiptResult = await optionalJson(join(root, ".pi-plugin.json"));
+  if (receiptResult.error !== undefined) diagnostics.push(diagnostic(".pi-plugin.json", receiptResult.error));
+  const receipt = record(receiptResult.value) ? Object.freeze({ ...receiptResult.value }) : undefined;
+  const disabled = await isFile(join(root, ".disabled"));
+  const info: InstalledPluginInfo = Object.freeze({
+    marketplace,
+    name,
+    root,
+    data,
+    enabled: !disabled,
+    ...(receipt === undefined ? {} : { receipt }),
+  });
+  if (disabled) return Object.freeze({ info, skillPaths: [], hooks: [], diagnostics: Object.freeze(diagnostics) });
+
+  const skillPaths: string[] = [];
+  if (await isFile(join(root, "SKILL.md"))) skillPaths.push(root);
+  const skillsRoot = join(root, "skills");
+  if (await containsSkillFile(skillsRoot)) skillPaths.push(skillsRoot);
+
+  const manifests: Record<string, unknown>[] = [];
+  for (const relativePath of [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
+    const manifest = await readManifest(root, relativePath, diagnostics);
+    if (manifest !== undefined) manifests.push(manifest);
+  }
+
+  const hookPaths = new Set<string>();
+  const conventionalHooks = join(root, "hooks/hooks.json");
+  if (await isFile(conventionalHooks)) hookPaths.add(conventionalHooks);
+  for (const manifest of manifests) {
+    if (typeof manifest.hooks === "string") {
+      try {
+        hookPaths.add(await declaredPath(root, manifest.hooks, "manifest hooks path") ?? "");
+      } catch (error) {
+        diagnostics.push(diagnostic("manifest hooks path", error));
+      }
+    }
+  }
+  const hooks: PluginHookCommand[] = [];
+  for (const path of hookPaths) {
+    if (path.length === 0) continue;
+    const result = await optionalJson(path);
+    if (result.error !== undefined) {
+      diagnostics.push(diagnostic(path, result.error));
+      continue;
+    }
+    if (result.value === undefined) continue;
+    try {
+      const parsed = parseHooks(result.value, path);
+      hooks.push(...parsed.hooks);
+      diagnostics.push(...parsed.diagnostics);
+    } catch (error) {
+      diagnostics.push(diagnostic(path, error));
+    }
+  }
+
+  const mcpDocuments: unknown[] = [];
+  const conventionalMcp = join(root, ".mcp.json");
+  if (await isFile(conventionalMcp)) mcpDocuments.push(conventionalMcp);
+  for (const manifest of manifests) {
+    const declaration = manifest.mcpServers ?? manifest.mcp;
+    if (typeof declaration === "string") {
+      try {
+        const path = await declaredPath(root, declaration, "manifest MCP path");
+        if (path !== undefined) mcpDocuments.push(path);
+      } catch (error) {
+        diagnostics.push(diagnostic("manifest MCP path", error));
+      }
+    } else if (record(declaration)) {
+      mcpDocuments.push(declaration);
+    }
+  }
+  const mcpServers: Record<string, unknown> = {};
+  for (const document of mcpDocuments) {
+    let value: unknown = document;
+    if (typeof document === "string") {
+      const result = await optionalJson(document);
+      if (result.error !== undefined) {
+        diagnostics.push(diagnostic(document, result.error));
+        continue;
+      }
+      value = result.value;
+    }
+    if (!record(value)) {
+      diagnostics.push(diagnostic("MCP", new Error("MCP document must be an object")));
+      continue;
+    }
+    const servers = record(value.mcpServers) ? value.mcpServers : value;
+    for (const [serverName, server] of Object.entries(servers)) {
+      if (!record(server)) {
+        diagnostics.push(diagnostic(`MCP.${serverName}`, new Error("MCP server declaration must be an object")));
+        continue;
+      }
+      mcpServers[serverName] = server;
+    }
+  }
+
+  return Object.freeze({
+    info,
+    skillPaths: Object.freeze(skillPaths),
+    hooks: Object.freeze(hooks),
+    ...(Object.keys(mcpServers).length === 0 ? {} : { mcp: Object.freeze(mcpServers) }),
+    diagnostics: Object.freeze(diagnostics),
+  });
+}
+
+export async function scanInstalledPlugins(paths: PluginHostPaths): Promise<RuntimeSnapshot> {
+  const plugins: DiscoveredPlugin[] = [];
+  const diagnostics: PluginDiagnostic[] = [];
+  let marketplaces: string[] = [];
+  try { marketplaces = (await readdir(paths.plugins, { withFileTypes: true })).filter((item) => item.isDirectory() && !item.isSymbolicLink() && !item.name.startsWith(".")).map((item) => item.name); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") diagnostics.push(diagnostic("plugins", error));
+  }
+  for (const marketplace of marketplaces.sort()) {
+    let pluginEntries;
+    try { pluginEntries = await readdir(join(paths.plugins, marketplace), { withFileTypes: true }); } catch (error) {
+      diagnostics.push(diagnostic(`plugins/${marketplace}`, error));
+      continue;
+    }
+    for (const entry of pluginEntries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.name.startsWith(".") || !entry.isDirectory() || entry.isSymbolicLink()) continue;
+      try {
+        const name = assertSafeName(entry.name, "plugin name");
+        const root = await realpath(join(paths.plugins, marketplace, name));
+        const data = join(paths.data, marketplace, name);
+        await mkdir(data, { recursive: true });
+        const discovered = await discoverPlugin(root, marketplace, name, data);
+        plugins.push(discovered);
+        diagnostics.push(...discovered.diagnostics);
+      } catch (error) {
+        diagnostics.push(diagnostic(`${marketplace}/${entry.name}`, error));
+      }
+    }
+  }
+  const skillPaths = [...new Set(plugins.filter((plugin) => plugin.info.enabled).flatMap((plugin) => plugin.skillPaths))];
+  return Object.freeze({
+    plugins: Object.freeze(plugins),
+    skillPaths: Object.freeze(skillPaths),
+    diagnostics: Object.freeze(diagnostics),
+  });
+}

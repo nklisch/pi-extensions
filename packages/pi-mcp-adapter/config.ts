@@ -283,7 +283,7 @@ export function loadMcpConfig(overridePath?: string, cwd = process.cwd()): McpCo
   for (const source of sourceSpecs) {
     const loaded = readValidatedConfig(source.readPath, `MCP config from ${source.readPath}`);
     if (!loaded) continue;
-    config = mergeConfigs(config, expandImports(loaded, cwd));
+    config = mergeMcpConfigs(config, expandImports(loaded, cwd));
   }
 
   return config;
@@ -304,7 +304,7 @@ function loadDiscoveredHostConfigs(cwd: string): McpConfig {
   for (const importKind of Object.keys(IMPORT_PATHS) as ImportKind[]) {
     const imported = loadImportedConfig(importKind, cwd, `Failed to discover imported MCP config from ${importKind}:`);
     if (!imported) continue;
-    config = mergeConfigs(config, {
+    config = mergeMcpConfigs(config, {
       mcpServers: extractServers(imported.value, importKind),
     });
   }
@@ -428,7 +428,7 @@ function getConfigSources(overridePath?: string, cwd = process.cwd()): ConfigSou
   return sources;
 }
 
-function mergeConfigs(base: McpConfig, next: McpConfig): McpConfig {
+export function mergeMcpConfigs(base: McpConfig, next: McpConfig): McpConfig {
   const imports = mergeImports(base.imports, next.imports);
   const settings = next.settings ? { ...base.settings, ...next.settings } : base.settings;
   return {
@@ -1020,13 +1020,13 @@ export function writeProjectServerDisabledOverride(
     for (const source of getConfigSources(overridePath, cwd)) {
       if (source.readPath === filePath) continue;
       const loaded = readValidatedConfig(source.readPath, `MCP config from ${source.readPath}`);
-      if (loaded) lowerConfig = mergeConfigs(lowerConfig, expandImports(loaded, cwd));
+      if (loaded) lowerConfig = mergeMcpConfigs(lowerConfig, expandImports(loaded, cwd));
     }
     if (raw.imports !== undefined) {
       if (!Array.isArray(raw.imports) || raw.imports.some((kind) => typeof kind !== "string" || !Object.hasOwn(IMPORT_PATHS, kind))) {
         throw new Error(`Failed to update project MCP override at ${filePath}: imports contains an unsupported config kind`);
       }
-      lowerConfig = mergeConfigs(lowerConfig, expandImports({ mcpServers: {}, imports: raw.imports as ImportKind[] }, cwd));
+      lowerConfig = mergeMcpConfigs(lowerConfig, expandImports({ mcpServers: {}, imports: raw.imports as ImportKind[] }, cwd));
     }
     if (isServerDisabled(lowerConfig.mcpServers[serverName])) next.disabled = false;
   }

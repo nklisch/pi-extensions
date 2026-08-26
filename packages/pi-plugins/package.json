@@ -1,8 +1,8 @@
 {
   "name": "@nklisch/pi-plugins",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "private": false,
-  "description": "Native marketplace and plugin lifecycle management for Pi, with Claude Code and Codex compatibility.",
+  "description": "A small filesystem-first marketplace and plugin host for Pi.",
   "license": "MIT",
   "author": "Nathan Klisch",
   "repository": {
@@ -54,34 +54,22 @@
     "clean:dist": "node -e \"import('node:fs/promises').then(fs => fs.rm('dist', { recursive: true, force: true }))\"",
     "build": "npm run clean && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "boundaries": "depcruise src --config .dependency-cruiser.cjs",
     "test:unit": "vitest run",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts",
-    "test:e2e:production": "vitest run --config vitest.e2e.config.ts test/e2e/production",
-    "test:e2e:production:final": "vitest run --config vitest.e2e.config.ts test/e2e/production/final-packed-registry.e2e.test.ts",
-    "test:e2e:infrastructure": "vitest run --config vitest.e2e.config.ts test/e2e/infrastructure/packed-pi-smoke.e2e.test.ts",
-    "test:package": "npm run build && node test/compiled-package-import.mjs && node test/compiled-pi-package-import.mjs && node test/packed-pi-consumer.mjs",
-    "test": "npm run typecheck && npm run boundaries && npm run test:unit && npm run test:package"
+    "test:package": "npm run build && node test/compiled-package-import.mjs && node test/compiled-pi-package-import.mjs",
+    "test": "npm run typecheck && npm run test:unit && npm run test:package"
   },
   "bundledDependencies": [
     "@nklisch/pi-subagents"
   ],
   "dependencies": {
-    "@nklisch/pi-mcp-adapter": "2.21.0-nklisch.1",
+    "@nklisch/pi-mcp-adapter": "2.21.0-nklisch.2",
     "@nklisch/pi-subagents": "18.1.0-nklisch.3",
-    "jiti": "2.7.0",
-    "semver": "7.8.1",
-    "smol-toml": "^1.7.0",
-    "yaml": "2.9.0",
-    "zod": "^4.0.0"
+    "jiti": "2.7.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.82.0",
     "@earendil-works/pi-tui": "0.82.0",
-    "@swc/core": "^1.15.43",
     "@types/node": "^24.0.0",
-    "@types/semver": "^7.7.1",
-    "dependency-cruiser": "^17.0.0",
     "typescript": ">=7.0.0 <8",
     "vitest": "^4.0.0"
   },

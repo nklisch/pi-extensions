@@ -1,6 +1,0 @@
-{
-  "analytics": {
-    "url": "https://example.invalid/analytics",
-    "auth": {"oauth": {"client_id": "opaque"}}
-  }
-}

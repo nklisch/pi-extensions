@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.4
+
+### Changed
+
+- Rebundle the filesystem-first `@nklisch/pi-plugins` 0.5.0 and `@nklisch/pi-mcp-adapter` 2.21.0-nklisch.2. Plugin MCP servers now overlay normal user/project MCP files instead of replacing file discovery.
+
 ## v0.2.3
 
 ### Fixed

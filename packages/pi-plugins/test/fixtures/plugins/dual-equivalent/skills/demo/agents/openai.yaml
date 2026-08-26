@@ -1,4 +1,0 @@
-interface:
-  display_name: Demo
-policy:
-  allow_implicit_invocation: true

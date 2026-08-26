@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-enhanced",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Pi, enhanced — one install for nklisch's full harness: policy-gated command review, plugin marketplace, subagents, background tasks, research tools, search, model modes, and a curated UX set.",
   "author": {
     "name": "nklisch"
@@ -70,7 +70,7 @@
     "@nklisch/pi-clearance": "^0",
     "@nklisch/pi-conveniences": "^0",
     "@nklisch/pi-fff-compat": "^0",
-    "@nklisch/pi-mcp-adapter": "2.21.0-nklisch.1",
+    "@nklisch/pi-mcp-adapter": "2.21.0-nklisch.2",
     "@nklisch/pi-model-modes": "^0",
     "@nklisch/pi-plugins": "^0",
     "@sinclair/typebox": "^0.34.49",

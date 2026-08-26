@@ -1,20 +1,9 @@
 # Pi Plugins
 
-Native plugin management for [Pi](https://github.com/badlogic/pi-mono), with compatibility for supported Claude Code and Codex marketplaces.
-
-`@nklisch/pi-plugins` provides:
-
-- marketplace discovery, inspection, and read-only foreign-state adoption;
-- transactional install, enable, disable, update, recovery, and uninstall;
-- Agent Skills and command-hook activation;
-- receipt-qualified MCP and subagent lifecycle integration;
-- deterministic `/plugins` commands and a Pi-native interactive manager;
-- offline-safe startup, update policy, diagnostics, and multiprocess coordination.
-
-## Requirements
-
-- Node.js 22.19 or newer
-- Pi 0.82.0-compatible public extension APIs
+`@nklisch/pi-plugins` is a small filesystem-first marketplace and plugin host
+for [Pi](https://github.com/badlogic/pi-mono). It installs compatible Claude
+Code and Codex plugin bundles, discovers their skills, runs their simple
+command hooks, and supplies their MCP declarations to Pi.
 
 ## Install
 
@@ -22,51 +11,85 @@ Native plugin management for [Pi](https://github.com/badlogic/pi-mono), with com
 pi install npm:@nklisch/pi-plugins
 ```
 
-Then start Pi and run `/plugins`. The manager uses the same progressive list footprint as Pi settings: choose **My Plugins**, **Discover**, **Sources**, **Updates**, or **Health**, then drill into an item and its available actions. Escape returns one level. On a clean installation, open Sources and choose **Add Source**, or use:
+Then use the concise command surface:
 
 ```text
 /plugins marketplace add nklisch/skills
-/plugins add <plugin@marketplace> --scope user
+/plugins marketplace list
+/plugins browse nklisch-skills
+/plugins install workbench@nklisch-skills --yes
+/plugins update workbench@nklisch-skills --yes
+/plugins enable workbench@nklisch-skills --yes
+/plugins disable workbench@nklisch-skills
+/plugins remove workbench@nklisch-skills --yes
 ```
 
-`/plugins add` adds the complete plugin to the selected user or project plugin list, collects any required configuration and executable trust, installs and enables it, and reloads Pi when activation changes. Use `/plugins help` for the concise command surface:
+The command uses Pi's ordinary select, input, and confirmation dialogs when
+invoked without arguments in a UI session. Installing, updating, enabling, or
+removing executable plugin content requires confirmation; pass `--yes` for
+headless use. Pi reloads after a runtime-affecting mutation.
 
-If an installed plugin's executable content changes outside a managed update (a rebuilt local source, a refreshed payload), its exact-trust grant no longer covers it and its hooks and MCP servers stop. At the next session start Pi asks whether to trust the changed content again; accepting records the grant and one `/reload` reactivates the plugin. The same remedy is available any time as the manager's **Trust plugin** action or `/plugins trust`.
+## Filesystem truth
+
+The host stores no database or lifecycle ledger. Its durable layout is:
 
 ```text
-/plugins add <plugin> --scope user|project
-/plugins remove <plugin> --scope user|project --keep-data|--delete-data
-/plugins update <plugin> --scope user|project
-/plugins enable <plugin> --scope user|project
-/plugins disable <plugin> --scope user|project
-/plugins trust <plugin> --scope user|project --yes
-/plugins list
-/plugins doctor [plugin]
-/plugins marketplace add|list|refresh|remove ...
+<agent-dir>/plugin-host/
+├── marketplaces/<name>/{source.json,checkout}
+├── plugins/<marketplace>/<plugin>/{.pi-plugin.json,.disabled?,...bundle}
+└── data/<marketplace>/<plugin>/
 ```
 
-The older `install`, `uninstall`, and `diagnose` forms remain accepted as compatibility aliases. Workflow-phase and operation-token routes remain available to automation but are intentionally omitted from normal help and completion.
+A plugin directory is installed; `.disabled` means disabled. The receipt is
+descriptive only. Refresh and install/update stage a sibling directory and
+rename it into place. Persistent plugin data is not replaced by an update and
+is retained by removal unless `--delete-data` is supplied.
 
-Marketplace registration is global; plugin installation remains user- or project-scoped. GitHub shorthand is the default marketplace source. Use `--source-kind git` or `--source-kind local-git` for those source forms. The interactive manager opens only in a TUI session.
+Marketplaces accept GitHub shorthand, Git URLs, and local repository paths.
+The host reads `.agents/plugins/marketplace.json` and
+`.claude-plugin/marketplace.json`, merges valid siblings, and supports local
+plugin declarations such as `{ "source": "local", "path": "./plugins/demo" }`
+and ordinary relative string paths. Catalog paths must remain within the
+marketplace checkout. Symlinks are rejected anywhere in a copied plugin tree,
+so catalog-controlled content cannot expose arbitrary host files.
 
-This package manages compatible foreign marketplace plugins as complete bundles. It does **not** replace Pi's package manager: use `pi list`, `pi install`, `pi update`, and `pi config` for ordinary Pi extension packages.
+## Runtime compatibility
 
-## Security
+At extension load, enabled bundles are scanned for:
 
-Pi packages execute with full local-system access. Review the source and requested plugin trust before installation. Sensitive plugin configuration currently fails closed when production cannot prove atomic operating-system credential ownership; plaintext is never retained in plugin-host state, projections, diagnostics, logs, or control output.
+- `SKILL.md` at the bundle root and skills beneath `skills/`;
+- command hooks in `hooks/hooks.json` or a simple manifest-declared hook path;
+- MCP servers in `.mcp.json` or a simple manifest-declared MCP path/object.
 
-Marketplace-derived network access is origin-authorized and DNS-pinned. Credential-bearing MCP endpoints require HTTPS; unauthenticated plaintext HTTP is limited to explicitly approved literal loopback endpoints.
+Supported Claude hook events include `SessionStart`, `SessionEnd`,
+`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`,
+`PreCompact`, `PostCompact`, and `Stop`. Hook processes receive JSON on stdin,
+the plugin root/data variables, `CLAUDE_PROJECT_DIR`, a bounded timeout, and
+cancellation. Hook failures are reported for that plugin and do not disable
+unrelated bundles. SessionStart `hookSpecificOutput.additionalContext` is
+injected into the next Pi system prompt.
 
-## Compatibility
+MCP declarations are recursively expanded for the plugin root, persistent data
+root, and project root, then passed as an in-memory `{ mcpServers }` overlay to
+`@nklisch/pi-mcp-adapter`. The adapter merges that overlay with the user's normal
+file-discovered MCP configuration. Duplicate plugin server names are qualified
+by plugin identity.
+There is no background network activity. Marketplace refresh runs only when
+requested; updating a plugin first refreshes its marketplace, then replaces the
+installed copy.
 
-The current production package pins:
+## Development
 
-- `@nklisch/pi-mcp-adapter@2.21.0-nklisch.1`
-- `@nklisch/pi-subagents@18.1.0-nklisch.3`
+```bash
+npm run typecheck
+npm run test:unit
+npm run build
+npm run test:package
+```
 
-Executable dependencies are checked against their declared package shape before import: exact name and version, license, engine and peer ranges, required exports, and declared Pi resources. The MCP and subagent packages are transitive dependencies: one top-level `pi install npm:@nklisch/pi-plugins` installs and activates both through verified wrappers, so they do not need separate `pi install` entries. The bundled subagent loader reuses Pi's already-loaded coding-agent, AI, and TUI module identities rather than installing a second Pi runtime tree. Package, API, runtime-range, or behavioral drift makes the affected capability unavailable rather than partially activating it. Subagent lifecycle conformance remains a separate qualification contract.
-
-See [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) for the complete compatibility contract.
+Node.js 22.19 or newer is required. The package keeps the bundled
+`@nklisch/pi-subagents` Pi resource available through a direct, best-effort
+loader; failure of that optional resource does not prevent plugin discovery.
 
 ## License
 

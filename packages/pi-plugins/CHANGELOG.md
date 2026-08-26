@@ -1,3 +1,16 @@
+## v0.5.0
+
+### Changed
+
+- Replace the transactional plugin lifecycle with a filesystem-first host. Marketplaces are ordinary checkouts, installed plugin directories are authoritative, `.disabled` is the complete enablement model, and plugin data is the only persistent non-reproducible state.
+- Discover skills, command hooks, and MCP declarations directly from installed bundles at extension load. Plugin MCP servers overlay the adapter's normal file discovery instead of replacing user/project MCP configuration. Mutations use temporary sibling directories and Pi's normal reload flow.
+- Replace the custom manager and control protocol with concise `/plugins` commands and Pi's built-in selection, input, and confirmation UI.
+
+### Removed
+
+- Remove SQLite state, generations, document schemas and digests, CAS, immutable revision stores, projections, convergence and garbage collection, leases, automatic-update scheduling and notices, trust ledgers, repair/rollback, project synchronization, foreign-state adoption, and host-wide degradation accounting.
+- Remove the implementation-mirroring test and E2E machinery for those deleted systems. Focused tests now cover path containment, safe copying, direct lifecycle operations, skill/hook/MCP discovery, and the Pi extension boundary.
+
 ## v0.4.2
 
 ### Fixed

@@ -521,7 +521,10 @@ export interface McpConfig {
 }
 
 export interface McpAdapterOptions {
+  /** Complete isolated configuration; file discovery is disabled. */
   config?: McpConfig;
+  /** Configuration merged over the normal file-discovered configuration. */
+  configOverlay?: McpConfig;
   configPath?: string;
 }
 

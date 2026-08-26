@@ -1,46 +1,38 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { createPackagedPluginHost } from "../composition/create-packaged-plugin-host.js";
-import { createProductionMcpRuntimeCandidate } from "../composition/create-mcp-runtime.js";
-import { createPiControlChannel } from "./pi-control-channel.js";
-import { createPluginCommandAdapter } from "./plugin-command.js";
-import { createPluginManagerLifecycle } from "./plugin-manager-lifecycle.js";
-import { createPiManagerReloadHandoff } from "./pi-manager-reload-handoff.js";
-import { createPiUpdateNotificationPublisher } from "./pi-update-notification-publisher.js";
-import { createPiControlInputPort } from "./manager/pi-control-input.js";
-import { createPluginManagerSession } from "./manager/plugin-manager-session.js";
-import { createPiTrustReview } from "./pi-trust-review.js";
+import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createMcpAdapter, type McpAdapterOptions } from "@nklisch/pi-mcp-adapter";
+import { registerPluginHooks } from "../hooks.js";
+import { createPluginHost } from "../host.js";
+import { registerPluginsCommand } from "./commands.js";
 
-/** Construct-only Pi extension entry; host startup remains session_start-owned. */
-export default async function packagedPluginHostExtension(pi: ExtensionAPI): Promise<void> {
-  const publisher = createPiUpdateNotificationPublisher({ pi });
-  // The isolated MCP candidate attaches before host startup, so its session
-  // context is available when central qualification captures environment-aware
-  // facts. It starts empty; authoritative full-bundle reconciliation remains
-  // the only source publication path.
-  const mcpCandidate = await createProductionMcpRuntimeCandidate();
-  if (mcpCandidate.kind === "verified") mcpCandidate.adapter.extension(pi);
-  // Host construction registers its lifecycle delegates before presentation.
-  // Keep the candidate's fixed explanation, but never forward its native cause
-  // into status, doctor, or any other serialized host surface.
-  const host = createPackagedPluginHost({
-    pi,
-    runtime: mcpCandidate.kind === "verified"
-      ? { mcp: mcpCandidate.adapter.runtime }
-      : { mcpUnavailable: { code: mcpCandidate.code, explanation: mcpCandidate.explanation } },
-    update: { publisher },
-  });
-  const handoff = createPiManagerReloadHandoff();
-  const manager = createPluginManagerSession({ host, handoff });
-  const channel = createPiControlChannel({ pi });
-  const command = createPluginCommandAdapter({
-    pi,
-    sourceUrl: import.meta.url,
-    host,
-    manager,
-    channel,
-    handoff,
-    createInput: (context, mode) => createPiControlInputPort({ context, mode, present: () => manager.inlinePresenter?.() }),
-  });
-  command.register();
-  createPluginManagerLifecycle({ pi, publisher, manager, command, channel, handoff, trustReview: createPiTrustReview({ host }) }).register();
+/**
+ * The extension is intentionally a load-time filesystem snapshot. Mutations
+ * write the durable layout and ask Pi to reload; there is no resident manager,
+ * scheduler, database, or convergence loop to reconcile afterward.
+ */
+export default async function filesystemPluginHostExtension(pi: ExtensionAPI): Promise<void> {
+  const host = createPluginHost(getAgentDir());
+  const snapshot = await host.scanRuntime();
+  pi.on("resources_discover", () => ({ skillPaths: [...snapshot.skillPaths] }));
+  registerPluginHooks(pi, snapshot);
+  registerPluginsCommand(pi, host);
+
+  if (snapshot.diagnostics.length > 0) {
+    pi.on("session_start", async (_event, ctx) => {
+      if (!ctx.hasUI) return;
+      for (const item of snapshot.diagnostics) ctx.ui.notify(`Plugin ${item.scope}: ${item.message}`, "warning");
+    });
+  }
+
+  try {
+    const config = await host.buildMcpConfig(snapshot);
+    if (Object.keys(config.mcpServers).length > 0) {
+      // This is deliberately the adapter's plain config entry point. The
+      // plugin host owns discovery and substitution, but not MCP lifecycle.
+      createMcpAdapter({ configOverlay: config as NonNullable<McpAdapterOptions["configOverlay"]> })(pi);
+    }
+  } catch (error) {
+    pi.on("session_start", async (_event, ctx) => {
+      if (ctx.hasUI) ctx.ui.notify(`Plugin MCP setup failed: ${error instanceof Error ? error.message : String(error)}`, "warning");
+    });
+  }
 }
