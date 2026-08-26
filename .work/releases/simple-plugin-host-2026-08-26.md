@@ -36,3 +36,15 @@ The package now contains 12 TypeScript source files (1,696 lines) and five focus
 - The real stored `nklisch/skills` marketplace was exercised in an isolated agent directory: 13 catalog plugins, Workbench skill and SessionStart hook discovery, Krometrail MCP discovery, explicit update/removal, and zero diagnostics.
 - Authoritative root `npm run check` passed and packed all release candidates, including `pi-plugins` 0.5.0, `pi-mcp-adapter` 2.21.0-nklisch.2, and `pi-enhanced` 0.2.4.
 - `git diff --check` passed.
+
+## Publication receipts
+
+Trusted-publishing workflow: [GitHub Actions run 33024148610](https://github.com/nklisch/pi-extensions/actions/runs/33024148610), successful from commit `d9052df` on 2026-08-26.
+
+Registry verification returned each exact version with a SHA-512 integrity receipt:
+
+- `@nklisch/pi-mcp-adapter@2.21.0-nklisch.2` — `sha512-zVycgXTXjW+AAWUEXZZmUaU5tyd20178Y9yOy84YKZOVLuxfc47giucHeSdEnBfV14DndgxkNMGz7BmICPGNig==`
+- `@nklisch/pi-plugins@0.5.0` — `sha512-T/5O5Sr7Bd5LRMRjRFOyeO5JXjbPkra5Cxk6PsCu2h8jmTkGWuEZjrp3B8X15GDTUtfwIhIayyHOiNCezQNuEQ==`
+- `@nklisch/pi-enhanced@0.2.4` — `sha512-0lOQSdHjkgBvAeKiKkZ/5kAdgyMLR2Cf2A4pf4r5+e+zzSqiNuK5r/SGYQVgAD/WFvLp2wLwobjuTGWvAymYQA==`
+
+The adapter's `latest` tag points to `2.21.0-nklisch.2`. Its optional `maintained` tag remains stale because npm trusted publishing authenticates package publication but not post-publish dist-tag mutation, and this machine has no interactive npm login.
