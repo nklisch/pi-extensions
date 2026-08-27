@@ -139,6 +139,35 @@ describe("SubagentManager — Bug 1 race condition (consumed state vs onComplete
     expect(sendMessage).toHaveBeenCalledOnce();
   });
 
+  it("notifies normally after an interrupted direct result wait", async () => {
+    const completion = Promise.withResolvers<void>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- Promise.withResolvers<void> is valid; rule does not allow void in generic fn call type args
+    const { factory, stub } = createSessionFactory();
+    stub.runTurnLoop.mockImplementation(async () => {
+      await completion.promise;
+      return { responseText: "Finished after interrupted wait.", aborted: false, steered: false };
+    });
+
+    const sendMessage = vi.fn();
+    const notifications = new NotificationManager(sendMessage);
+    ({ manager } = createManager({
+      createSubagentSession: factory,
+      observer: { onSubagentCompleted: (record) => notifications.sendCompletion(record) },
+    }));
+    const id = spawnBgWithToolCall(manager, "tc-1");
+    const record = manager.getRecord(id)!;
+    const controller = new AbortController();
+
+    const directWait = record.waitForResult(controller.signal);
+    await vi.waitFor(() => expect(stub.runTurnLoop).toHaveBeenCalledOnce());
+    controller.abort();
+    await directWait;
+    expect(record.hasPendingResultWait).toBe(false);
+
+    completion.resolve();
+    await record.promise;
+    expect(sendMessage).toHaveBeenCalledOnce();
+  });
+
   it("onComplete is not called for foreground agents", async () => {
     let onCompleteCalled = false;
     ({ manager } = createManager({ observer: { onSubagentCompleted: () => {

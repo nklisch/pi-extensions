@@ -157,7 +157,10 @@ export class NotificationManager implements NotificationSystem {
   ) {}
 
   sendCompletion(record: Subagent): void {
-    if (this.disposed || record.consumed) return;
+    // A blocking get-result request has already selected direct delivery for
+    // this terminal outcome. Never enqueue the same payload as a follow-up,
+    // even if Pi's parent lifecycle currently appears idle.
+    if (this.disposed || record.consumed || record.hasPendingResultWait) return;
     if (this.parentRunActive) {
       this.pendingNudges.set(record.id, record);
       return;

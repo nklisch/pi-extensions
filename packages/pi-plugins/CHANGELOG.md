@@ -1,3 +1,9 @@
+## v0.6.2
+
+### Fixed
+
+- Rebundle `@nklisch/pi-subagents` 18.1.0-nklisch.4 so blocking result retrieval and completion notifications deliver each background-agent outcome only once.
+
 ## v0.6.1
 
 ### Fixed

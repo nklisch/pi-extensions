@@ -33,8 +33,10 @@ export class GetResultTool {
 		}
 
 		// A queued record is awaitable from spawn, and a resumed record republishes
-		// its live promise. Interrupting this tool stops only the wait.
-		if (params.wait) await record.waitUntilSettled(signal);
+		// its live promise. This claim is synchronous so completion cannot race the
+		// direct result with an asynchronous follow-up notification. Interrupting
+		// this tool stops only the wait.
+		if (params.wait) await record.waitForResult(signal);
 
 		// Pull delivery: only a terminal result was actually collected.
 		if (!record.isActive()) record.markConsumed();

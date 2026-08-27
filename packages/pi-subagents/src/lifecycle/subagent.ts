@@ -127,6 +127,8 @@ export class Subagent {
 	get stoppedWhileQueued(): boolean { return this.state.stoppedWhileQueued; }
 	get consumedAt(): number | undefined { return this.state.consumedAt; }
 	get consumed(): boolean { return this.state.consumed; }
+	/** A blocking get-result call will deliver the next terminal outcome directly. */
+	get hasPendingResultWait(): boolean { return this.state.hasPendingResultWait; }
 	get toolUses(): number { return this.state.toolUses; }
 	get lifetimeUsage(): Readonly<LifetimeUsage> { return this.state.lifetimeUsage; }
 	get compactionCount(): number { return this.state.compactionCount; }
@@ -494,6 +496,21 @@ export class Subagent {
 		const run = this._promise;
 		if (!run || (!this.executionInFlight && !this.resumeReserved) || signal.aborted) return;
 		await settleOrAbort(run, signal);
+	}
+
+	/**
+	 * Wait for a terminal result that the caller will return directly to the
+	 * parent. The claim begins synchronously, before the first await, so a child
+	 * that settles while the tool is blocked cannot also queue a follow-up nudge.
+	 */
+	async waitForResult(signal: AbortSignal): Promise<void> {
+		if (!this.isActive()) return;
+		this.state.beginResultWait();
+		try {
+			await this.waitUntilSettled(signal);
+		} finally {
+			this.state.endResultWait();
+		}
 	}
 
 	/** Build a callback-only lifecycle bridge after the immutable child session exists. */

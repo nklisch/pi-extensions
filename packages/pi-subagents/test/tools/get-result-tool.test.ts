@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AgentTypeRegistry } from "#src/config/agent-types";
+import { NotificationManager } from "#src/observation/notification";
 import { GetResultTool, type GetResultToolManager } from "#src/tools/get-result-tool";
 import type { Subagent } from "#src/types";
 import { createTestSubagent, makeStubExecution } from "#test/helpers/make-subagent";
@@ -70,17 +71,35 @@ describe("GetResultTool", () => {
 		expect(result.content[0].text).toContain("Partial output");
 	});
 
-	it("waits for the current run and then consumes it", async () => {
+	it("delivers a waited result directly without enqueueing its completion nudge", async () => {
+		const completion = Promise.withResolvers<void>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- Promise.withResolvers<void> is valid; rule does not allow void in generic fn call type args
 		const sessionStub = createSubagentSessionStub();
-		sessionStub.runTurnLoop.mockResolvedValue({ responseText: "Finished after wait.", aborted: false, steered: false });
+		sessionStub.runTurnLoop.mockImplementation(async () => {
+			await completion.promise;
+			return { responseText: "Finished after wait.", aborted: false, steered: false };
+		});
+		const sendMessage = vi.fn();
+		const notifications = new NotificationManager(sendMessage);
 		const record = createTestSubagent({
 			status: "running",
 			completedAt: undefined,
-			execution: makeStubExecution({ createSubagentSession: async () => toSubagentSession(sessionStub) }),
+			execution: makeStubExecution({
+				createSubagentSession: async () => toSubagentSession(sessionStub),
+				observer: { onRunFinished: (completed) => notifications.sendCompletion(completed) },
+			}),
 		});
 		record.start();
-		const result = await execute(makeManager(new Map([["agent-1", record]])), { agent_id: "agent-1", wait: true });
+
+		const resultPromise = execute(
+			makeManager(new Map([["agent-1", record]])),
+			{ agent_id: "agent-1", wait: true },
+		);
+		await vi.waitFor(() => expect(sessionStub.runTurnLoop).toHaveBeenCalledOnce());
+		completion.resolve();
+		const result = await resultPromise;
+
 		expect(result.content[0].text).toContain("Finished after wait.");
+		expect(sendMessage).not.toHaveBeenCalled();
 		expect(record.consumed).toBe(true);
 	});
 

@@ -66,6 +66,12 @@ export class SubagentState {
 	get consumedAt(): number | undefined { return this._consumedAt; }
 	get consumed(): boolean { return this._consumedAt != null; }
 
+	// A blocking result request has claimed the next terminal outcome for direct
+	// delivery. Completion notification observes this so it cannot enqueue the
+	// same result through Pi's asynchronous follow-up channel.
+	private _pendingResultWaits = 0;
+	get hasPendingResultWait(): boolean { return this._pendingResultWaits > 0; }
+
 	// Stats — accumulated via mutation methods, readable via getters
 	private _toolUses = 0;
 	get toolUses(): number { return this._toolUses; }
@@ -206,6 +212,16 @@ export class SubagentState {
 	/** Record that the parent collected the outcome. Idempotent. */
 	markConsumed(at?: number): void {
 		this._consumedAt ??= at ?? Date.now();
+	}
+
+	/** Claim the next terminal outcome for a blocking direct-result request. */
+	beginResultWait(): void {
+		this._pendingResultWaits++;
+	}
+
+	/** Release one direct-result claim after its wait returns or is interrupted. */
+	endResultWait(): void {
+		this._pendingResultWaits = Math.max(0, this._pendingResultWaits - 1);
 	}
 
 	/** Transition to stopped state. Always valid — no guard. */

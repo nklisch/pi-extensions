@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.7
+
+### Fixed
+
+- Rebundle `@nklisch/pi-plugins` 0.6.2 and `@nklisch/pi-subagents` 18.1.0-nklisch.4 so a blocking subagent result request cannot duplicate its completion notification in context.
+
 ## v0.2.6
 
 ### Fixed
