@@ -39,4 +39,4 @@ Registry verification returned each exact version with a SHA-512 integrity recei
 - `@nklisch/pi-plugins@0.6.0` — `sha512-sO5iC/UMXV0XYTloKkFt0IXrkFd44xtjapPUlD9hmuxJbKqTYb0Mec0ZH44LAGx3Dpy1af0e+nNjC5aQ4Zbb+g==`
 - `@nklisch/pi-enhanced@0.2.5` — `sha512-K24pIjAx2Ah6QbSUmplQuQd8076G6U11xtHpl8Y7CV225pIDly1sxO8zbX1bP1xgVcYSX/wXl25Ewknftr0VHQ==`
 
-Both packages' `latest` dist-tags point to these versions. A registry-downloaded `@nklisch/pi-enhanced@0.2.5` tarball contains `@nklisch/pi-plugins@0.6.0`, and its compiled Pi extension imports successfully with the host peers present.
+A registry-downloaded `@nklisch/pi-enhanced@0.2.5` tarball contains `@nklisch/pi-plugins@0.6.0`, and its compiled Pi extension imports successfully with the host peers present. These initial versions were later superseded by the peer-resolution patch recorded in `.work/releases/plugin-manager-peer-resolution-hotfix-2026-08-27.md`.
