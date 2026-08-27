@@ -16,6 +16,9 @@ const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const clearanceManifest = JSON.parse(
   readFileSync(join(root, "../pi-clearance/package.json"), "utf8"),
 );
+const pluginsManifest = JSON.parse(
+  readFileSync(join(root, "../pi-plugins/package.json"), "utf8"),
+);
 
 // Pack through the repo's bundle-aware packer; npm pack alone drops
 // bundleDependencies inside workspaces.
@@ -34,6 +37,12 @@ const declared = [
 ].map((p) => p.replace(/^\.\//, ""));
 
 const failures = [];
+const supportedPiPeerRange = ">=0.82.0 <1";
+for (const peer of ["@earendil-works/pi-coding-agent", "@earendil-works/pi-tui"]) {
+  if (pluginsManifest.peerDependencies?.[peer] !== supportedPiPeerRange) {
+    failures.push(`node_modules/@nklisch/pi-plugins/package.json (${peer} must require ${supportedPiPeerRange})`);
+  }
+}
 const fffCompatEntrypoint = "./node_modules/@nklisch/pi-fff-compat/extensions/fff-compat-search.ts";
 if (!manifest.pi.extensions.includes(fffCompatEntrypoint)) {
   failures.push(`${fffCompatEntrypoint} (FFF compatibility extension entrypoint not declared)`);

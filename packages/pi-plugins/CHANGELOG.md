@@ -1,3 +1,9 @@
+## v0.6.1
+
+### Fixed
+
+- Require Pi coding-agent and TUI peers 0.82 or newer. This prevents an older peer selected for another bundled extension from shadowing the plugin manager's TUI import with an empty or incompatible nested package in `pi-enhanced` installations.
+
 ## v0.6.0
 
 ### Added

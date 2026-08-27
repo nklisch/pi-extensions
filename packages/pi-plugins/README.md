@@ -117,7 +117,7 @@ npm run build
 npm run test:package
 ```
 
-Node.js 22.19 or newer is required. The package keeps the bundled
+Pi 0.82 or newer and Node.js 22.19 or newer are required. The package keeps the bundled
 `@nklisch/pi-subagents` Pi resource available through a direct, best-effort
 loader; failure of that optional resource does not prevent plugin discovery.
 

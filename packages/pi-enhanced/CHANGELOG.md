@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.6
+
+### Fixed
+
+- Rebundle `@nklisch/pi-plugins` 0.6.1 with an explicit Pi 0.82+ peer floor so npm installs a compatible TUI beside the plugin manager instead of resolving through the older peer used by another bundled extension.
+
 ## v0.2.5
 
 ### Changed

@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-plugins",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": false,
   "description": "A small filesystem-first marketplace and plugin host for Pi.",
   "license": "MIT",
@@ -74,8 +74,8 @@
     "vitest": "^4.0.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*"
+    "@earendil-works/pi-coding-agent": ">=0.82.0 <1",
+    "@earendil-works/pi-tui": ">=0.82.0 <1"
   },
   "bundleDependencies": [
     "@nklisch/pi-subagents"
