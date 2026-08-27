@@ -29,3 +29,14 @@ Catalog paths remain contained, symlinks and special files remain rejected, and 
 - `@nklisch/pi-plugins`: 26 tests passed with typecheck, build, and compiled package/Pi entry imports.
 - The authoritative repository `npm run check` gate passed and packed `@nklisch/pi-plugins@0.6.0` and `@nklisch/pi-enhanced@0.2.5` successfully.
 - Wide, narrow, detail, active-check navigation, batch confirmation/result, and reload-on-close behavior were exercised through the real component.
+
+## Publication receipts
+
+Trusted-publishing workflow: [GitHub Actions run 33033722228](https://github.com/nklisch/pi-extensions/actions/runs/33033722228), successful from commit `d40352a` on 2026-08-27.
+
+Registry verification returned each exact version with a SHA-512 integrity receipt:
+
+- `@nklisch/pi-plugins@0.6.0` — `sha512-sO5iC/UMXV0XYTloKkFt0IXrkFd44xtjapPUlD9hmuxJbKqTYb0Mec0ZH44LAGx3Dpy1af0e+nNjC5aQ4Zbb+g==`
+- `@nklisch/pi-enhanced@0.2.5` — `sha512-K24pIjAx2Ah6QbSUmplQuQd8076G6U11xtHpl8Y7CV225pIDly1sxO8zbX1bP1xgVcYSX/wXl25Ewknftr0VHQ==`
+
+Both packages' `latest` dist-tags point to these versions. A registry-downloaded `@nklisch/pi-enhanced@0.2.5` tarball contains `@nklisch/pi-plugins@0.6.0`, and its compiled Pi extension imports successfully with the host peers present.
