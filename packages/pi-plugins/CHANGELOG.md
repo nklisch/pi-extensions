@@ -1,3 +1,15 @@
+## v0.6.0
+
+### Added
+
+- Add a keyboard-first `/plugins` manager with Installed, Discover, Marketplaces, and Issues views; local search and details; explicit multi-select batches; cancellable marketplace checks; mixed-result reporting; and one reload when the manager closes after runtime changes.
+- Add `.auto-update` authorization, bounded pre-activation updates for marked plugins with declared version changes, and `/plugins update-marked` to force-update every marked plugin—including unversioned entries—with one grouped refresh and one reload.
+
+### Changed
+
+- Add grouped marketplace refresh and sequential batch host APIs while keeping directories and marker files authoritative. Automatic updates preserve disabled state and installed copies remain active when refreshes or individual updates fail.
+- Persist only the optional manager check-on-open preference; selections, progress, results, diagnostics, and reload state remain transient.
+
 ## v0.5.0
 
 ### Changed

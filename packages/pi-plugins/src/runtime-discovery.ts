@@ -47,15 +47,26 @@ async function isFile(path: string): Promise<boolean> {
   }
 }
 
-async function containsSkillFile(root: string): Promise<boolean> {
-  if (!await isDirectory(root)) return false;
+async function collectSkillNames(root: string, prefix: string, names: string[]): Promise<void> {
+  if (!await isDirectory(root)) return;
   for (const entry of await readdir(root, { withFileTypes: true })) {
     if (entry.isSymbolicLink()) continue;
     const child = join(root, entry.name);
-    if (entry.isFile() && entry.name === "SKILL.md") return true;
-    if (entry.isDirectory() && !entry.name.startsWith(".") && await containsSkillFile(child)) return true;
+    if (entry.isFile() && entry.name === "SKILL.md") {
+      names.push(prefix.length === 0 ? "root" : prefix);
+      continue;
+    }
+    if (entry.isDirectory() && !entry.name.startsWith(".")) {
+      await collectSkillNames(child, prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`, names);
+    }
   }
-  return false;
+}
+
+async function discoverSkillNames(root: string): Promise<readonly string[]> {
+  const names: string[] = [];
+  if (await isFile(join(root, "SKILL.md"))) names.push("root");
+  await collectSkillNames(join(root, "skills"), "skills", names);
+  return Object.freeze(names);
 }
 
 function timeoutMilliseconds(value: unknown): number {
@@ -131,8 +142,9 @@ async function discoverPlugin(root: string, marketplace: string, name: string, d
   } catch (error) {
     diagnostics.push(diagnostic("bundle", error));
     return Object.freeze({
-      info: Object.freeze({ marketplace, name, root, data, enabled: false }),
+      info: Object.freeze({ marketplace, name, root, data, enabled: false, autoUpdate: false }),
       skillPaths: [],
+      skillNames: [],
       hooks: [],
       diagnostics: Object.freeze(diagnostics),
     });
@@ -141,20 +153,22 @@ async function discoverPlugin(root: string, marketplace: string, name: string, d
   if (receiptResult.error !== undefined) diagnostics.push(diagnostic(".pi-plugin.json", receiptResult.error));
   const receipt = record(receiptResult.value) ? Object.freeze({ ...receiptResult.value }) : undefined;
   const disabled = await isFile(join(root, ".disabled"));
+  const autoUpdate = await isFile(join(root, ".auto-update"));
   const info: InstalledPluginInfo = Object.freeze({
     marketplace,
     name,
     root,
     data,
     enabled: !disabled,
+    autoUpdate,
     ...(receipt === undefined ? {} : { receipt }),
   });
-  if (disabled) return Object.freeze({ info, skillPaths: [], hooks: [], diagnostics: Object.freeze(diagnostics) });
+  if (disabled) return Object.freeze({ info, skillPaths: [], skillNames: [], hooks: [], diagnostics: Object.freeze(diagnostics) });
 
+  const skillNames = await discoverSkillNames(root);
   const skillPaths: string[] = [];
-  if (await isFile(join(root, "SKILL.md"))) skillPaths.push(root);
-  const skillsRoot = join(root, "skills");
-  if (await containsSkillFile(skillsRoot)) skillPaths.push(skillsRoot);
+  if (skillNames.includes("root")) skillPaths.push(root);
+  if (skillNames.some((name) => name === "skills" || name.startsWith("skills/"))) skillPaths.push(join(root, "skills"));
 
   const manifests: Record<string, unknown>[] = [];
   for (const relativePath of [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
@@ -236,6 +250,7 @@ async function discoverPlugin(root: string, marketplace: string, name: string, d
   return Object.freeze({
     info,
     skillPaths: Object.freeze(skillPaths),
+    skillNames,
     hooks: Object.freeze(hooks),
     ...(Object.keys(mcpServers).length === 0 ? {} : { mcp: Object.freeze(mcpServers) }),
     diagnostics: Object.freeze(diagnostics),

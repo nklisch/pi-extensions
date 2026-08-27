@@ -19,13 +19,38 @@ import type {
   InstalledPluginInfo,
   MarketplaceCatalog,
   MarketplaceInfo,
+  MarketplaceRefreshResult,
   MarketplaceSource,
+  MarkedPluginUpdateOptions,
+  MarkedPluginUpdateResult,
+  MarkedPluginUpdateSummary,
+  PluginBatchAction,
+  PluginBatchItemResult,
+  PluginBatchOptions,
+  PluginBatchResult,
   PluginHost,
+  PluginIdentity,
+  PluginUpdateOptions,
+  RefreshMarketplaceOptions,
   RuntimeSnapshot,
 } from "./types.js";
 import type { PluginHostPaths } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+
+export const DEFAULT_REFRESH_TIMEOUT_MS = 10_000;
+const CHECK_ON_OPEN_MARKER = ".check-on-open";
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const error = new Error(signal.reason instanceof Error ? signal.reason.message : "operation cancelled");
+  error.name = "AbortError";
+  throw error;
+}
 
 type SourceFile = Readonly<{
   kind: MarketplaceSource["kind"];
@@ -89,12 +114,18 @@ async function readSource(root: string): Promise<MarketplaceSource> {
   return parseSourceFile(JSON.parse(await readFile(join(root, "source.json"), "utf8")) as unknown);
 }
 
-async function runGitClone(source: MarketplaceSource, destination: string): Promise<void> {
+async function runGitClone(source: MarketplaceSource, destination: string, options: RefreshMarketplaceOptions = {}): Promise<void> {
+  throwIfAborted(options.signal);
   const gitSource = source.kind === "github" ? `https://github.com/${source.value}.git` : source.value;
   const args = ["clone", "--quiet", "--no-tags"];
   if (source.ref !== undefined) args.push("--branch", source.ref);
   args.push(gitSource, destination);
-  await execFileAsync("git", args, { maxBuffer: 4 * 1024 * 1024 });
+  await execFileAsync("git", args, {
+    maxBuffer: 4 * 1024 * 1024,
+    timeout: options.timeoutMs ?? DEFAULT_REFRESH_TIMEOUT_MS,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+  throwIfAborted(options.signal);
 }
 
 async function makeOwnerWritable(root: string): Promise<void> {
@@ -117,12 +148,14 @@ async function removeOwnedTree(root: string): Promise<void> {
   await rm(root, { recursive: true, force: true });
 }
 
-async function materializeMarketplace(source: MarketplaceSource, destination: string): Promise<void> {
+async function materializeMarketplace(source: MarketplaceSource, destination: string, options: RefreshMarketplaceOptions = {}): Promise<void> {
+  throwIfAborted(options.signal);
   if (source.kind === "local") {
     await cp(source.value, destination, { recursive: true, dereference: false, force: true });
   } else {
-    await runGitClone(source, destination);
+    await runGitClone(source, destination, options);
   }
+  throwIfAborted(options.signal);
   await makeOwnerWritable(destination);
 }
 
@@ -181,6 +214,41 @@ async function readReceipt(root: string): Promise<Readonly<Record<string, unknow
   }
 }
 
+async function hasRegularMarker(root: string, marker: string): Promise<boolean> {
+  try {
+    const stat = await lstat(join(root, marker));
+    if (stat.isSymbolicLink()) throw new Error(`${marker} must not be a symlink: ${root}`);
+    return stat.isFile();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function setRegularMarker(root: string, marker: string, enabled: boolean): Promise<void> {
+  const path = join(root, marker);
+  if (enabled) {
+    try {
+      const stat = await lstat(path);
+      if (stat.isSymbolicLink()) throw new Error(`${marker} must not be a symlink: ${root}`);
+      if (!stat.isFile()) throw new Error(`${marker} must be a regular file: ${root}`);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await writeFile(path, "", { encoding: "utf8", flag: "wx" });
+    }
+    return;
+  }
+  try {
+    const stat = await lstat(path);
+    if (stat.isSymbolicLink()) throw new Error(`${marker} must not be a symlink: ${root}`);
+    if (!stat.isFile()) throw new Error(`${marker} must be a regular file: ${root}`);
+    await rm(path, { force: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
 async function installedInfo(paths: PluginHostPaths, marketplace: string, plugin: string): Promise<InstalledPluginInfo> {
   const market = assertSafeName(marketplace, "marketplace name");
   const name = assertSafeName(plugin, "plugin name");
@@ -188,9 +256,10 @@ async function installedInfo(paths: PluginHostPaths, marketplace: string, plugin
   const stat = await lstat(root);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`installed plugin is not a directory: ${name}@${market}`);
   const data = join(paths.data, market, name);
-  const disabled = await lstat(join(root, ".disabled")).then((item) => item.isFile()).catch(() => false);
+  const disabled = await hasRegularMarker(root, ".disabled");
+  const autoUpdate = await hasRegularMarker(root, ".auto-update");
   const receipt = await readReceipt(root);
-  return Object.freeze({ marketplace: market, name, root, data, enabled: !disabled, ...(receipt === undefined ? {} : { receipt }) });
+  return Object.freeze({ marketplace: market, name, root, data, enabled: !disabled, autoUpdate, ...(receipt === undefined ? {} : { receipt }) });
 }
 
 function pluginPath(paths: PluginHostPaths, marketplace: string, plugin: string): string {
@@ -231,7 +300,15 @@ async function resolvePluginSource(paths: PluginHostPaths, info: MarketplaceInfo
   }
 }
 
-async function copyPluginBundle(paths: PluginHostPaths, source: string, marketplace: string, plugin: string, entry: CatalogPlugin, preserveDisabled: boolean): Promise<InstalledPluginInfo> {
+async function copyPluginBundle(
+  paths: PluginHostPaths,
+  source: string,
+  marketplace: string,
+  plugin: string,
+  entry: CatalogPlugin,
+  preserveDisabled: boolean,
+  preserveAutoUpdate: boolean,
+): Promise<InstalledPluginInfo> {
   await assertNoSymlinks(source);
   const market = assertSafeName(marketplace, "marketplace name");
   const name = assertSafeName(plugin, "plugin name");
@@ -240,7 +317,10 @@ async function copyPluginBundle(paths: PluginHostPaths, source: string, marketpl
   const stage = await mkdtemp(join(parent, `.${name}-`));
   try {
     for (const item of await readdir(source, { withFileTypes: true })) {
-      if (item.name === ".git") continue;
+      // These files are host authority, not bundle content. In particular, a
+      // catalog must not be able to grant automatic executable updates by
+      // shipping its own marker.
+      if (item.name === ".git" || item.name === ".pi-plugin.json" || item.name === ".disabled" || item.name === ".auto-update") continue;
       await cp(join(source, item.name), join(stage, item.name), { recursive: true, dereference: false, force: true });
     }
     await makeOwnerWritable(stage);
@@ -252,6 +332,7 @@ async function copyPluginBundle(paths: PluginHostPaths, source: string, marketpl
       source: entry.source,
     }, null, 2)}\n`, "utf8");
     if (preserveDisabled) await writeFile(join(stage, ".disabled"), "", "utf8");
+    if (preserveAutoUpdate) await writeFile(join(stage, ".auto-update"), "", "utf8");
     await assertNoSymlinks(stage);
     const target = pluginPath(paths, market, name);
     await removeOwnedTree(target);
@@ -273,7 +354,11 @@ export function createPluginHost(agentDir: string): PluginHost {
     const stageRoot = await mkdtemp(join(paths.marketplaces, ".marketplace-"));
     try {
       const checkout = join(stageRoot, "checkout");
-      await materializeMarketplace(source, checkout);
+      // Adding a user-selected source may need to clone substantially more
+      // history than a routine refresh. Node's zero timeout leaves this
+      // foreground acquisition user-controlled instead of applying the
+      // manager/startup refresh budget.
+      await materializeMarketplace(source, checkout, { timeoutMs: 0 });
       const result = await catalogForCheckout(checkout);
       const info = marketplaceInfo(paths, result.catalog.name, source);
       await writeFile(join(stageRoot, "source.json"), `${JSON.stringify(sourceFile(source), null, 2)}\n`, "utf8");
@@ -302,23 +387,67 @@ export function createPluginHost(agentDir: string): PluginHost {
     return Object.freeze(values.sort((a, b) => a.name.localeCompare(b.name)));
   }
 
-  async function refreshMarketplace(nameValue: string): Promise<MarketplaceInfo> {
+  async function refreshMarketplace(nameValue: string, options: RefreshMarketplaceOptions = {}): Promise<MarketplaceInfo> {
     const name = assertSafeName(nameValue, "marketplace name");
     await ensureRoots(paths);
+    throwIfAborted(options.signal);
     const root = join(paths.marketplaces, name);
     const source = await readSource(root);
     const stageRoot = await mkdtemp(join(paths.marketplaces, ".marketplace-refresh-"));
     try {
       const checkout = join(stageRoot, "checkout");
-      await materializeMarketplace(source, checkout);
+      await materializeMarketplace(source, checkout, options);
       const result = await catalogForCheckout(checkout);
       if (result.catalog.name !== name) throw new Error(`refreshed marketplace declares ${result.catalog.name}, expected ${name}`);
+      throwIfAborted(options.signal);
       await removeOwnedTree(join(root, "checkout"));
       await rename(checkout, join(root, "checkout"));
       return marketplaceInfo(paths, name, source);
     } finally {
       await rm(stageRoot, { recursive: true, force: true });
     }
+  }
+
+  async function refreshMarketplaces(
+    names: readonly string[],
+    options: RefreshMarketplaceOptions & {
+      readonly concurrency?: number;
+      readonly onResult?: (result: MarketplaceRefreshResult) => void;
+    } = {},
+  ): Promise<readonly MarketplaceRefreshResult[]> {
+    const uniqueNames = [...new Set(names)].map((name) => assertSafeName(name, "marketplace name"));
+    const concurrency = Math.max(1, Math.min(options.concurrency ?? 2, uniqueNames.length || 1));
+    const results: MarketplaceRefreshResult[] = [];
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const index = next++;
+        const name = uniqueNames[index];
+        if (name === undefined) return;
+        let result: MarketplaceRefreshResult;
+        if (options.signal?.aborted) {
+          result = Object.freeze({ marketplace: name, ok: false, diagnostics: Object.freeze([]), error: "operation cancelled" });
+        } else {
+          try {
+            const info = await refreshMarketplace(name, options);
+            const catalog = await catalogForCheckout(info.checkout);
+            result = Object.freeze({
+              marketplace: name,
+              ok: true,
+              info,
+              catalog: Object.freeze({ ...catalog.catalog, diagnostics: catalog.diagnostics }),
+              diagnostics: catalog.diagnostics,
+            });
+          } catch (error) {
+            result = Object.freeze({ marketplace: name, ok: false, diagnostics: Object.freeze([]), error: errorMessage(error) });
+          }
+        }
+        results[index] = result;
+        try { options.onResult?.(result); } catch { /* UI observers cannot change filesystem truth. */ }
+      }
+    };
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
+    return Object.freeze(results.filter((result): result is MarketplaceRefreshResult => result !== undefined));
   }
 
   async function removeMarketplace(nameValue: string): Promise<void> {
@@ -346,7 +475,7 @@ export function createPluginHost(agentDir: string): PluginHost {
     return Object.freeze(result.sort((a, b) => `${a.marketplace}/${a.name}`.localeCompare(`${b.marketplace}/${b.name}`)));
   }
 
-  async function mutatePlugin(marketplace: string, plugin: string, update: boolean): Promise<InstalledPluginInfo> {
+  async function mutatePlugin(marketplace: string, plugin: string, update: boolean, options: PluginUpdateOptions = {}): Promise<InstalledPluginInfo> {
     await ensureRoots(paths);
     let currentInfo: InstalledPluginInfo | undefined;
     try {
@@ -358,13 +487,14 @@ export function createPluginHost(agentDir: string): PluginHost {
       throw new Error(`plugin is not installed: ${plugin}@${marketplace}`);
     }
     const preserveDisabled = currentInfo?.enabled === false;
-    if (update) {
-      await refreshMarketplace(marketplace);
+    const preserveAutoUpdate = currentInfo?.autoUpdate === true;
+    if (update && options.refresh !== false) {
+      await refreshMarketplace(marketplace, options);
     }
     const { info, entry } = await findCatalogPlugin(paths, marketplace, plugin);
     const source = await resolvePluginSource(paths, info, entry);
     try {
-      return await copyPluginBundle(paths, source.root, info.name, entry.name, entry, preserveDisabled);
+      return await copyPluginBundle(paths, source.root, info.name, entry.name, entry, preserveDisabled, preserveAutoUpdate);
     } finally {
       await source.cleanup();
     }
@@ -386,8 +516,31 @@ export function createPluginHost(agentDir: string): PluginHost {
   async function disablePlugin(marketplace: string, plugin: string): Promise<InstalledPluginInfo> {
     const info = await installedInfo(paths, marketplace, plugin);
     const marker = join(info.root, ".disabled");
+    try {
+      const stat = await lstat(marker);
+      if (stat.isSymbolicLink()) throw new Error(`disabled marker is a symlink: ${marker}`);
+      if (!stat.isFile()) throw new Error(`disabled marker is not a file: ${marker}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     await writeFile(marker, "", { encoding: "utf8", flag: "w" });
     return installedInfo(paths, marketplace, plugin);
+  }
+
+  async function setAutoUpdate(marketplace: string, plugin: string, enabled: boolean): Promise<InstalledPluginInfo> {
+    const info = await installedInfo(paths, marketplace, plugin);
+    await setRegularMarker(info.root, ".auto-update", enabled);
+    return installedInfo(paths, marketplace, plugin);
+  }
+
+  async function getCheckOnOpen(): Promise<boolean> {
+    await ensureRoots(paths);
+    return hasRegularMarker(paths.hostRoot, CHECK_ON_OPEN_MARKER);
+  }
+
+  async function setCheckOnOpen(enabled: boolean): Promise<void> {
+    await ensureRoots(paths);
+    await setRegularMarker(paths.hostRoot, CHECK_ON_OPEN_MARKER, enabled);
   }
 
   async function removePlugin(marketplace: string, plugin: string, deleteData = false): Promise<void> {
@@ -404,19 +557,131 @@ export function createPluginHost(agentDir: string): PluginHost {
     return scanInstalledPlugins(paths);
   }
 
+  async function runPluginBatch(
+    action: PluginBatchAction,
+    identities: readonly PluginIdentity[],
+    options: PluginBatchOptions = {},
+  ): Promise<PluginBatchResult> {
+    const refreshRequired = options.refresh ?? (action === "install" || action === "update");
+    const refreshes = refreshRequired
+      ? await refreshMarketplaces(identities.map((identity) => identity.marketplace), options)
+      : [];
+    const refreshByMarketplace = new Map(refreshes.map((result) => [result.marketplace, result]));
+    const results: PluginBatchItemResult[] = [];
+    let cancelled = false;
+
+    for (const identity of identities) {
+      if (options.signal?.aborted) {
+        cancelled = true;
+        break;
+      }
+      try { options.onBeforeItem?.(identity); } catch { /* observers cannot change filesystem truth */ }
+      if (options.signal?.aborted) {
+        cancelled = true;
+        break;
+      }
+      let result: PluginBatchItemResult;
+      try {
+        const marketplace = assertSafeName(identity.marketplace, "marketplace name");
+        const plugin = assertSafeName(identity.plugin, "plugin name");
+        const refresh = refreshByMarketplace.get(marketplace);
+        if (refreshRequired && refresh?.ok !== true) {
+          throw new Error(`marketplace refresh failed: ${refresh?.error ?? "unknown error"}`);
+        }
+        let info: InstalledPluginInfo | undefined;
+        if (action === "install") info = await mutatePlugin(marketplace, plugin, false);
+        if (action === "update") {
+          const updateOptions: PluginUpdateOptions = {
+            refresh: false,
+            ...(options.signal === undefined ? {} : { signal: options.signal }),
+            ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+          };
+          info = await mutatePlugin(marketplace, plugin, true, updateOptions);
+        }
+        if (action === "enable") info = await enablePlugin(marketplace, plugin);
+        if (action === "disable") info = await disablePlugin(marketplace, plugin);
+        if (action === "remove") await removePlugin(marketplace, plugin, options.deleteData === true);
+        result = Object.freeze({ action, identity: Object.freeze({ marketplace, plugin }), ok: true, ...(info === undefined ? {} : { info }) });
+      } catch (error) {
+        result = Object.freeze({
+          action,
+          identity: Object.freeze({ ...identity }),
+          ok: false,
+          error: errorMessage(error),
+        });
+      }
+      // The scan is deliberately after each settled item, including failures:
+      // the next item and the result page both observe current filesystem truth.
+      await scanRuntime().catch(() => undefined);
+      results.push(result);
+      try { options.onItem?.(result); } catch { /* a view observer cannot change the batch result */ }
+    }
+    return Object.freeze({ results: Object.freeze(results), cancelled });
+  }
+
+  async function updateMarkedPlugins(options: MarkedPluginUpdateOptions = {}): Promise<MarkedPluginUpdateSummary> {
+    const marked = (await listInstalled()).filter((plugin) => plugin.autoUpdate);
+    const refreshes = await refreshMarketplaces(
+      [...new Set(marked.map((plugin) => plugin.marketplace))],
+      options,
+    );
+    const refreshByMarketplace = new Map(refreshes.map((result) => [result.marketplace, result]));
+    const results: MarkedPluginUpdateResult[] = [];
+    const force = options.force === true;
+
+    for (const installed of marked) {
+      if (options.signal?.aborted) break;
+      const identity = Object.freeze({ marketplace: installed.marketplace, plugin: installed.name });
+      const refresh = refreshByMarketplace.get(installed.marketplace);
+      let result: MarkedPluginUpdateResult;
+      try {
+        if (refresh?.ok !== true || refresh.catalog === undefined) {
+          throw new Error(`marketplace refresh failed: ${refresh?.error ?? "unknown error"}`);
+        }
+        const entry = refresh.catalog.plugins.find((candidate) => candidate.name === installed.name);
+        if (entry === undefined) throw new Error(`plugin is not in marketplace catalog: ${installed.name}@${installed.marketplace}`);
+        const installedVersion = typeof installed.receipt?.version === "string" ? installed.receipt.version : undefined;
+        if (!force && entry.version === undefined) {
+          result = Object.freeze({ identity, ok: true, updated: false, skipped: true, reason: "catalog version is not declared" });
+        } else if (!force && installedVersion === entry.version) {
+          result = Object.freeze({ identity, ok: true, updated: false, skipped: true, reason: "already at declared catalog version" });
+        } else {
+          const updateOptions: PluginUpdateOptions = {
+            refresh: false,
+            ...(options.signal === undefined ? {} : { signal: options.signal }),
+            ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+          };
+          const info = await mutatePlugin(installed.marketplace, installed.name, true, updateOptions);
+          result = Object.freeze({ identity, ok: true, updated: true, skipped: false, info });
+        }
+      } catch (error) {
+        result = Object.freeze({ identity, ok: false, updated: false, skipped: false, error: errorMessage(error) });
+      }
+      results.push(result);
+      try { options.onItem?.(result); } catch { /* a view observer cannot change the update outcome */ }
+    }
+    return Object.freeze({ refreshes, results: Object.freeze(results) });
+  }
+
   return Object.freeze({
     paths,
     addMarketplace,
     listMarketplaces,
     refreshMarketplace,
+    refreshMarketplaces,
     removeMarketplace,
     browseMarketplace,
     listInstalled,
     installPlugin: (marketplace: string, plugin: string) => mutatePlugin(marketplace, plugin, false),
-    updatePlugin: (marketplace: string, plugin: string) => mutatePlugin(marketplace, plugin, true),
+    updatePlugin: (marketplace: string, plugin: string, options?: PluginUpdateOptions) => mutatePlugin(marketplace, plugin, true, options),
     enablePlugin,
     disablePlugin,
     removePlugin,
+    setAutoUpdate,
+    runPluginBatch,
+    updateMarkedPlugins,
+    getCheckOnOpen,
+    setCheckOnOpen,
     scanRuntime,
     buildMcpConfig: async (snapshot?: RuntimeSnapshot) => buildMcpConfig(snapshot ?? await scanRuntime()),
   });

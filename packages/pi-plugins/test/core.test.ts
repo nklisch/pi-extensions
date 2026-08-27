@@ -32,6 +32,22 @@ async function pluginRepository(root: string, entries: Record<string, string> = 
   }
 }
 
+async function multiPluginRepository(root: string, versions: Record<string, string | undefined>): Promise<void> {
+  await mkdir(join(root, ".agents/plugins"), { recursive: true });
+  const plugins = Object.entries(versions).map(([name, version]) => ({
+    name,
+    source: { source: "local", path: `./plugins/${name}` },
+    description: `${name} fixture`,
+    ...(version === undefined ? {} : { version }),
+  }));
+  await writeFile(join(root, ".agents/plugins/marketplace.json"), JSON.stringify({ name: "fixture-marketplace", plugins }));
+  for (const name of Object.keys(versions)) {
+    await mkdir(join(root, `plugins/${name}/skills/${name}`), { recursive: true });
+    await writeFile(join(root, `plugins/${name}/skills/${name}/SKILL.md`), `---\nname: ${name}\ndescription: ${name}\n---\n# ${name}\n`);
+    await writeFile(join(root, `plugins/${name}/payload.txt`), `${name}-one`);
+  }
+}
+
 afterEach(async () => {
   await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
@@ -128,5 +144,108 @@ describe("filesystem-first plugin core", () => {
     const runtime = await host.scanRuntime();
     expect(runtime.skillPaths).toEqual([]);
     expect(runtime.diagnostics.some((item) => /symlink/iu.test(item.message))).toBe(true);
+  });
+
+  it("preserves and toggles the automatic-update marker alongside disabled state", async () => {
+    const agentDir = await tempDir();
+    const repository = await tempDir();
+    await pluginRepository(repository, { "version.txt": "one" });
+    const host = createPluginHost(agentDir);
+    await host.addMarketplace(repository);
+    await host.installPlugin("fixture-marketplace", "demo");
+    await host.setAutoUpdate("fixture-marketplace", "demo", true);
+    await host.disablePlugin("fixture-marketplace", "demo");
+
+    await writeFile(join(repository, "plugins/demo/version.txt"), "two");
+    await host.updatePlugin("fixture-marketplace", "demo");
+    const updated = (await host.listInstalled())[0]!;
+    expect(updated.autoUpdate).toBe(true);
+    expect(updated.enabled).toBe(false);
+    expect(await readFile(join(updated.root, "version.txt"), "utf8")).toBe("two");
+
+    await host.setAutoUpdate("fixture-marketplace", "demo", false);
+    expect((await host.listInstalled())[0]!.autoUpdate).toBe(false);
+  });
+
+  it("persists the manager check-on-open preference and defaults it off", async () => {
+    const agentDir = await tempDir();
+    const host = createPluginHost(agentDir);
+
+    expect(await host.getCheckOnOpen()).toBe(false);
+    await host.setCheckOnOpen(true);
+    expect(await createPluginHost(agentDir).getCheckOnOpen()).toBe(true);
+    await host.setCheckOnOpen(false);
+    expect(await createPluginHost(agentDir).getCheckOnOpen()).toBe(false);
+  });
+
+  it("refreshes each marked marketplace once and updates only declared version changes", async () => {
+    const agentDir = await tempDir();
+    const repository = await tempDir();
+    await multiPluginRepository(repository, { versioned: "1.0.0", manual: undefined });
+    const host = createPluginHost(agentDir);
+    await host.addMarketplace(repository);
+    await host.installPlugin("fixture-marketplace", "versioned");
+    await host.installPlugin("fixture-marketplace", "manual");
+    await host.setAutoUpdate("fixture-marketplace", "versioned", true);
+    await host.setAutoUpdate("fixture-marketplace", "manual", true);
+
+    await writeFile(join(repository, ".agents/plugins/marketplace.json"), JSON.stringify({
+      name: "fixture-marketplace",
+      plugins: [
+        { name: "versioned", source: { source: "local", path: "./plugins/versioned" }, description: "versioned", version: "2.0.0" },
+        { name: "manual", source: { source: "local", path: "./plugins/manual" }, description: "manual" },
+      ],
+    }));
+    await writeFile(join(repository, "plugins/versioned/payload.txt"), "versioned-two");
+    const startup = await host.updateMarkedPlugins();
+    expect(startup.refreshes).toHaveLength(1);
+    expect(startup.results).toEqual(expect.arrayContaining([
+      expect.objectContaining({ identity: { plugin: "versioned", marketplace: "fixture-marketplace" }, ok: true, updated: true, skipped: false }),
+      expect.objectContaining({ identity: { plugin: "manual", marketplace: "fixture-marketplace" }, ok: true, updated: false, skipped: true }),
+    ]));
+    expect(await readFile(join((await host.listInstalled()).find((item) => item.name === "versioned")!.root, "payload.txt"), "utf8")).toBe("versioned-two");
+
+    const forced = await host.updateMarkedPlugins({ force: true });
+    expect(forced.refreshes).toHaveLength(1);
+    expect(forced.results.find((result) => result.identity.plugin === "manual")?.updated).toBe(true);
+  });
+
+  it("retains installed copies on offline marked refresh failures", async () => {
+    const agentDir = await tempDir();
+    const repository = await tempDir();
+    await pluginRepository(repository, { "version.txt": "installed" });
+    const host = createPluginHost(agentDir);
+    await host.addMarketplace(repository);
+    await host.installPlugin("fixture-marketplace", "demo");
+    await host.setAutoUpdate("fixture-marketplace", "demo", true);
+    await rm(repository, { recursive: true, force: true });
+    const result = await host.updateMarkedPlugins();
+    expect(result.results[0]).toMatchObject({ ok: false, updated: false });
+    expect(await readFile(join((await host.listInstalled())[0]!.root, "version.txt"), "utf8")).toBe("installed");
+  });
+
+  it("runs explicit batches sequentially with mixed results and cancellation between items", async () => {
+    const agentDir = await tempDir();
+    const repository = await tempDir();
+    await multiPluginRepository(repository, { good: "1.0.0", bad: "1.0.0" });
+    await symlink(join(repository, "outside.txt"), join(repository, "plugins/bad/escape.txt"));
+    const host = createPluginHost(agentDir);
+    await host.addMarketplace(repository);
+    const mixed = await host.runPluginBatch("install", [
+      { plugin: "good", marketplace: "fixture-marketplace" },
+      { plugin: "bad", marketplace: "fixture-marketplace" },
+    ]);
+    expect(mixed.results.map((result) => result.ok)).toEqual([true, false]);
+
+    const secondAgentDir = await tempDir();
+    const secondHost = createPluginHost(secondAgentDir);
+    await secondHost.addMarketplace(repository);
+    const controller = new AbortController();
+    const cancelled = await secondHost.runPluginBatch("install", [
+      { plugin: "good", marketplace: "fixture-marketplace" },
+      { plugin: "bad", marketplace: "fixture-marketplace" },
+    ], { onItem: () => controller.abort("stop after first"), signal: controller.signal });
+    expect(cancelled.results).toHaveLength(1);
+    expect(cancelled.cancelled).toBe(true);
   });
 });

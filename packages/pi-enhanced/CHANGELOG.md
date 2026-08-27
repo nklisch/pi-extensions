@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.5
+
+### Changed
+
+- Rebundle `@nklisch/pi-plugins` 0.6.0 with the keyboard-first plugin manager, explicit multi-select batches, bounded marketplace checks, and marker-authorized startup updates.
+
 ## v0.2.4
 
 ### Changed

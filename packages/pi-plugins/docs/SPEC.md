@@ -3,29 +3,40 @@
 ## Scope
 
 Pi Plugin Host manages user-global plugin bundles from Claude Code and Codex
-marketplaces. It supports three runtime surfaces: Agent Skills, simple Claude
-command hooks, and MCP server declarations. It does not manage project scope,
-foreign host state, trust ledgers, updates on a schedule, rollback, repair,
-SQLite, schemas/generations/digests, CAS, leases, notices, or a custom manager
-TUI.
+marketplaces. It supports Agent Skills, simple Claude command hooks, and Model
+Context Protocol (MCP) server declarations. It provides direct commands and a
+single-pane Pi terminal manager.
+
+It does not manage project scope, foreign host state, trust ledgers, periodic
+schedules, rollback, repair, SQLite, schemas, generations, digests, content
+stores, leases, notices, operation tokens, or a custom control protocol.
 
 ## Filesystem contract
 
 ```text
 <agent-dir>/plugin-host/
+├── .check-on-open?
 ├── marketplaces/<marketplace>/{source.json,checkout}
 ├── plugins/<marketplace>/<plugin>/
 │   ├── .pi-plugin.json
 │   ├── .disabled?
+│   ├── .auto-update?
 │   └── bundle
 └── data/<marketplace>/<plugin>/
 ```
 
 Marketplace and plugin names are simple filesystem names. Directory presence
-means installed. `.disabled` means disabled. `.pi-plugin.json` contains only
-human-readable source/version/description information. Plugin data is the one
-persistent plugin-owned directory and survives update; removal may explicitly
-remove it.
+means installed. `.disabled` means disabled. `.auto-update` selects and grants
+standing authorization to update that installed plugin before activation.
+`.pi-plugin.json` contains only human-readable source, version, and description
+information. `.check-on-open` stores one manager preference; all other manager
+state is transient. Plugin data is the persistent plugin-owned directory and
+survives update; removal may explicitly remove it.
+
+Host marker files must be regular files and must not be symlinks. Installation
+and update do not copy `.disabled`, `.auto-update`, or `.pi-plugin.json` from a
+catalog bundle. Existing disabled and automatic-update state is preserved when
+an installed bundle is replaced.
 
 ## Marketplaces and catalogs
 
@@ -36,8 +47,7 @@ are copied. Materialization happens in a temporary sibling. The host reads:
 - `.agents/plugins/marketplace.json`
 - `.claude-plugin/marketplace.json`
 
-The root `name` is the durable marketplace directory name. An explicit plugin
-update refreshes that marketplace before replacing the installed copy. If both catalogs
+The root `name` is the durable marketplace directory name. If both catalogs
 exist, their names must agree. Valid entries from both are merged by plugin
 name. Invalid individual entries produce local diagnostics while valid siblings
 remain browseable. Supported plugin sources are relative string paths,
@@ -45,14 +55,24 @@ remain browseable. Supported plugin sources are relative string paths,
 Git-subdirectory declarations.
 
 Relative catalog paths cannot be absolute, contain traversal, or cross the
-checkout through a symlink. Plugin installation resolves the selected catalog
-entry and copies the complete bundle to a temporary sibling before renaming it
-into `<marketplace>/<plugin>`. Any symlink in the source bundle rejects the
-operation: otherwise an untrusted catalog could expose arbitrary host files.
+checkout through a symlink. Plugin installation resolves the selected entry and
+copies the complete bundle to a temporary sibling before renaming it into
+`<marketplace>/<plugin>`. Any symlink in the source bundle rejects the
+operation because it could expose arbitrary host files.
+
+Grouped refresh deduplicates marketplace names, uses bounded concurrency and a
+per-source timeout, accepts cancellation, and reports each marketplace
+independently. Failure does not remove the prior checkout.
 
 ## Runtime
 
-At extension load, enabled plugin directories are scanned directly. Skills are
+Before activation, the extension checks installed `.auto-update` markers. With
+no marked plugins, it performs no marketplace refresh. With marked plugins, it
+refreshes each affected marketplace once and replaces an installed bundle only
+when the catalog declares a different version. An unversioned entry is skipped.
+Refresh and item failures preserve installed copies and do not block discovery.
+
+After that pass, enabled plugin directories are scanned directly. Skills are
 discovered from directories beneath `skills/` containing `SKILL.md`, plus a
 root `SKILL.md`. Hooks are read from conventional `hooks/hooks.json` and a
 simple string path in a plugin manifest. MCP is read from conventional
@@ -84,9 +104,34 @@ passed to the named `createMcpAdapter` factory as one in-memory
 duplicate plugin server name is qualified with a provider-safe
 `<plugin>_<marketplace>_<server>` name.
 
+## Manager
+
+`/plugins` with no arguments requires Pi terminal UI mode and opens Installed,
+Discover, Marketplaces, and Issues tabs. The first render depends only on local
+files. Search, cursor, detail, selection, progress, mixed results, diagnostics,
+and the pending-reload flag live only in the component.
+
+Marketplace checks run asynchronously, use the grouped bounded refresh seam,
+and can be cancelled without closing the manager. The optional check-on-open
+setting defaults off and persists as `.check-on-open`. Narrow layouts keep
+checking and reload status visible in the footer.
+
+`Ctrl+F` focuses search. Space selects stable `plugin@marketplace` identities.
+`a` selects all filtered rows. Contextual keys start install, update, enable,
+disable, or remove batches.
+The manager drops identities that disappeared from current truth, then shows one
+confirmation describing the selected count and executable or destructive
+effect. Items run sequentially. Failure does not roll back prior success.
+Cancellation stops before the next item, and current filesystem truth is
+rescanned after every settled item.
+
+Any successful runtime mutation sets a transient reload flag. Closing the
+manager reloads Pi exactly once. Marketplace-only changes do not set the flag.
+
 ## Commands
 
 ```text
+/plugins
 /plugins list|status
 /plugins marketplace add|list|refresh|remove
 /plugins browse <marketplace>
@@ -94,9 +139,15 @@ duplicate plugin server name is qualified with a provider-safe
 /plugins update <plugin>@<marketplace>
 /plugins enable|disable <plugin>@<marketplace>
 /plugins remove|uninstall <plugin>@<marketplace>
+/plugins update-marked
 ```
 
-Without arguments, a UI session uses Pi's ordinary selection/input/confirmation
-controls. Executable installation, update, enablement, and removal require
-interactive confirmation or `--yes` in headless mode. Runtime mutations call
-`ctx.reload()` and return immediately afterward.
+Direct executable installation, update, enablement, and removal require
+interactive confirmation or `--yes` in headless mode. Each direct runtime
+mutation reloads Pi after success.
+
+`/plugins update-marked` refreshes each affected marketplace once, force-updates
+every marked plugin including unversioned entries, reports per-item success or
+failure, and reloads once if at least one update succeeds. The marker already
+provides standing update authorization, so the command does not repeat one
+confirmation per plugin.

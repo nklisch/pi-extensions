@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { openPluginManager } from "./plugin-manager.js";
 import type { PluginHost } from "../types.js";
 
 function tokens(input: string): string[] {
@@ -86,15 +87,35 @@ async function browse(host: PluginHost, args: string[], ctx: ExtensionCommandCon
   for (const plugin of catalog.plugins) say(ctx, `${plugin.name}@${name}${plugin.version === undefined ? "" : ` ${plugin.version}`}${plugin.description === undefined ? "" : ` — ${plugin.description}`}`);
 }
 
+async function updateMarked(host: PluginHost, ctx: ExtensionCommandContext): Promise<void> {
+  const summary = await host.updateMarkedPlugins({ force: true });
+  if (summary.results.length === 0) {
+    say(ctx, "No plugins are marked for automatic updates.");
+    return;
+  }
+  for (const result of summary.results) {
+    const identity = `${result.identity.plugin}@${result.identity.marketplace}`;
+    if (result.ok && result.updated) say(ctx, `Updated ${identity}.`);
+    else if (result.ok && result.skipped) say(ctx, `${identity}: ${result.reason ?? "skipped"}.`, "warning");
+    else say(ctx, `Failed ${identity}: ${result.error ?? "unknown error"}`, "error");
+  }
+  if (summary.results.some((result) => result.ok && result.updated)) {
+    // This is the sole reload seam for the command, after all marked items
+    // have reported. Partial success is intentionally retained on disk.
+    await ctx.reload();
+  }
+}
+
 async function dispatch(host: PluginHost, input: string, ctx: ExtensionCommandContext): Promise<void> {
   const args = tokens(input);
   const action = args.shift();
   if (action === undefined) {
-    if (!ctx.hasUI) { say(ctx, "Usage: /plugins list|status|marketplace|browse|install|update|enable|disable|remove"); return; }
-    const chosen = await ctx.ui.select("Plugins", ["list", "marketplace list", "marketplace add", "marketplace refresh", "browse", "install", "update", "enable", "disable", "remove"]);
-    if (chosen !== undefined) await dispatch(host, chosen, ctx);
+    if (!ctx.hasUI) { say(ctx, "Usage: /plugins [update-marked]|list|status|marketplace|browse|install|update|enable|disable|remove"); return; }
+    const result = await openPluginManager(host, ctx);
+    if (result?.reloadNeeded === true) await ctx.reload();
     return;
   }
+  if (action === "update-marked") { await updateMarked(host, ctx); return; }
   if (action === "list" || action === "status") { await listInstalled(host, ctx); return; }
   if (action === "browse") { await browse(host, args, ctx); return; }
 

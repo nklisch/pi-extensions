@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plugin Manager Walkthrough</title>
+  <style>
+    :root {
+      --page: #121516;
+      --terminal: #202425;
+      --terminal-raised: #282d2e;
+      --text: #f0f1ee;
+      --muted: #9ca6a5;
+      --dim: #737d7c;
+      --accent: #b9b8ff;
+      --accent-bg: #b9b8ff;
+      --cyan: #36b9ed;
+      --green: #62d58b;
+      --yellow: #f1c75b;
+      --red: #ff716f;
+      --border: #aaa9ed;
+      --focus: #e7e6ff;
+      --font: "Iosevka Term", "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font: 15px/1.36 var(--font);
+      overflow: hidden;
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    .mock-meta {
+      height: 44px;
+      padding: 8px 16px;
+      background: #0d0f10;
+      border-bottom: 1px solid #34393a;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      font: 13px/1.3 system-ui, sans-serif;
+    }
+    .mock-meta strong { font-weight: 650; }
+    .mock-meta span { color: #9ea6a6; }
+    .scenes { margin-left: auto; display: flex; gap: 5px; }
+    .scene {
+      border: 1px solid #3b4142;
+      border-radius: 4px;
+      background: #171a1b;
+      color: #adb5b4;
+      padding: 5px 9px;
+      cursor: pointer;
+    }
+    .scene.active { background: #32363f; border-color: var(--accent); color: #fff; }
+    .terminal {
+      height: calc(100vh - 44px);
+      max-width: 1530px;
+      margin: 0 auto;
+      background: var(--terminal);
+      display: flex;
+      flex-direction: column;
+      border-inline: 1px solid #33393a;
+    }
+    .pi-context {
+      min-height: 156px;
+      padding: 14px 21px 8px;
+      color: var(--muted);
+      position: relative;
+    }
+    .pi-title { color: var(--cyan); font-weight: 700; }
+    .pi-row { margin-top: 4px; }
+    .prompt-mark { color: var(--text); margin-right: 8px; }
+    .manager {
+      min-height: 0;
+      flex: 1;
+      border-top: 2px solid var(--border);
+      padding: 15px 22px 14px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .tabs { display: flex; align-items: center; gap: 24px; min-height: 26px; }
+    .brand { color: var(--accent); font-weight: 700; }
+    .tab {
+      border: 0;
+      background: transparent;
+      padding: 2px 4px;
+      cursor: pointer;
+    }
+    .tab.active { background: var(--accent-bg); color: #11141a; font-weight: 750; }
+    .tab-badge { color: var(--yellow); }
+    .tab.active .tab-badge { color: #4d3a00; }
+    .network-state { margin-left: auto; color: var(--muted); font-size: 13px; }
+    .network-state.busy { color: var(--cyan); }
+    .compact-state { display: none; margin-left: auto; color: var(--yellow); }
+    .spinner { display: inline-block; animation: spin 800ms steps(8) infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .content { min-height: 0; flex: 1; padding-top: 17px; overflow: hidden; display: flex; flex-direction: column; }
+    .section-title { color: var(--cyan); font-size: 17px; line-height: 1.3; font-weight: 700; margin: 0 0 13px; }
+    .search-wrap { position: relative; margin: 0 3px 16px; }
+    .search-icon { position: absolute; left: 13px; top: 8px; color: var(--muted); }
+    .search {
+      width: 100%; height: 38px; padding: 7px 12px 7px 34px;
+      border: 1px solid #c5cccb; border-radius: 5px;
+      background: transparent; color: var(--text);
+    }
+    .search::placeholder { color: #8e9897; }
+    .list { overflow: auto; min-height: 0; padding-right: 10px; scrollbar-color: #555b5b transparent; }
+    .group-label { margin: 8px 0 7px 15px; color: var(--muted); font-weight: 700; }
+    .group-label.attention { color: var(--yellow); }
+    .row {
+      width: 100%; border: 0; background: transparent; color: var(--text);
+      text-align: left; padding: 7px 10px; display: grid;
+      grid-template-columns: 22px minmax(180px, 1fr) auto; align-items: start;
+      cursor: pointer; border-radius: 3px;
+    }
+    .row:hover, .row.cursor { background: #2b3031; }
+    .row.cursor .pointer { color: var(--accent); }
+    .pointer { color: var(--dim); }
+    .check { color: var(--muted); }
+    .check.selected { color: var(--accent); }
+    .row-main { min-width: 0; }
+    .row-title { color: #fff; }
+    .row-title strong { color: var(--cyan); }
+    .row-meta { color: var(--muted); }
+    .row-description { color: #aab2b1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+    .row-side { color: var(--muted); padding-left: 18px; white-space: nowrap; }
+    .success { color: var(--green); }
+    .warning { color: var(--yellow); }
+    .danger { color: var(--red); }
+    .accent { color: var(--cyan); }
+    .muted { color: var(--muted); }
+    .dim { color: var(--dim); }
+    .detail { overflow: auto; padding-right: 12px; }
+    .breadcrumb { color: var(--cyan); font-weight: 700; margin-bottom: 12px; }
+    .detail h2 { margin: 0 0 3px; color: var(--cyan); font-size: 16px; }
+    .detail p { margin: 10px 0; max-width: 1180px; }
+    .facts { display: grid; grid-template-columns: 122px minmax(0, 1fr); gap: 3px 8px; margin: 12px 0 17px; }
+    .fact-label { color: var(--muted); }
+    .components { margin: 15px 0; }
+    .components h3, .actions h3 { color: var(--cyan); font-size: 15px; margin: 0 0 5px; }
+    .component-line { margin-left: 2px; color: var(--muted); }
+    .component-line::before { content: "• "; color: var(--text); }
+    .actions { margin-top: 21px; }
+    .action {
+      display: block; border: 0; background: transparent; padding: 3px 0;
+      text-align: left; cursor: pointer;
+    }
+    .action.primary { color: var(--cyan); font-weight: 700; }
+    .action.destructive { color: var(--red); }
+    .action:hover::before, .action.focused::before { content: "› "; color: var(--accent); }
+    .toggle-line { display: flex; align-items: center; gap: 10px; margin: 15px 0; }
+    .switch {
+      width: 38px; height: 20px; border: 1px solid #65706f; border-radius: 11px;
+      padding: 2px; cursor: pointer; background: #343a3a;
+    }
+    .switch::after { content: ""; display: block; width: 14px; height: 14px; border-radius: 50%; background: #9ba4a3; transition: transform 140ms ease; }
+    .switch.on { border-color: var(--green); background: #23452e; }
+    .switch.on::after { background: var(--green); transform: translateX(17px); }
+    .batch-bar {
+      margin-top: 10px; border-top: 1px solid #555d5c; padding: 9px 3px 0;
+      display: flex; align-items: center; gap: 18px; color: var(--muted);
+    }
+    .batch-bar strong { color: var(--accent); }
+    .batch-action { border: 0; background: transparent; color: var(--cyan); padding: 2px; cursor: pointer; }
+    .batch-action.danger { color: var(--red); }
+    .footer { min-height: 27px; padding-top: 8px; color: #919a99; font-style: italic; font-size: 13px; }
+    .footer kbd { font: inherit; color: #c4cccb; }
+    .progress-list { max-width: 880px; margin-top: 8px; }
+    .progress-row { display: grid; grid-template-columns: 26px minmax(230px, 1fr) 180px; padding: 7px 5px; border-bottom: 1px solid #343a3b; }
+    .progress-row.current { background: #282e2f; }
+    .progress-note { color: var(--muted); }
+    .summary { margin-top: 18px; padding: 10px 12px; border-left: 2px solid var(--yellow); background: #282c2d; max-width: 900px; }
+    .issue {
+      width: 100%; padding: 9px 10px; margin: 0 0 7px; display: grid; grid-template-columns: 18px 1fr;
+      border: 0; border-left: 2px solid var(--red); background: #272b2c; color: var(--text);
+      text-align: left; cursor: pointer;
+    }
+    .issue:hover { background: #2d3233; }
+    .issue.warn { border-color: var(--yellow); }
+    .issue-title { color: var(--cyan); font-weight: 700; }
+    .issue p { margin: 3px 0 0; color: var(--muted); }
+    .market-card { padding: 9px 10px; margin-bottom: 7px; border-radius: 3px; }
+    .market-card:hover, .market-card.cursor { background: #2b3031; }
+    .market-name { color: var(--cyan); font-weight: 700; }
+    .market-source, .market-stats { color: var(--muted); margin-top: 2px; }
+    .market-actions { margin: 7px 0 0 20px; color: var(--text); }
+    .command { color: #d8d8ff; background: #151819; padding: 1px 5px; border-radius: 3px; }
+    .empty { color: var(--muted); padding: 24px 10px; }
+    .reload-pill { color: var(--yellow); font-weight: 700; }
+    .toast {
+      position: absolute; right: 22px; bottom: 49px; background: #151819;
+      border: 1px solid var(--accent); padding: 9px 13px; box-shadow: 0 8px 30px #0008;
+    }
+    @media (max-width: 820px) {
+      body { font-size: 13px; }
+      .mock-meta span { display: none; }
+      .scenes .scene { padding-inline: 6px; font-size: 11px; }
+      .scene span { display: none; }
+      .pi-context { min-height: 105px; }
+      .manager { padding-inline: 12px; }
+      .tabs { gap: 10px; }
+      .brand { display: none; }
+      .network-state { display: none; }
+      .compact-state { display: inline; }
+      .row { grid-template-columns: 20px 1fr; }
+      .row-side { display: none; }
+      .facts { grid-template-columns: 92px minmax(0, 1fr); }
+      .progress-row { grid-template-columns: 22px 1fr; }
+      .progress-note { grid-column: 2; }
+    }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } .switch::after { transition: none; } }
+  </style>
+</head>
+<body>
+  <header class="mock-meta">
+    <strong>Plugin manager walkthrough</strong>
+    <span>Screenshot-inspired single-pane manager with explicit batches and filesystem truth.</span>
+    <nav class="scenes" aria-label="Walkthrough scenes">
+      <button class="scene active" data-scene="installed">1 <span>Installed</span></button>
+      <button class="scene" data-scene="discover">2 <span>Select</span></button>
+      <button class="scene" data-scene="confirm">3 <span>Confirm</span></button>
+      <button class="scene" data-scene="batch">4 <span>Batch</span></button>
+      <button class="scene" data-scene="sources">5 <span>Sources</span></button>
+      <button class="scene" data-scene="issues">6 <span>Issues</span></button>
+      <button class="scene" data-scene="auto">7 <span>Auto</span></button>
+    </nav>
+  </header>
+
+  <main class="terminal">
+    <section class="pi-context" aria-label="Pi session context">
+      <div><span class="pi-title">Pi</span> <span class="muted">0.84.3</span></div>
+      <div class="pi-row">GPT-5.6 Sol · high thinking</div>
+      <div class="pi-row">/home/nathan/dev/pi-extensions</div>
+      <div class="pi-row" style="margin-top:17px"><span class="prompt-mark">│</span><span class="muted">/plugins</span></div>
+    </section>
+
+    <section class="manager" aria-label="Plugin manager">
+      <nav class="tabs" aria-label="Plugin manager tabs">
+        <span class="brand">Plugins</span>
+        <button class="tab active" data-tab="installed">Installed</button>
+        <button class="tab" data-tab="discover">Discover</button>
+        <button class="tab" data-tab="marketplaces">Marketplaces</button>
+        <button class="tab" data-tab="issues">Issues <span class="tab-badge">(2)</span></button>
+        <span class="compact-state" id="compactState"></span>
+        <span class="network-state" id="networkState">Local data · updates not checked</span>
+      </nav>
+      <section class="content" id="content" aria-live="polite"></section>
+      <footer class="footer" id="footer"></footer>
+    </section>
+  </main>
+
+  <script>
+    const plugins = [
+      { id: 'workbench@nklisch-skills', name: 'workbench', market: 'nklisch-skills', version: '0.16.1', available: '0.16.1', enabled: true, auto: true, status: 'enabled', description: 'Requirements-first delivery with adaptive review, grounded research, and filesystem work tracking.', skills: ['work', 'design', 'deliver', 'scan', 'research'], hooks: ['SessionStart'], mcp: [] },
+      { id: 'krometrail@nklisch-skills', name: 'krometrail', market: 'nklisch-skills', version: '0.9.2', available: '0.9.3', enabled: true, auto: true, status: 'update', description: 'Local Chromium control and retained visual evidence for agents.', skills: ['krometrail', 'report-krometrail-issue'], hooks: [], mcp: ['krometrail'] },
+      { id: 'peeragent@nklisch-skills', name: 'peeragent', market: 'nklisch-skills', version: '0.8.0', available: '0.8.0', enabled: true, auto: false, status: 'enabled', description: 'Delegate focused work to another local coding agent.', skills: ['peer'], hooks: [], mcp: [] },
+      { id: 'ux-ui-design@nklisch-skills', name: 'ux-ui-design', market: 'nklisch-skills', version: '0.5.0', available: '0.5.0', enabled: false, auto: false, status: 'disabled', description: 'Mockup-first UI and UX design for screens, flows, and visual systems.', skills: ['ux-ui'], hooks: [], mcp: [] },
+      { id: 'zai-research@nklisch-skills', name: 'zai-research', market: 'nklisch-skills', version: '0.4.2', available: null, enabled: true, auto: false, status: 'issue', description: 'Grounded web research through Z.ai search and extraction.', skills: ['research'], hooks: [], mcp: ['zai-search'], issue: 'Plugin declaration references a missing marketplace entry.' },
+    ];
+    const discover = [
+      { id: 'agent-coordination@nklisch-skills', name: 'agent-coordination', market: 'nklisch-skills', version: '0.7.0', description: 'Sparse cross-agent coordination through repository discussions.', surface: '4 skills · 1 hook' },
+      { id: 'agentic-research@nklisch-skills', name: 'agentic-research', market: 'nklisch-skills', version: '0.6.2', description: 'Grounded and verifiable research with selectable evidence gates.', surface: '5 skills' },
+      { id: 'nates-toolkit@nklisch-skills', name: 'nates-toolkit', market: 'nklisch-skills', version: '0.3.1', description: 'Small standalone utility skills without workflow lock-in.', surface: '6 skills' },
+      { id: 'frontend-design@claude-plugins-official', name: 'frontend-design', market: 'claude-plugins-official', version: '2.1.0', description: 'Create distinctive production-grade frontend interfaces.', surface: '3 skills · 1 hook' },
+      { id: 'code-review@claude-plugins-official', name: 'code-review', market: 'claude-plugins-official', version: '1.8.4', description: 'Automated code review using several focused agents.', surface: '2 skills' },
+      { id: 'context7@claude-plugins-official', name: 'context7', market: 'claude-plugins-official', version: '1.4.0', description: 'Up-to-date library documentation through an MCP server.', surface: '1 MCP server' },
+    ];
+
+    const state = {
+      scene: 'installed', tab: 'installed', view: 'list', query: '', cursor: 0,
+      selected: new Set(), checking: false, checkRun: 0, updatesChecked: false, reloadNeeded: false, autoEnabled: true,
+      detail: null, toast: null,
+    };
+
+    const content = document.querySelector('#content');
+    const footer = document.querySelector('#footer');
+    const networkState = document.querySelector('#networkState');
+    const compactState = document.querySelector('#compactState');
+
+    function esc(value) { return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function status(plugin) {
+      if (plugin.status === 'update') return '<span class="warning">↑ update available</span>';
+      if (plugin.status === 'issue') return '<span class="danger">× 1 issue</span>';
+      if (!plugin.enabled) return '<span class="muted">○ disabled</span>';
+      return '<span class="success">✓ enabled</span>';
+    }
+    function setTab(tab) {
+      state.tab = tab; state.view = 'list'; state.detail = null; state.query = ''; state.cursor = 0; state.selected.clear();
+      render();
+    }
+    function visibleRows() {
+      const source = state.tab === 'discover' ? discover : plugins;
+      const q = state.query.trim().toLowerCase();
+      return q ? source.filter(p => `${p.name} ${p.market} ${p.description}`.toLowerCase().includes(q)) : source;
+    }
+    function searchBox(label) {
+      return `<div class="search-wrap"><span class="search-icon">⌕</span><input class="search" id="search" aria-label="Search plugins" placeholder="${label}" value="${esc(state.query)}"></div>`;
+    }
+    function row(plugin, index, discoverMode = false) {
+      const selected = state.selected.has(plugin.id);
+      return `<button class="row ${index === state.cursor ? 'cursor' : ''}" data-row="${esc(plugin.id)}">
+        <span class="pointer">${index === state.cursor ? '›' : ' '}</span>
+        <span class="row-main"><span class="check ${selected ? 'selected' : ''}">${selected ? '◉' : '○'}</span> <span class="row-title"><strong>${esc(plugin.name)}</strong></span> <span class="row-meta">· ${esc(plugin.market)} · ${esc(plugin.version ?? 'unversioned')}</span><div class="row-description">${esc(plugin.description)}</div></span>
+        <span class="row-side">${discoverMode ? esc(plugin.surface) : status(plugin)}</span>
+      </button>`;
+    }
+    function installedList() {
+      const rows = visibleRows();
+      const attention = rows.filter(p => p.status === 'issue' || p.status === 'update');
+      const normal = rows.filter(p => !attention.includes(p));
+      let index = 0;
+      return `<h1 class="section-title">Installed plugins <span class="muted">(${rows.length})</span></h1>${searchBox('Search installed plugins…')}
+        <div class="list">
+          ${attention.length ? '<div class="group-label attention">Needs attention</div>' + attention.map(p => row(p, index++)).join('') : ''}
+          ${normal.length ? '<div class="group-label">Ready</div>' + normal.map(p => row(p, index++)).join('') : ''}
+          ${rows.length ? '' : '<div class="empty">No installed plugins match this search.</div>'}
+        </div>${batchBar('installed')}`;
+    }
+    function discoverList() {
+      const rows = visibleRows();
+      return `<h1 class="section-title">Discover plugins <span class="muted">(${rows.length})</span></h1>${searchBox('Search all marketplaces…')}
+        <div class="list">${rows.map((p, i) => row(p, i, true)).join('')}${rows.length ? '' : '<div class="empty">No discoverable plugins match this search.</div>'}</div>${batchBar('discover')}`;
+    }
+    function batchBar(mode) {
+      if (state.selected.size === 0) return '';
+      const actions = mode === 'discover'
+        ? '<button class="batch-action" data-action="install-batch">i Install selected</button>'
+        : '<button class="batch-action" data-action="update-batch">u Update</button><button class="batch-action">e Enable</button><button class="batch-action">d Disable</button><button class="batch-action danger">x Remove</button>';
+      return `<div class="batch-bar"><strong>${state.selected.size} selected</strong>${actions}<button class="batch-action" data-action="clear">Esc clear</button></div>`;
+    }
+    function pluginDetail(plugin, discoverMode = false) {
+      const skills = plugin.skills ?? plugin.surface?.match(/\d+ skills/)?.[0] ?? 'Declared skills';
+      return `<div class="detail"><div class="breadcrumb">${discoverMode ? 'Discover' : 'Installed'} / Plugin details</div>
+        <h2>${esc(plugin.name)} <span class="muted">@ ${esc(plugin.market)}</span></h2>
+        <div class="facts">
+          <span class="fact-label">Version</span><span>${esc(plugin.version ?? 'not declared')}</span>
+          ${discoverMode ? '' : `<span class="fact-label">Status</span><span>${status(plugin)}</span>`}
+          <span class="fact-label">Source</span><span>${esc(plugin.market)}</span>
+        </div>
+        <p>${esc(plugin.description)}</p>
+        <div class="components"><h3>${discoverMode ? 'Will install' : 'Installed components'}</h3>
+          <div class="component-line">Skills: ${Array.isArray(skills) ? esc(skills.join(', ')) : esc(skills)}</div>
+          ${plugin.hooks?.length ? `<div class="component-line">Hooks: ${esc(plugin.hooks.join(', '))}</div>` : ''}
+          ${plugin.mcp?.length ? `<div class="component-line">MCP servers: ${esc(plugin.mcp.join(', '))}</div>` : ''}
+          ${discoverMode && plugin.surface ? `<div class="component-line">Surface summary: ${esc(plugin.surface)}</div>` : ''}
+        </div>
+        ${discoverMode ? '<p class="warning">△ Hooks and MCP servers execute local code. Review the source before installation.</p>' : ''}
+        ${!discoverMode ? `<div class="toggle-line"><button class="switch ${plugin.auto ? 'on' : ''}" data-action="toggle-auto" aria-label="Toggle automatic updates"></button><span><strong>Update automatically on Pi startup</strong><br><span class="muted">Checks this marketplace before activation and updates declared version changes.</span></span></div>` : ''}
+        <div class="actions"><h3>Actions</h3>
+          ${discoverMode ? '<button class="action primary" data-action="install-one">Install plugin</button>' : `<button class="action primary" data-action="${plugin.enabled ? 'disable-one' : 'enable-one'}">${plugin.enabled ? 'Disable' : 'Enable'} plugin</button><button class="action" data-action="update-one">Update now</button><button class="action destructive">Remove plugin</button>`}
+          <button class="action" data-action="back">Back to plugin list</button>
+        </div></div>`;
+    }
+    function marketplaces() {
+      return `<h1 class="section-title">Manage marketplaces</h1><div class="list">
+        <button class="action primary" data-action="add-marketplace">+ Add marketplace</button><br>
+        <div class="market-card cursor"><div class="market-name">${state.checking ? '<span class="spinner">◌</span> ' : '• '}nklisch-skills</div><div class="market-source">nklisch/skills</div><div class="market-stats">13 available · 5 installed ${state.checking ? '· checking…' : '· local checkout ready'}</div><div class="market-actions">› Browse plugins &nbsp; · &nbsp; Refresh &nbsp; · &nbsp; Remove</div></div>
+        <div class="market-card"><div class="market-name">${state.checking ? '<span class="spinner">◌</span> ' : '• '}claude-plugins-official</div><div class="market-source">anthropics/claude-plugins-official</div><div class="market-stats">290 available · 0 installed ${state.checking ? '· checking…' : '· local checkout ready'}</div></div>
+        <div class="toggle-line"><button class="switch ${state.autoEnabled ? 'on' : ''}" data-action="toggle-check-open" aria-label="Toggle checking on manager open"></button><span><strong>Check for updates when manager opens</strong><br><span class="muted">Opens from local data first, then refreshes sources without blocking navigation.</span></span></div>
+        <button class="action primary" data-action="check-updates">Check for updates now</button>
+      </div>`;
+    }
+    function issues() {
+      return `<h1 class="section-title">Issues <span class="warning">(2)</span></h1><div class="list">
+        <button class="issue" data-detail="zai-research@nklisch-skills"><span class="danger">×</span><span><span class="issue-title">zai-research @ nklisch-skills</span><p>Plugin declaration references a marketplace entry that is no longer present. The installed bundle remains enabled.</p></span></button>
+        <button class="issue warn"><span class="warning">△</span><span><span class="issue-title">local-notes @ personal</span><p>Automatic updates are marked, but this catalog does not declare a version. Use <span class="command">/plugins update-marked</span> to force an explicit update.</p></span></button>
+      </div>`;
+    }
+    function batchConfirmation() {
+      return `<div class="detail"><div class="breadcrumb">Discover / Confirm installation</div><h2>Install 3 selected plugins?</h2>
+        <p>This batch adds <strong>15 skills</strong> and <strong>1 command hook</strong> from <span class="accent">nklisch-skills</span>.</p>
+        <div class="progress-list">
+          <div class="progress-row"><span>•</span><span>agent-coordination</span><span class="progress-note">4 skills · 1 hook</span></div>
+          <div class="progress-row"><span>•</span><span>agentic-research</span><span class="progress-note">5 skills</span></div>
+          <div class="progress-row"><span>•</span><span>nates-toolkit</span><span class="progress-note">6 skills</span></div>
+        </div>
+        <div class="summary"><strong>Executable content</strong><br><span class="muted">The SessionStart hook runs local code when Pi starts. Review the source before continuing.</span></div>
+        <div class="actions"><button class="action primary" data-action="confirm-batch">Install 3 plugins</button><button class="action" data-action="back-discover">Back to selection</button></div>
+      </div>`;
+    }
+    function batchProgress() {
+      const complete = state.scene === 'batch-result';
+      return `<div class="detail"><div class="breadcrumb">Discover / Install selected</div><h2>${complete ? 'Batch complete' : 'Installing 3 plugins'}</h2>
+        <p class="muted">The manager refreshed nklisch-skills once. Plugin copies now run sequentially.</p>
+        <div class="progress-list">
+          <div class="progress-row"><span class="success">✓</span><span>agent-coordination</span><span class="progress-note">installed</span></div>
+          <div class="progress-row ${complete ? '' : 'current'}"><span class="${complete ? 'danger' : 'accent'}">${complete ? '×' : '<span class="spinner">◌</span>'}</span><span>agentic-research</span><span class="progress-note">${complete ? 'hook declaration is malformed' : 'copying bundle…'}</span></div>
+          <div class="progress-row"><span class="${complete ? 'success' : 'dim'}">${complete ? '✓' : '○'}</span><span>nates-toolkit</span><span class="progress-note">${complete ? 'installed' : 'waiting'}</span></div>
+        </div>
+        ${complete ? '<div class="summary"><strong>2 installed · 1 failed</strong><br><span class="muted">Successful plugins remain installed. Reload will run once when this manager closes.</span></div><div class="actions"><button class="action primary" data-action="back-installed">View installed plugins</button><button class="action" data-action="retry-failed">Retry failed item</button></div>' : '<div class="actions"><button class="action" data-action="finish-batch">Finish walkthrough</button><button class="action destructive" data-action="cancel-batch">Stop after current plugin</button></div>'}
+      </div>`;
+    }
+    function autoUpdates() {
+      return `<div class="detail"><div class="breadcrumb">Installed / Automatic updates</div><h2>Marked startup updates</h2>
+        <p>Two plugins carry the <span class="command">.auto-update</span> marker. Pi checks their marketplaces once before plugin activation.</p>
+        <div class="progress-list">
+          <div class="progress-row"><span class="success">✓</span><span>workbench <span class="muted">@ nklisch-skills</span></span><span class="progress-note">current · 0.16.1</span></div>
+          <div class="progress-row"><span class="warning">↑</span><span>krometrail <span class="muted">@ nklisch-skills</span></span><span class="progress-note">0.9.2 → 0.9.3</span></div>
+        </div>
+        <div class="summary"><strong>One source refresh · one plugin update</strong><br><span class="muted">The update completes before skills, hooks, and MCP servers load. Offline startup keeps the installed copies.</span></div>
+        <div class="actions"><h3>Manual command</h3><p><span class="command">/plugins update-marked</span> force-updates every marked plugin, including unversioned plugins, then reloads once.</p><button class="action primary" data-action="back-installed">Back to installed plugins</button></div>
+      </div>`;
+    }
+    function render() {
+      document.querySelectorAll('.tab').forEach(el => el.classList.toggle('active', el.dataset.tab === state.tab));
+      document.querySelectorAll('.scene').forEach(el => el.classList.toggle('active', el.dataset.scene === state.scene || (state.scene === 'batch-result' && el.dataset.scene === 'batch')));
+      networkState.className = `network-state ${state.checking ? 'busy' : ''}`;
+      networkState.innerHTML = state.checking ? '<span class="spinner">◌</span> Checking 2 marketplaces · manager remains available' : state.reloadNeeded ? '<span class="reload-pill">● Reload needed</span>' : state.updatesChecked ? 'Local data · updates checked just now' : 'Local data · updates not checked';
+      compactState.innerHTML = state.checking ? '<span class="spinner">◌</span>' : state.reloadNeeded ? '● reload' : '';
+      if (state.view === 'confirm') content.innerHTML = batchConfirmation();
+      else if (state.view === 'batch') content.innerHTML = batchProgress();
+      else if (state.view === 'auto') content.innerHTML = autoUpdates();
+      else if (state.view === 'detail' && state.detail) content.innerHTML = pluginDetail(state.detail, state.tab === 'discover');
+      else if (state.tab === 'installed') content.innerHTML = installedList();
+      else if (state.tab === 'discover') content.innerHTML = discoverList();
+      else if (state.tab === 'marketplaces') content.innerHTML = marketplaces();
+      else content.innerHTML = issues();
+      footer.innerHTML = state.view === 'detail' || state.view === 'confirm' ? '<kbd>↑↓</kbd> navigate actions · <kbd>Enter</kbd> run · <kbd>Esc</kbd> back' : state.view === 'batch' ? (state.scene === 'batch-result' ? '<kbd>Enter</kbd> view installed · <kbd>r</kbd> retry failed · <kbd>Esc</kbd> close and reload once' : '<kbd>Esc</kbd> stop after current · manager stays open') : state.checking ? '<kbd>Esc</kbd> cancel checks · navigation remains available' : '<kbd>Ctrl+←/→</kbd> tabs · <kbd>↑↓</kbd> navigate · <kbd>Space</kbd> select · <kbd>a</kbd> all · <kbd>Enter</kbd> details · <kbd>r</kbd> check updates · <kbd>Esc</kbd> close';
+      if (state.toast) content.insertAdjacentHTML('beforeend', `<div class="toast">${esc(state.toast)}</div>`);
+      wire();
+    }
+    function wire() {
+      const search = document.querySelector('#search');
+      search?.addEventListener('input', e => { state.query = e.target.value; state.cursor = 0; render(); document.querySelector('#search')?.focus(); });
+      document.querySelectorAll('[data-row]').forEach((el, index) => el.addEventListener('click', e => {
+        const id = el.dataset.row; const source = state.tab === 'discover' ? discover : plugins; state.cursor = index;
+        if (e.detail > 1) { state.detail = source.find(p => p.id === id); state.view = 'detail'; }
+        else { state.selected.has(id) ? state.selected.delete(id) : state.selected.add(id); }
+        render();
+      }));
+      document.querySelectorAll('[data-action]').forEach(el => el.addEventListener('click', () => action(el.dataset.action)));
+      document.querySelectorAll('[data-detail]').forEach(el => el.addEventListener('click', () => { state.tab = 'installed'; state.detail = plugins.find(p => p.id === el.dataset.detail); state.view = 'detail'; render(); }));
+    }
+    function action(name) {
+      if (name === 'clear') state.selected.clear();
+      if (name === 'back') state.view = 'list';
+      if (name === 'back-installed') { state.tab = 'installed'; state.view = 'list'; state.selected.clear(); }
+      if (name === 'back-discover') { state.tab = 'discover'; state.view = 'list'; }
+      if (name === 'install-batch' || name === 'update-batch') { state.view = 'confirm'; state.scene = 'confirm'; }
+      if (name === 'confirm-batch') { state.view = 'batch'; state.scene = 'batch'; state.reloadNeeded = true; }
+      if (name === 'finish-batch') { state.scene = 'batch-result'; state.reloadNeeded = true; }
+      if (name === 'toggle-check-open') state.autoEnabled = !state.autoEnabled;
+      if (name === 'toggle-auto' && state.detail) { state.detail.auto = !state.detail.auto; state.toast = state.detail.auto ? 'Automatic startup updates enabled' : 'Automatic startup updates disabled'; setTimeout(() => { state.toast = null; render(); }, 1200); }
+      if (name === 'check-updates') startCheck();
+      if (name === 'install-one' || name === 'update-one' || name === 'enable-one' || name === 'disable-one') { state.reloadNeeded = true; state.toast = 'Filesystem changed · reload will run once on close'; setTimeout(() => { state.toast = null; render(); }, 1500); }
+      render();
+    }
+    function startCheck() {
+      if (state.checking) return;
+      state.checking = true; const run = ++state.checkRun; render();
+      setTimeout(() => { if (run !== state.checkRun) return; state.checking = false; state.updatesChecked = true; plugins.find(p => p.name === 'krometrail').status = 'update'; state.toast = 'Update check complete · 1 plugin available'; render(); setTimeout(() => { state.toast = null; render(); }, 1400); }, 2200);
+    }
+    function scene(name) {
+      state.scene = name; state.view = 'list'; state.detail = null; state.selected.clear(); state.query = ''; state.checking = false;
+      if (name === 'installed') { state.tab = 'installed'; state.detail = plugins[1]; state.view = 'detail'; }
+      if (name === 'discover') { state.tab = 'discover'; state.selected = new Set(discover.slice(0,3).map(p => p.id)); }
+      if (name === 'confirm') { state.tab = 'discover'; state.view = 'confirm'; state.selected = new Set(discover.slice(0,3).map(p => p.id)); }
+      if (name === 'batch') { state.tab = 'discover'; state.view = 'batch'; state.reloadNeeded = true; }
+      if (name === 'sources') { state.tab = 'marketplaces'; state.checking = true; }
+      if (name === 'issues') state.tab = 'issues';
+      if (name === 'auto') { state.tab = 'installed'; state.view = 'auto'; }
+      render();
+    }
+    document.querySelectorAll('.tab').forEach(el => el.addEventListener('click', () => setTab(el.dataset.tab)));
+    document.querySelectorAll('.scene').forEach(el => el.addEventListener('click', () => scene(el.dataset.scene)));
+    document.addEventListener('keydown', e => {
+      if (e.target.matches('input')) { if (e.key === 'Escape') { state.query = ''; render(); } return; }
+      const rows = visibleRows();
+      if (state.view === 'list' && (state.tab === 'installed' || state.tab === 'discover')) {
+        if (e.key === 'ArrowDown') { e.preventDefault(); state.cursor = Math.min(rows.length - 1, state.cursor + 1); render(); }
+        if (e.key === 'ArrowUp') { e.preventDefault(); state.cursor = Math.max(0, state.cursor - 1); render(); }
+        if (e.key === ' ') { e.preventDefault(); const p = rows[state.cursor]; if (p) state.selected.has(p.id) ? state.selected.delete(p.id) : state.selected.add(p.id); render(); }
+        if (e.key === 'Enter') { const p = rows[state.cursor]; if (p) { state.detail = p; state.view = 'detail'; render(); } }
+        if (e.key.toLowerCase() === 'a') { state.selected = new Set(rows.map(p => p.id)); render(); }
+      }
+      if (e.key.toLowerCase() === 'r' && state.view === 'list') startCheck();
+      if (e.key === 'Escape') {
+        if (state.checking) { state.checking = false; state.checkRun++; state.toast = 'Update check cancelled'; render(); setTimeout(() => { state.toast = null; render(); }, 1200); return; }
+        if (state.view !== 'list') { state.view = 'list'; state.detail = null; render(); } else if (state.selected.size) { state.selected.clear(); render(); } else { state.toast = state.reloadNeeded ? 'Closing manager · reloading Pi once…' : 'Manager closed'; render(); }
+      }
+    });
+    const initialScene = new URLSearchParams(location.search).get('scene');
+    if (initialScene === 'batch-result') {
+      scene('batch');
+      state.scene = 'batch-result';
+      render();
+    } else {
+      scene(['installed', 'discover', 'confirm', 'batch', 'sources', 'issues', 'auto'].includes(initialScene) ? initialScene : 'installed');
+    }
+  </script>
+</body>
+</html>

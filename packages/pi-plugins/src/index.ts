@@ -1,5 +1,6 @@
 export {
   createPluginHost,
+  DEFAULT_REFRESH_TIMEOUT_MS,
   assertSafeName,
   assertSafeRelativePath,
   isPathContained,
@@ -13,6 +14,15 @@ export { createPluginHostPaths } from "./paths.js";
 export type {
   AddMarketplaceOptions,
   CatalogPlugin,
+  MarkedPluginUpdateOptions,
+  MarkedPluginUpdateResult,
+  MarkedPluginUpdateSummary,
+  MarketplaceRefreshResult,
+  PluginBatchAction,
+  PluginBatchItemResult,
+  PluginBatchOptions,
+  PluginBatchResult,
+  PluginIdentity,
   DiscoveredPlugin,
   HookExecutionResult,
   HookOutput,
@@ -26,6 +36,8 @@ export type {
   PluginHost,
   PluginHostPaths,
   PluginSource,
+  PluginUpdateOptions,
+  RefreshMarketplaceOptions,
   RuntimeSnapshot,
   SupportedHookEvent,
 } from "./types.js";
