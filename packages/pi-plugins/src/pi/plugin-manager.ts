@@ -38,10 +38,19 @@ export interface PluginManagerOptions {
   readonly theme: Theme;
   readonly keybindings: KeybindingsManager;
   readonly done: (result: PluginManagerResult) => void;
-  readonly confirm: (title: string, message: string) => Promise<boolean>;
-  readonly input: (title: string, placeholder?: string) => Promise<string | undefined>;
   readonly notify: (message: string, type?: "info" | "warning" | "error") => void;
 }
+
+/**
+ * Manager-internal modal dialogs. The manager deliberately does not delegate
+ * text entry or confirmation to pi's `ctx.ui.input`/`ctx.ui.confirm`: host
+ * dialogs replace the editor container's single active component, which orphans
+ * this custom component mid-prompt (its `ui.custom` promise would never
+ * settle) and leaves every later command wedged behind the first one.
+ */
+type DialogState =
+  | Readonly<{ kind: "input"; title: string; placeholder: string; resolver: (value: string | undefined) => void }>
+  | Readonly<{ kind: "confirm"; title: string; message: string; actionLabel: string; destructive: boolean; resolver: (approved: boolean) => void }>;
 
 type IssueEntry = Readonly<{
   readonly id: string;
@@ -61,6 +70,23 @@ const BATCH_ACTIONS: readonly PluginBatchAction[] = ["install", "update", "enabl
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Naive greedy word wrap for dialog message text; long messages stay readable at narrow widths. */
+function wrapText(text: string, width: number): readonly string[] {
+  const lines: string[] = [];
+  for (const paragraph of text.split("\n")) {
+    let current = "";
+    for (const word of paragraph.split(/\s+/u).filter((word) => word.length > 0)) {
+      const candidate = current.length === 0 ? word : `${current} ${word}`;
+      if (candidate.length > width && current.length > 0) {
+        lines.push(current);
+        current = word;
+      } else current = candidate;
+    }
+    lines.push(current);
+  }
+  return lines;
 }
 
 function catalogEntry(catalog: MarketplaceCatalog | undefined, name: string): CatalogPlugin | undefined {
@@ -91,10 +117,11 @@ export class PluginManager implements Component, Focusable {
   private readonly theme: Theme;
   private readonly keybindings: KeybindingsManager;
   private readonly done: (result: PluginManagerResult) => void;
-  private readonly confirm: PluginManagerOptions["confirm"];
-  private readonly input: PluginManagerOptions["input"];
   private readonly notify: PluginManagerOptions["notify"];
   private readonly searchInput = new Input();
+  private readonly dialogInput = new Input();
+  private dialog: DialogState | undefined;
+  private dialogCursor = 0;
   private _focused = false;
 
   private tab: PluginManagerTab = "installed";
@@ -142,10 +169,9 @@ export class PluginManager implements Component, Focusable {
     this.theme = options.theme;
     this.keybindings = options.keybindings;
     this.done = options.done;
-    this.confirm = options.confirm;
-    this.input = options.input;
     this.notify = options.notify;
     this.searchInput.onSubmit = () => this.leaveSearch();
+    this.dialogInput.onSubmit = () => this.submitDialogInput();
 
     // Opening is local-first: the first render does not wait for either a
     // catalog read or a network request. Both tasks update this view in place.
@@ -160,6 +186,7 @@ export class PluginManager implements Component, Focusable {
   set focused(value: boolean) {
     this._focused = value;
     this.searchInput.focused = value && this.searchFocused;
+    this.dialogInput.focused = value && this.dialog?.kind === "input";
   }
 
   render(width: number): string[] {
@@ -168,7 +195,8 @@ export class PluginManager implements Component, Focusable {
     lines.push(this.renderTabs(renderWidth));
     lines.push(this.theme.fg("border", "─".repeat(renderWidth)));
 
-    if (this.view === "detail") lines.push(...this.renderDetail(renderWidth));
+    if (this.dialog !== undefined) lines.push(...this.renderDialog(renderWidth));
+    else if (this.view === "detail") lines.push(...this.renderDetail(renderWidth));
     else if (this.view === "confirm") lines.push(...this.renderConfirmation(renderWidth));
     else if (this.view === "batch") lines.push(...this.renderBatch(renderWidth));
     else if (this.tab === "installed") lines.push(...this.renderInstalled(renderWidth));
@@ -184,6 +212,10 @@ export class PluginManager implements Component, Focusable {
 
   handleInput(data: string): void {
     if (this.destroyed) return;
+    if (this.dialog !== undefined) {
+      this.handleDialogInput(data);
+      return;
+    }
     if (this.searchFocused) {
       if (matchesKey(data, Key.escape) || matchesKey(data, Key.enter)) {
         this.leaveSearch();
@@ -244,6 +276,13 @@ export class PluginManager implements Component, Focusable {
 
   dispose(): void {
     this.destroyed = true;
+    // A dialog resolver that never fires would wedge the awaiting mutation
+    // forever; settling it on dispose keeps promises from leaking if the host
+    // tears the component down mid-dialog.
+    const dialog = this.dialog;
+    this.dialog = undefined;
+    if (dialog?.kind === "input") dialog.resolver(undefined);
+    else dialog?.resolver(false);
     this.checkRun++;
     this.checkController?.abort("manager closed");
     this.batchController?.abort("manager closed");
@@ -380,6 +419,109 @@ export class PluginManager implements Component, Focusable {
       lines.push(this.renderCursorLine(index === this.detailActionCursor, action.destructive ? this.theme.fg("error", text) : index === 0 ? this.theme.fg("accent", text) : this.theme.fg("text", text)));
     }
     return lines;
+  }
+
+  private renderDialog(width: number): string[] {
+    const dialog = this.dialog!;
+    const lines = [this.heading(dialog.title)];
+    if (dialog.kind === "confirm") {
+      lines.push("");
+      for (const line of wrapText(dialog.message, Math.max(8, width - 4))) lines.push(this.indent(line, width));
+      lines.push("");
+      lines.push(this.renderCursorLine(this.dialogCursor === 0, dialog.destructive
+        ? this.theme.fg("error", dialog.actionLabel)
+        : this.theme.fg("accent", dialog.actionLabel)));
+      lines.push(this.renderCursorLine(this.dialogCursor === 1, this.theme.fg("text", "Cancel")));
+    } else {
+      lines.push("");
+      this.dialogInput.focused = this._focused;
+      const text = this.dialogInput.getValue().length === 0
+        ? this.theme.fg("muted", `› ${dialog.placeholder}`)
+        : `› ${this.dialogInput.render(Math.max(1, width - 4))[0] ?? ""}`;
+      lines.push(this.indent(this.theme.fg("border", "[") + text + this.theme.fg("border", "]"), width));
+    }
+    lines.push("");
+    lines.push(this.theme.fg("dim", dialog.kind === "input" ? "enter submit · esc cancel" : "↑↓ or y/n · enter run · esc cancel"));
+    return lines.map((line) => truncateToWidth(line, width, ""));
+  }
+
+  private handleDialogInput(data: string): void {
+    const dialog = this.dialog!;
+    if (dialog.kind === "input") {
+      if (matchesKey(data, Key.escape)) {
+        this.dialogInput.setValue("");
+        this.closeDialogInput(undefined);
+        return;
+      }
+      this.dialogInput.handleInput(data);
+      this.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.escape)) {
+      this.closeDialogConfirm(false);
+      return;
+    }
+    if (matchesKey(data, Key.up) || matchesKey(data, Key.down) || matchesKey(data, Key.left) || matchesKey(data, Key.right) || matchesKey(data, Key.tab)) {
+      this.dialogCursor = this.dialogCursor === 0 ? 1 : 0;
+      this.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.enter)) {
+      this.closeDialogConfirm(this.dialogCursor === 0);
+      return;
+    }
+    // y/n shortcuts keep destructive dialogs reachable without navigation.
+    const lower = data.toLocaleLowerCase();
+    if (lower === "y") this.closeDialogConfirm(true);
+    else if (lower === "n") this.closeDialogConfirm(false);
+  }
+
+  private submitDialogInput(): void {
+    const value = this.dialogInput.getValue();
+    this.closeDialogInput(value);
+  }
+
+  private closeDialogInput(value: string | undefined): void {
+    const dialog = this.dialog;
+    if (dialog === undefined || dialog.kind !== "input") return;
+    this.dialog = undefined;
+    this.dialogCursor = 0;
+    dialog.resolver(value);
+    this.requestRender();
+  }
+
+  private closeDialogConfirm(approved: boolean): void {
+    const dialog = this.dialog;
+    if (dialog === undefined || dialog.kind !== "confirm") return;
+    this.dialog = undefined;
+    this.dialogCursor = 0;
+    dialog.resolver(approved);
+    this.requestRender();
+  }
+
+  private promptInput(title: string, placeholder: string): Promise<string | undefined> {
+    return new Promise<string | undefined>((resolve) => {
+      this.dialogInput.setValue("");
+      this.dialogCursor = 0;
+      this.dialog = Object.freeze({ kind: "input", title, placeholder, resolver: resolve });
+      this.dialogInput.focused = this._focused;
+      this.requestRender();
+    });
+  }
+
+  private promptConfirm(title: string, message: string, options: { readonly actionLabel?: string; readonly destructive?: boolean } = {}): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      this.dialogCursor = 0;
+      this.dialog = Object.freeze({
+        kind: "confirm",
+        title,
+        message,
+        actionLabel: options.actionLabel ?? "Confirm",
+        destructive: options.destructive === true,
+        resolver: resolve,
+      });
+      this.requestRender();
+    });
   }
 
   private renderConfirmation(width: number): string[] {
@@ -681,9 +823,10 @@ export class PluginManager implements Component, Focusable {
     }
     if (action === "toggle-auto" && installed !== undefined) {
       if (!installed.autoUpdate) {
-        const approved = await this.confirm(
+        const approved = await this.promptConfirm(
           "Enable automatic plugin updates",
           "This grants standing authorization to replace executable hooks and MCP servers when Pi startup sees a declared catalog version change. Enable it?",
+          { actionLabel: "Enable" },
         );
         if (!approved) return;
       }
@@ -1024,7 +1167,7 @@ export class PluginManager implements Component, Focusable {
 
   private async addMarketplace(): Promise<void> {
     try {
-      const source = await this.input("Add marketplace", "owner/repository, Git URL, or local path");
+      const source = await this.promptInput("Add marketplace", "owner/repository, Git URL, or local path");
       if (source === undefined || source.trim().length === 0) return;
       const added = await this.host.addMarketplace(source.trim());
       this.showToast(`Added marketplace ${added.name}`);
@@ -1184,7 +1327,7 @@ export class PluginManager implements Component, Focusable {
   }
 
   private async removeMarketplace(name: string): Promise<void> {
-    const approved = await this.confirm("Remove marketplace", `Remove ${name}'s source checkout? Installed plugin bundles are left in place.`);
+    const approved = await this.promptConfirm("Remove marketplace", `Remove ${name}'s source checkout? Installed plugin bundles are left in place.`, { actionLabel: "Remove", destructive: true });
     if (!approved) return;
     try {
       await this.host.removeMarketplace(name);
@@ -1234,8 +1377,6 @@ export async function openPluginManager(host: PluginHost, ctx: ExtensionCommandC
     theme,
     keybindings,
     done,
-    confirm: (title, message) => ctx.ui.confirm(title, message),
-    input: (title, placeholder) => ctx.ui.input(title, placeholder),
     notify: (message, type) => ctx.ui.notify(message, type),
   }));
 }

@@ -206,29 +206,41 @@ async function discoverPlugin(root: string, marketplace: string, name: string, d
     }
   }
 
-  const mcpDocuments: unknown[] = [];
+  const mcpDocuments: { source: string; value: unknown }[] = [];
+  const loadedMcpPaths = new Set<string>();
   const conventionalMcp = join(root, ".mcp.json");
-  if (await isFile(conventionalMcp)) mcpDocuments.push(conventionalMcp);
+  if (await isFile(conventionalMcp)) {
+    mcpDocuments.push({ source: ".mcp.json", value: conventionalMcp });
+    loadedMcpPaths.add(conventionalMcp);
+  }
+  // Manifest order is precedence order: the Claude document is the richer
+  // declaration (variable substitution, relative-path roots), so a same-named
+  // server in a later Codex manifest pointer must not clobber it.
   for (const manifest of manifests) {
     const declaration = manifest.mcpServers ?? manifest.mcp;
     if (typeof declaration === "string") {
       try {
         const path = await declaredPath(root, declaration, "manifest MCP path");
-        if (path !== undefined) mcpDocuments.push(path);
+        if (path === undefined) continue;
+        // Several manifests may point at one physical document; that is one
+        // declaration, not a conflict, so skip it without a diagnostic.
+        if (loadedMcpPaths.has(path)) continue;
+        loadedMcpPaths.add(path);
+        mcpDocuments.push({ source: declaration, value: path });
       } catch (error) {
         diagnostics.push(diagnostic("manifest MCP path", error));
       }
     } else if (record(declaration)) {
-      mcpDocuments.push(declaration);
+      mcpDocuments.push({ source: "manifest", value: declaration });
     }
   }
   const mcpServers: Record<string, unknown> = {};
   for (const document of mcpDocuments) {
-    let value: unknown = document;
-    if (typeof document === "string") {
-      const result = await optionalJson(document);
+    let value: unknown = document.value;
+    if (typeof document.value === "string") {
+      const result = await optionalJson(document.value);
       if (result.error !== undefined) {
-        diagnostics.push(diagnostic(document, result.error));
+        diagnostics.push(diagnostic(document.source, result.error));
         continue;
       }
       value = result.value;
@@ -241,6 +253,10 @@ async function discoverPlugin(root: string, marketplace: string, name: string, d
     for (const [serverName, server] of Object.entries(servers)) {
       if (!record(server)) {
         diagnostics.push(diagnostic(`MCP.${serverName}`, new Error("MCP server declaration must be an object")));
+        continue;
+      }
+      if (serverName in mcpServers) {
+        diagnostics.push(diagnostic(`MCP.${serverName}`, new Error(`duplicate MCP server declaration from ${document.source}; the earlier declaration wins`)));
         continue;
       }
       mcpServers[serverName] = server;

@@ -1,3 +1,4 @@
+import { isAbsolute, resolve } from "node:path";
 import type { RuntimeSnapshot } from "./types.js";
 
 const VARIABLE_NAMES = [
@@ -23,6 +24,23 @@ function namespace(plugin: RuntimeSnapshot["plugins"][number], server: string): 
   return `${plugin.info.name}_${plugin.info.marketplace}_${server}`.replace(/[^A-Za-z0-9_-]/gu, "_");
 }
 
+/**
+ * Anchor stdio servers to the plugin root. Codex-style declarations commonly
+ * use cwd-relative commands (`sh bin/launcher`), and pi launches MCP children
+ * from the project directory, not the plugin directory — without this anchor
+ * every such plugin server fails to start out of the box. A declaration's own
+ * relative `cwd` is honored relative to the plugin root; absolute paths and
+ * non-stdio servers are left untouched.
+ */
+function resolvePluginStdioCwd(definition: unknown, pluginRoot: string): unknown {
+  if (definition === null || typeof definition !== "object" || Array.isArray(definition)) return definition;
+  const server = definition as Record<string, unknown>;
+  if (typeof server.command !== "string" || server.command.length === 0) return definition;
+  const declared = typeof server.cwd === "string" && server.cwd.trim().length > 0 ? server.cwd : ".";
+  const resolved = isAbsolute(declared) || declared.startsWith("~") ? declared : resolve(pluginRoot, declared);
+  return { ...server, cwd: resolved };
+}
+
 /** Build the only MCP input this package gives to pi-mcp-adapter. */
 export async function buildMcpConfig(snapshot: RuntimeSnapshot): Promise<Readonly<{ mcpServers: Readonly<Record<string, unknown>> }>> {
   const plugins = snapshot.plugins.filter((item) => item.info.enabled && item.mcp !== undefined);
@@ -45,7 +63,7 @@ export async function buildMcpConfig(snapshot: RuntimeSnapshot): Promise<Readonl
     });
     for (const [serverName, definition] of Object.entries(plugin.mcp!)) {
       const name = occurrences.get(serverName) === 1 ? serverName : namespace(plugin, serverName);
-      values.set(name, substitute(definition, variables));
+      values.set(name, resolvePluginStdioCwd(substitute(definition, variables), plugin.info.root));
     }
   }
   return Object.freeze({ mcpServers: Object.freeze(Object.fromEntries(values)) });

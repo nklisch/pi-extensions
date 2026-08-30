@@ -1,3 +1,15 @@
+## v0.7.0
+
+### Fixed
+
+- Own text entry and confirmation inside the plugin manager instead of delegating to host prompts. pi's `ctx.ui.input`/`ctx.ui.confirm` dialogs replace the TUI's single active component, which orphaned the manager mid-dialog: the window disappeared right after adding a marketplace, the first `/plugins` command never settled, and every later command was silently wedged behind it. The Marketplace add, Marketplace remove, and automatic-update dialogs are now rendered by the manager itself, and a torn-down manager settles any open dialog resolver so no awaiting mutation can hang.
+- Give plugin MCP server declarations plugin-root-relative semantics for codex-style bundles: stdio servers now launch with the plugin install root as their working directory (a declaration's own relative `cwd` is honored relative to that root), so out-of-the-box installs like krometrail's `sh bin/krometrail` resolve instead of failing with “No such file or directory” from the project directory.
+- Stop letting a same-named server in a `.codex-plugin` manifest pointer clobber the richer `.claude-plugin`/`.mcp.json` declaration. Documents are read in precedence order (conventional `.mcp.json`, then Claude manifest, then Codex manifest), first declaration wins with a diagnostic, and multiple manifests pointing at one physical document are treated as a single declaration without noise.
+
+### Changed
+
+- Add regression tests pinning the internal-dialog key contract (Enter submits, Escape cancels, y/n shortcuts) and the MCP precedence/working-directory behavior.
+
 ## v0.6.2
 
 ### Fixed

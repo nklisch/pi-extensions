@@ -107,4 +107,64 @@ describe("filesystem plugin runtime", () => {
     expect(names).toEqual(["alpha_m_same", "beta_m_same", "gamma_m_same"]);
     expect(config.mcpServers[names[0]!] ).toMatchObject({ args: [expect.stringContaining("/alpha/server.mjs"), expect.stringContaining("/alpha")] });
   });
+
+  it("prefers the claude MCP document over a same-named codex declaration and reports the duplicate", async () => {
+    const agentDir = await tempDir();
+    const repository = await tempDir();
+    await mkdir(join(repository, "plugins/krometrail-like/.claude-plugin"), { recursive: true });
+    await mkdir(join(repository, "plugins/krometrail-like/.codex-plugin"), { recursive: true });
+    await mkdir(join(repository, "plugins/krometrail-like/skills/demo"), { recursive: true });
+    await mkdir(join(repository, ".claude-plugin"), { recursive: true });
+    await writeFile(join(repository, ".claude-plugin/marketplace.json"), JSON.stringify({ name: "m", plugins: [{ name: "krometrail-like", source: "./plugins/krometrail-like" }] }));
+    await writeFile(join(repository, "plugins/krometrail-like/.claude-plugin/plugin.json"), JSON.stringify({
+      name: "krometrail-like",
+      mcpServers: "./.mcp.json",
+    }));
+    await writeFile(join(repository, "plugins/krometrail-like/.mcp.json"), JSON.stringify({
+      mcpServers: { krometrail: { command: "${CLAUDE_PLUGIN_ROOT}/bin/tool", args: ["mcp"], env: { ROOT: "${CLAUDE_PLUGIN_DATA}" } } },
+    }));
+    await writeFile(join(repository, "plugins/krometrail-like/.codex-plugin/plugin.json"), JSON.stringify({
+      name: "krometrail-like",
+      mcpServers: "./.mcp.codex.json",
+    }));
+    await writeFile(join(repository, "plugins/krometrail-like/.mcp.codex.json"), JSON.stringify({
+      krometrail: { command: "sh", args: ["bin/tool"], cwd: "." },
+    }));
+    const host = createPluginHost(agentDir);
+    await host.addMarketplace(repository);
+    await host.installPlugin("m", "krometrail-like");
+    const snapshot = await host.scanRuntime();
+    const plugin = snapshot.plugins[0]!;
+    // The codex declaration must not clobber the claude declaration.
+    expect(Object.keys(plugin.mcp!)).toEqual(["krometrail"]);
+    expect(plugin.mcp!.krometrail).toMatchObject({ command: "${CLAUDE_PLUGIN_ROOT}/bin/tool" });
+    const duplicate = snapshot.diagnostics.find((item) => item.scope === "MCP.krometrail");
+    expect(duplicate?.message).toContain("duplicate");
+
+    // Substituted config keeps the claude declaration intact.
+    const config = await host.buildMcpConfig(snapshot);
+    expect(config.mcpServers.krometrail).toMatchObject({ command: expect.stringContaining("/bin/tool") });
+  });
+
+  it("anchors codex-only stdio servers to the plugin root so relative commands resolve", async () => {
+    const agentDir = await tempDir();
+    const repository = await tempDir();
+    await mkdir(join(repository, "plugins/codex-only/.codex-plugin"), { recursive: true });
+    await mkdir(join(repository, ".claude-plugin"), { recursive: true });
+    await writeFile(join(repository, ".claude-plugin/marketplace.json"), JSON.stringify({ name: "m", plugins: [{ name: "codex-only", source: "./plugins/codex-only" }] }));
+    await writeFile(join(repository, "plugins/codex-only/.codex-plugin/plugin.json"), JSON.stringify({
+      name: "codex-only",
+      mcpServers: "./.mcp.codex.json",
+    }));
+    await writeFile(join(repository, "plugins/codex-only/.mcp.codex.json"), JSON.stringify({
+      server: { command: "sh", args: ["bin/tool", "mcp"], cwd: "." },
+    }));
+    const host = createPluginHost(agentDir);
+    await host.addMarketplace(repository);
+    await host.installPlugin("m", "codex-only");
+    const snapshot = await host.scanRuntime();
+    const config = await host.buildMcpConfig(snapshot);
+    const declared = config.mcpServers.server as { cwd: string };
+    expect(declared.cwd).toBe(join(agentDir, "plugin-host/plugins/m/codex-only"));
+  });
 });
