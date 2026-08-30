@@ -118,7 +118,7 @@ describe("filesystem plugin runtime", () => {
     expect(config.mcpServers[names[0]!] ).toMatchObject({ args: [expect.stringContaining("/alpha/server.mjs"), expect.stringContaining("/alpha")] });
   });
 
-  it("prefers the claude MCP document over a same-named codex declaration and reports the duplicate", async () => {
+  it("prefers the claude MCP document over a same-named codex host alternative without warning", async () => {
     const agentDir = await tempDir();
     const repository = await tempDir();
     await mkdir(join(repository, "plugins/krometrail-like/.claude-plugin"), { recursive: true });
@@ -149,7 +149,7 @@ describe("filesystem plugin runtime", () => {
     expect(Object.keys(plugin.mcp!)).toEqual(["krometrail"]);
     expect(plugin.mcp!.krometrail).toMatchObject({ command: "${CLAUDE_PLUGIN_ROOT}/bin/tool" });
     const duplicate = snapshot.diagnostics.find((item) => item.scope === "MCP.krometrail");
-    expect(duplicate?.message).toContain("duplicate");
+    expect(duplicate).toBeUndefined();
 
     // Substituted config keeps the claude declaration intact.
     const config = await host.buildMcpConfig(snapshot);

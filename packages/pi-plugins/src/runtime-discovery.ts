@@ -170,16 +170,19 @@ async function discoverPlugin(root: string, marketplace: string, name: string, d
   if (skillNames.includes("root")) skillPaths.push(root);
   if (skillNames.some((name) => name === "skills" || name.startsWith("skills/"))) skillPaths.push(join(root, "skills"));
 
-  const manifests: Record<string, unknown>[] = [];
-  for (const relativePath of [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
-    const manifest = await readManifest(root, relativePath, diagnostics);
-    if (manifest !== undefined) manifests.push(manifest);
+  const manifests: { host: "claude" | "codex"; value: Record<string, unknown> }[] = [];
+  for (const spec of [
+    { host: "claude" as const, path: ".claude-plugin/plugin.json" },
+    { host: "codex" as const, path: ".codex-plugin/plugin.json" },
+  ]) {
+    const manifest = await readManifest(root, spec.path, diagnostics);
+    if (manifest !== undefined) manifests.push({ host: spec.host, value: manifest });
   }
 
   const hookPaths = new Set<string>();
   const conventionalHooks = join(root, "hooks/hooks.json");
   if (await isFile(conventionalHooks)) hookPaths.add(conventionalHooks);
-  for (const manifest of manifests) {
+  for (const { value: manifest } of manifests) {
     if (typeof manifest.hooks === "string") {
       try {
         hookPaths.add(await declaredPath(root, manifest.hooks, "manifest hooks path") ?? "");
@@ -206,17 +209,17 @@ async function discoverPlugin(root: string, marketplace: string, name: string, d
     }
   }
 
-  const mcpDocuments: { source: string; value: unknown }[] = [];
+  const mcpDocuments: { source: string; value: unknown; host: "common" | "claude" | "codex" }[] = [];
   const loadedMcpPaths = new Set<string>();
   const conventionalMcp = join(root, ".mcp.json");
   if (await isFile(conventionalMcp)) {
-    mcpDocuments.push({ source: ".mcp.json", value: conventionalMcp });
+    mcpDocuments.push({ source: ".mcp.json", value: conventionalMcp, host: "common" });
     loadedMcpPaths.add(conventionalMcp);
   }
   // Manifest order is precedence order: the Claude document is the richer
   // declaration (variable substitution, relative-path roots), so a same-named
   // server in a later Codex manifest pointer must not clobber it.
-  for (const manifest of manifests) {
+  for (const { host, value: manifest } of manifests) {
     const declaration = manifest.mcpServers ?? manifest.mcp;
     if (typeof declaration === "string") {
       try {
@@ -226,12 +229,12 @@ async function discoverPlugin(root: string, marketplace: string, name: string, d
         // declaration, not a conflict, so skip it without a diagnostic.
         if (loadedMcpPaths.has(path)) continue;
         loadedMcpPaths.add(path);
-        mcpDocuments.push({ source: declaration, value: path });
+        mcpDocuments.push({ source: declaration, value: path, host });
       } catch (error) {
         diagnostics.push(diagnostic("manifest MCP path", error));
       }
     } else if (record(declaration)) {
-      mcpDocuments.push({ source: "manifest", value: declaration });
+      mcpDocuments.push({ source: `${host} manifest`, value: declaration, host });
     }
   }
   const mcpServers: Record<string, unknown> = {};
@@ -256,7 +259,14 @@ async function discoverPlugin(root: string, marketplace: string, name: string, d
         continue;
       }
       if (serverName in mcpServers) {
-        diagnostics.push(diagnostic(`MCP.${serverName}`, new Error(`duplicate MCP server declaration from ${document.source}; the earlier declaration wins`)));
+        // A dual-host package may need a Codex-relative command alongside a
+        // richer Claude/Pi declaration for the same logical server. Pi already
+        // gives the conventional/Claude declaration precedence; the later
+        // Codex alternative is expected compatibility metadata, not a runtime
+        // conflict worth warning every Pi session about.
+        if (document.host !== "codex") {
+          diagnostics.push(diagnostic(`MCP.${serverName}`, new Error(`duplicate MCP server declaration from ${document.source}; the earlier declaration wins`)));
+        }
         continue;
       }
       mcpServers[serverName] = server;
