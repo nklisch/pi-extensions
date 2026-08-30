@@ -88,7 +88,60 @@ describe("filesystem plugin runtime", () => {
     const ctx = context(repository);
     await handlers.get("session_start")?.({ reason: "reload" }, ctx);
     const result = await handlers.get("before_agent_start")?.({ systemPrompt: "BASE" }, ctx);
-    expect(result).toEqual({ systemPrompt: "BASE\n\nWORKBENCH_CONTEXT" });
+    expect(result).toEqual({
+      message: {
+        customType: "plugin-hook-context",
+        content: "WORKBENCH_CONTEXT",
+        display: false,
+      },
+    });
+  });
+
+  it("delivers UserPromptSubmit additional context as a model-visible message on the same turn", async () => {
+    const repository = await tempDir();
+    const output = JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "UserPromptSubmit",
+        additionalContext: "ADDRESSED_COMMENT_ID",
+      },
+    }).replace(/'/gu, "'\\''");
+    const snapshot = {
+      plugins: [{
+        info: {
+          marketplace: "m",
+          name: "digest",
+          root: "/plugin-root",
+          data: "/plugin-data",
+          enabled: true,
+          autoUpdate: false,
+        },
+        skillPaths: [],
+        skillNames: [],
+        hooks: [{
+          event: "UserPromptSubmit",
+          command: `printf '%s' '${output}'`,
+          timeoutMs: 5_000,
+        }],
+        diagnostics: [],
+      }],
+      skillPaths: [],
+      diagnostics: [],
+    } as unknown as RuntimeSnapshot;
+    const handlers = new Map<string, (...args: any[]) => unknown>();
+    registerPluginHooks({ on: (event: string, handler: (...args: any[]) => unknown) => handlers.set(event, handler) } as unknown as ExtensionAPI, snapshot);
+    const ctx = context(repository, { id: "pi-session" });
+
+    await handlers.get("input")?.({ text: "acknowledge", images: [], source: "rpc" }, ctx);
+    const result = await handlers.get("before_agent_start")?.({ systemPrompt: "BASE" }, ctx);
+
+    expect(result).toEqual({
+      message: {
+        customType: "plugin-hook-context",
+        content: "ADDRESSED_COMMENT_ID",
+        display: false,
+      },
+    });
+    await expect(handlers.get("before_agent_start")?.({ systemPrompt: "BASE" }, ctx)).resolves.toBeUndefined();
   });
 
   it("builds MCP configuration with recursive plugin root/data substitutions and collision namespaces", async () => {

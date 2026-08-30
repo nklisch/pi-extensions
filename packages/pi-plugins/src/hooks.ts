@@ -294,10 +294,20 @@ export function registerPluginHooks(pi: ExtensionAPI, snapshot: RuntimeSnapshot)
   pi.on("agent_end", async (_event: AgentEndEvent, ctx: ExtensionContext) => {
     await invoke("Stop", hookInput("Stop", ctx), ctx);
   });
-  pi.on("before_agent_start", async (event: BeforeAgentStartEvent, _ctx: ExtensionContext) => {
+  pi.on("before_agent_start", async (_event: BeforeAgentStartEvent, _ctx: ExtensionContext) => {
     if (pendingContext.length === 0) return undefined;
     const context = pendingContext.join("\n\n");
     pendingContext = [];
-    return { systemPrompt: `${event.systemPrompt}\n\n${context}` };
+    // Hook additionalContext is turn data, not a lasting system instruction.
+    // Deliver it as a model-visible message so UserPromptSubmit digests are
+    // unambiguous in every host mode, including RPC, and remain auditable in
+    // the session transcript.
+    return {
+      message: {
+        customType: "plugin-hook-context",
+        content: context,
+        display: false,
+      },
+    };
   });
 }

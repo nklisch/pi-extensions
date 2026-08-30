@@ -99,8 +99,10 @@ Supported Claude hook events include `SessionStart`, `SessionEnd`,
 `PreCompact`, `PostCompact`, and `Stop`. Hook processes receive JSON on stdin,
 the plugin root/data variables, `CLAUDE_PROJECT_DIR`, a bounded timeout, and
 cancellation. Hook failures are reported for that plugin and do not disable
-unrelated bundles. SessionStart `hookSpecificOutput.additionalContext` is
-injected into the next Pi system prompt.
+unrelated bundles. `hookSpecificOutput.additionalContext` is delivered on the
+same turn as a model-visible, transcript-backed context message; this preserves
+per-turn `UserPromptSubmit` digests instead of treating them as lasting system
+instructions.
 
 MCP declarations are recursively expanded for the plugin root, persistent data
 root, and project root, then passed as an in-memory `{ mcpServers }` overlay to
