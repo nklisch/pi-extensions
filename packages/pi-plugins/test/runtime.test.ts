@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { executeHookCommand, registerPluginHooks } from "../src/hooks.js";
 import { createPluginHost } from "../src/index.js";
 import type { RuntimeSnapshot } from "../src/index.js";
@@ -14,11 +14,21 @@ async function tempDir(): Promise<string> {
   return value;
 }
 afterEach(async () => {
+  delete process.env.PI_PLUGIN_SESSION_ID;
   await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-function context(cwd: string): ExtensionContext {
-  return { cwd, hasUI: false, mode: "tui", signal: undefined } as unknown as ExtensionContext;
+function context(cwd: string, session?: { id: string; file?: string }): ExtensionContext {
+  return {
+    cwd,
+    hasUI: false,
+    mode: "tui",
+    signal: undefined,
+    sessionManager: {
+      getSessionId: () => session?.id ?? "",
+      getSessionFile: () => session?.file,
+    },
+  } as unknown as ExtensionContext;
 }
 
 describe("filesystem plugin runtime", () => {
@@ -164,7 +174,195 @@ describe("filesystem plugin runtime", () => {
     await host.installPlugin("m", "codex-only");
     const snapshot = await host.scanRuntime();
     const config = await host.buildMcpConfig(snapshot);
-    const declared = config.mcpServers.server as { cwd: string };
+    const declared = config.mcpServers.server as { cwd: string; env: Record<string, string> };
     expect(declared.cwd).toBe(join(agentDir, "plugin-host/plugins/m/codex-only"));
+    expect(declared.env).toMatchObject({
+      PI_SESSION_ID: "$env:PI_PLUGIN_SESSION_ID",
+      CLAUDE_SESSION_ID: "$env:PI_PLUGIN_SESSION_ID",
+    });
+  });
+
+  describe("session identity and shell result passthrough", () => {
+    // Hook children spawn with ctx.cwd, so it must be a real directory.
+    let cwd = "";
+    beforeEach(async () => {
+      cwd = await tempDir();
+    });
+    // A probe hook: parses the stdin payload and records it alongside the
+    // identity environment variables the runtime must export, into a file
+    // next to the probe script (hook stdout is reserved for hook output
+    // semantics, so a file is the reliable capture channel).
+    async function identityProbeSnapshot(event: string, matcher?: string): Promise<{ snapshot: RuntimeSnapshot; capture: string }> {
+      const dir = await tempDir();
+      const probe = join(dir, "identity-probe.mjs");
+      const capture = join(dir, "captured.json");
+      await writeFile(probe, [
+        "import { writeFileSync } from 'node:fs';",
+        "let data = '';",
+        "process.stdin.on('data', (chunk) => { data += chunk; });",
+        "process.stdin.on('end', () => {",
+        "  const payload = JSON.parse(data);",
+        "  writeFileSync(process.env.IDENTITY_PROBE_OUT, JSON.stringify({",
+        "    payload,",
+        "    pi_session_id: process.env.PI_SESSION_ID,",
+        "    claude_session_id: process.env.CLAUDE_SESSION_ID,",
+        "  }));",
+        "});",
+      ].join("\n"));
+      const snapshot = {
+        plugins: [{
+          info: {
+            marketplace: "m",
+            name: "identity-probe",
+            root: "/plugin-root",
+            data: "/plugin-data",
+            enabled: true,
+            autoUpdate: false,
+          },
+          skillPaths: [],
+          skillNames: [],
+          hooks: [{ event, command: `IDENTITY_PROBE_OUT=${JSON.stringify(capture)} ${process.execPath} ${probe}`, timeoutMs: 5_000, ...(matcher === undefined ? {} : { matcher }) }],
+          diagnostics: [],
+        }],
+        skillPaths: [],
+        diagnostics: [],
+      } as unknown as RuntimeSnapshot;
+      return { snapshot, capture };
+    }
+
+    async function readCaptured(capture: string): Promise<{ payload: Record<string, unknown>; pi_session_id?: string; claude_session_id?: string }> {
+      return JSON.parse(await readFile(capture, "utf8")) as { payload: Record<string, unknown>; pi_session_id?: string; claude_session_id?: string };
+    }
+
+    function handlersOf(snapshot: RuntimeSnapshot) {
+      const handlers = new Map<string, (...args: any[]) => unknown>();
+      registerPluginHooks({ on: (event: string, handler: (...args: any[]) => unknown) => handlers.set(event, handler) } as unknown as ExtensionAPI, snapshot);
+      return handlers;
+    }
+
+    it("puts the pi session id and transcript path in every hook payload and child environment", async () => {
+      const { snapshot, capture } = await identityProbeSnapshot("SessionStart");
+      const handlers = handlersOf(snapshot);
+      await handlers.get("session_start")?.(
+        { reason: "reload" },
+        context(cwd, { id: "pi-sess-123", file: "/sessions/pi-sess-123.jsonl" }),
+      );
+      const delivered = await readCaptured(capture);
+      expect(delivered.payload.session_id).toBe("pi-sess-123");
+      expect(delivered.payload.transcript_path).toBe("/sessions/pi-sess-123.jsonl");
+      // Environment parity: the same opaque instance id under both names.
+      expect(delivered.pi_session_id).toBe("pi-sess-123");
+      expect(delivered.claude_session_id).toBe("pi-sess-123");
+    });
+
+    it("treats the Claude manifest '*' matcher as an all-events wildcard", async () => {
+      const { snapshot, capture } = await identityProbeSnapshot("SessionStart", "*");
+      const handlers = handlersOf(snapshot);
+      await handlers.get("session_start")?.(
+        { reason: "startup" },
+        context(cwd, { id: "pi-sess-wildcard" }),
+      );
+      const delivered = await readCaptured(capture);
+      expect(delivered.payload.hook_event_name).toBe("SessionStart");
+      expect(delivered.payload.session_id).toBe("pi-sess-wildcard");
+    });
+
+    it("publishes the current identity for later MCP child startup and clears it on shutdown", async () => {
+      const { snapshot } = await identityProbeSnapshot("SessionStart");
+      const handlers = handlersOf(snapshot);
+      const ctx = context(cwd, { id: "pi-sess-mcp-child" });
+      await handlers.get("session_start")?.({ reason: "startup" }, ctx);
+      expect(process.env.PI_PLUGIN_SESSION_ID).toBe("pi-sess-mcp-child");
+      await handlers.get("session_shutdown")?.({ reason: "quit" }, ctx);
+      expect(process.env.PI_PLUGIN_SESSION_ID).toBeUndefined();
+    });
+
+    it("omits identity fields and env vars when no session is available", async () => {
+      const { snapshot, capture } = await identityProbeSnapshot("SessionStart");
+      const handlers = handlersOf(snapshot);
+      await handlers.get("session_start")?.({ reason: "reload" }, context(cwd));
+      const delivered = await readCaptured(capture);
+      expect(delivered.payload.session_id).toBeUndefined();
+      expect(delivered.payload.transcript_path).toBeUndefined();
+      expect(delivered.pi_session_id).toBeUndefined();
+      expect(delivered.claude_session_id).toBeUndefined();
+    });
+
+    it("adds a CC-shaped tool_response for shell results while retaining tool_output", async () => {
+      const { snapshot, capture } = await identityProbeSnapshot("PostToolUse");
+      const handlers = handlersOf(snapshot);
+      await handlers.get("tool_result")?.({
+        type: "tool_result",
+        toolName: "bash",
+        toolCallId: "t1",
+        input: { command: "git commit -m 'x'" },
+        content: [{ type: "text", text: "[main abcd123] done" }],
+        isError: false,
+        details: undefined,
+      }, context(cwd, { id: "pi-sess-123" }));
+      const delivered = await readCaptured(capture);
+      expect(delivered.payload.hook_event_name).toBe("PostToolUse");
+      expect(delivered.payload.tool_output).toEqual([{ type: "text", text: "[main abcd123] done" }]);
+      expect(delivered.payload.tool_response).toEqual({ exit_code: 0, stdout: "[main abcd123] done", stderr: "" });
+    });
+
+    it("derives exit_code from pi's failure status line and routes the failure event", async () => {
+      const { snapshot, capture } = await identityProbeSnapshot("PostToolUseFailure");
+      const handlers = handlersOf(snapshot);
+      await handlers.get("tool_result")?.({
+        type: "tool_result",
+        toolName: "bash",
+        toolCallId: "t2",
+        input: { command: "git commit -m 'x'" },
+        content: [{ type: "text", text: "nothing to commit\n\nCommand exited with code 1" }],
+        isError: true,
+        details: undefined,
+      }, context(cwd, { id: "pi-sess-123" }));
+      const delivered = await readCaptured(capture);
+      expect(delivered.payload.hook_event_name).toBe("PostToolUseFailure");
+      expect(delivered.payload.tool_response).toEqual({
+        exit_code: 1,
+        stdout: "nothing to commit\n\nCommand exited with code 1",
+        stderr: "",
+      });
+    });
+
+    it("uses pi's explicit nonzero status line even when the result event is not marked as an error", async () => {
+      const { snapshot, capture } = await identityProbeSnapshot("PostToolUse");
+      const handlers = handlersOf(snapshot);
+      await handlers.get("tool_result")?.({
+        type: "tool_result",
+        toolName: "bash",
+        toolCallId: "t-status",
+        input: { command: "git commit -m 'x'" },
+        content: [{ type: "text", text: "nothing to commit\n\nCommand exited with code 1" }],
+        isError: false,
+        details: undefined,
+      }, context(cwd, { id: "pi-sess-123" }));
+      const delivered = await readCaptured(capture);
+      expect(delivered.payload.hook_event_name).toBe("PostToolUse");
+      expect(delivered.payload.tool_response).toEqual({
+        exit_code: 1,
+        stdout: "nothing to commit\n\nCommand exited with code 1",
+        stderr: "",
+      });
+    });
+
+    it("does not add tool_response for non-shell tools", async () => {
+      const { snapshot, capture } = await identityProbeSnapshot("PostToolUse");
+      const handlers = handlersOf(snapshot);
+      await handlers.get("tool_result")?.({
+        type: "tool_result",
+        toolName: "read",
+        toolCallId: "t3",
+        input: { path: "/repo/f.txt" },
+        content: [{ type: "text", text: "file body" }],
+        isError: false,
+        details: undefined,
+      }, context(cwd, { id: "pi-sess-123" }));
+      const delivered = await readCaptured(capture);
+      expect(delivered.payload.tool_response).toBeUndefined();
+      expect(delivered.payload.tool_output).toEqual([{ type: "text", text: "file body" }]);
+    });
   });
 });

@@ -25,12 +25,13 @@ function namespace(plugin: RuntimeSnapshot["plugins"][number], server: string): 
 }
 
 /**
- * Anchor stdio servers to the plugin root. Codex-style declarations commonly
- * use cwd-relative commands (`sh bin/launcher`), and pi launches MCP children
- * from the project directory, not the plugin directory — without this anchor
- * every such plugin server fails to start out of the box. A declaration's own
- * relative `cwd` is honored relative to the plugin root; absolute paths and
- * non-stdio servers are left untouched.
+ * Anchor stdio servers to the plugin root and give their child process the
+ * same opaque Pi session identity used by hooks. Codex-style declarations
+ * commonly use cwd-relative commands (`sh bin/launcher`), and pi launches MCP
+ * children from the project directory. The `$env:` values are resolved by
+ * pi-mcp-adapter when the child starts, after SessionStart has published the
+ * current identity. A declaration's own relative `cwd` and env are preserved;
+ * absolute paths and non-stdio servers are left untouched.
  */
 function resolvePluginStdioCwd(definition: unknown, pluginRoot: string): unknown {
   if (definition === null || typeof definition !== "object" || Array.isArray(definition)) return definition;
@@ -38,7 +39,18 @@ function resolvePluginStdioCwd(definition: unknown, pluginRoot: string): unknown
   if (typeof server.command !== "string" || server.command.length === 0) return definition;
   const declared = typeof server.cwd === "string" && server.cwd.trim().length > 0 ? server.cwd : ".";
   const resolved = isAbsolute(declared) || declared.startsWith("~") ? declared : resolve(pluginRoot, declared);
-  return { ...server, cwd: resolved };
+  const declaredEnv = server.env !== null && typeof server.env === "object" && !Array.isArray(server.env)
+    ? server.env as Record<string, unknown>
+    : {};
+  return {
+    ...server,
+    cwd: resolved,
+    env: {
+      ...declaredEnv,
+      PI_SESSION_ID: "$env:PI_PLUGIN_SESSION_ID",
+      CLAUDE_SESSION_ID: "$env:PI_PLUGIN_SESSION_ID",
+    },
+  };
 }
 
 /** Build the only MCP input this package gives to pi-mcp-adapter. */

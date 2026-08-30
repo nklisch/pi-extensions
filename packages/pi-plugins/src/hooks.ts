@@ -15,6 +15,7 @@ import type {
 import type { HookExecutionResult, HookOutput, PluginHookCommand, RuntimeSnapshot, SupportedHookEvent } from "./types.js";
 
 const MAX_OUTPUT_BYTES = 1_000_000;
+const PLUGIN_SESSION_ENV = "PI_PLUGIN_SESSION_ID";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -138,22 +139,40 @@ function matcherValue(event: SupportedHookEvent, input: JsonRecord): string {
 }
 
 function matches(command: PluginHookCommand, input: JsonRecord): boolean {
-  if (command.matcher === undefined || command.matcher.length === 0) return true;
+  // Claude hook manifests use "*" as the all-events wildcard. It is not a
+  // valid standalone JavaScript regular expression, so handle that manifest
+  // sentinel before compiling ordinary matcher expressions.
+  if (command.matcher === undefined || command.matcher.length === 0 || command.matcher === "*") return true;
   try { return new RegExp(command.matcher, "u").test(matcherValue(command.event, input)); } catch { return false; }
 }
 
-function baseEnvironment(plugin: RuntimeSnapshot["plugins"][number], cwd: string): Readonly<Record<string, string>> {
+function baseEnvironment(plugin: RuntimeSnapshot["plugins"][number], cwd: string, sessionId: string): Readonly<Record<string, string>> {
   return Object.freeze({
     PLUGIN_ROOT: plugin.info.root,
     CLAUDE_PLUGIN_ROOT: plugin.info.root,
     PLUGIN_DATA: plugin.info.data,
     CLAUDE_PLUGIN_DATA: plugin.info.data,
     CLAUDE_PROJECT_DIR: cwd,
+    // Identity passthrough: hook subprocesses receive the same opaque instance
+    // id the stdin payload carries under `session_id`. PI_SESSION_ID is the
+    // native pi name; CLAUDE_SESSION_ID is the CC/Codex compatibility name
+    // that session-bound tools (e.g. jamsesh) resolve. Omitted when the
+    // session id is unavailable rather than shadowing an inherited value
+    // with an empty string.
+    ...(sessionId.length === 0 ? {} : { PI_SESSION_ID: sessionId, CLAUDE_SESSION_ID: sessionId }),
   });
 }
 
 function hookInput(event: SupportedHookEvent, ctx: ExtensionContext, values: JsonRecord = {}): JsonRecord {
-  return { hook_event_name: event, cwd: ctx.cwd, ...values };
+  const sessionId = ctx.sessionManager.getSessionId();
+  const transcriptPath = ctx.sessionManager.getSessionFile();
+  return {
+    hook_event_name: event,
+    cwd: ctx.cwd,
+    ...(sessionId.length === 0 ? {} : { session_id: sessionId }),
+    ...(transcriptPath === undefined ? {} : { transcript_path: transcriptPath }),
+    ...values,
+  };
 }
 
 function sessionStartReason(reason: SessionStartEvent["reason"]): "startup" | "resume" | "clear" {
@@ -178,17 +197,39 @@ function mergeAggregate(left: HookAggregate, output: HookOutput | undefined): Ho
   };
 }
 
+/**
+ * CC-shaped tool_response for shell tools, built from the most accurate Pi
+ * event data available. Pi merges command output into one text stream and
+ * signals failure by throwing (isError plus a trailing "Command exited with
+ * code N" status line), so exit_code is 0 on success, parsed from that status
+ * line on failure, else 1, and the combined output is reported as stdout.
+ * This restores information for CC-format hooks that consult result fields;
+ * correctness consumers (e.g. jamsesh) must not depend on it.
+ */
+function ccShellToolResponse(event: ToolResultEvent): JsonRecord | undefined {
+  if (event.toolName !== "bash") return undefined;
+  // Text-only join: image content blocks contribute nothing to a shell result.
+  const stdout = event.content
+    .map((item) => (item.type === "text" ? item.text : ""))
+    .filter((text) => text.length > 0)
+    .join("\n");
+  const parsed = /Command exited with code (\d+)\s*$/.exec(stdout);
+  const exitCode = parsed ? Number(parsed[1]) : (event.isError ? 1 : 0);
+  return { exit_code: exitCode, stdout, stderr: "" };
+}
+
 export function registerPluginHooks(pi: ExtensionAPI, snapshot: RuntimeSnapshot): void {
   let pendingContext: string[] = [];
 
   const invoke = async (event: SupportedHookEvent, input: JsonRecord, ctx: ExtensionContext): Promise<HookAggregate> => {
     let aggregate = emptyAggregate();
+    const sessionId = ctx.sessionManager.getSessionId();
     for (const plugin of snapshot.plugins.filter((item) => item.info.enabled)) {
       for (const command of plugin.hooks.filter((item) => item.event === event && matches(item, input))) {
         const result = await executeHookCommand({
           command: command.command,
           cwd: ctx.cwd,
-          environment: baseEnvironment(plugin, ctx.cwd),
+          environment: baseEnvironment(plugin, ctx.cwd, sessionId),
           timeoutMs: command.timeoutMs,
           ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
           stdin: input,
@@ -205,10 +246,22 @@ export function registerPluginHooks(pi: ExtensionAPI, snapshot: RuntimeSnapshot)
   };
 
   pi.on("session_start", async (event: SessionStartEvent, ctx: ExtensionContext) => {
+    // MCP config is assembled before a session context exists. Publish the
+    // current opaque session id into this Pi process before later-registered
+    // MCP lifecycle handlers start stdio children; plugin declarations can
+    // opt in with `$env:PI_PLUGIN_SESSION_ID` without exposing it globally to
+    // every child process.
+    const sessionId = ctx.sessionManager.getSessionId();
+    if (sessionId.length === 0) delete process.env[PLUGIN_SESSION_ENV];
+    else process.env[PLUGIN_SESSION_ENV] = sessionId;
     await invoke("SessionStart", hookInput("SessionStart", ctx, { reason: sessionStartReason(event.reason), pi_reason: event.reason }), ctx);
   });
   pi.on("session_shutdown", async (event: SessionShutdownEvent, ctx: ExtensionContext) => {
-    await invoke("SessionEnd", hookInput("SessionEnd", ctx, { reason: event.reason }), ctx);
+    try {
+      await invoke("SessionEnd", hookInput("SessionEnd", ctx, { reason: event.reason }), ctx);
+    } finally {
+      delete process.env[PLUGIN_SESSION_ENV];
+    }
   });
   pi.on("input", async (event: InputEvent, ctx: ExtensionContext) => {
     const result = await invoke("UserPromptSubmit", hookInput("UserPromptSubmit", ctx, { prompt: event.text }), ctx);
@@ -222,7 +275,14 @@ export function registerPluginHooks(pi: ExtensionAPI, snapshot: RuntimeSnapshot)
   });
   pi.on("tool_result", async (event: ToolResultEvent, ctx: ExtensionContext) => {
     const hookEvent: SupportedHookEvent = event.isError ? "PostToolUseFailure" : "PostToolUse";
-    await invoke(hookEvent, hookInput(hookEvent, ctx, { tool_name: event.toolName, tool_input: event.input, tool_output: event.content, is_error: event.isError }), ctx);
+    const toolResponse = ccShellToolResponse(event);
+    await invoke(hookEvent, hookInput(hookEvent, ctx, {
+      tool_name: event.toolName,
+      tool_input: event.input,
+      tool_output: event.content,
+      is_error: event.isError,
+      ...(toolResponse === undefined ? {} : { tool_response: toolResponse }),
+    }), ctx);
   });
   pi.on("session_before_compact", async (event: SessionBeforeCompactEvent, ctx: ExtensionContext) => {
     const result = await invoke("PreCompact", hookInput("PreCompact", ctx, { reason: event.reason }), ctx);
