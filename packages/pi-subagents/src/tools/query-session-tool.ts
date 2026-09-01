@@ -19,7 +19,7 @@ const MAX_QUERY_OUTPUT_LINES = 2_000;
 // Leave room for the summary, source path, omission tail, and a final line/
 // byte boundary. The entry budget is intentionally smaller than Pi's limits;
 // entries are additionally checked against the actual fixed text below.
-const MAX_QUERY_ENTRY_BYTES = 40 * 1024;
+const MAX_QUERY_ENTRY_BYTES = 39 * 1024;
 const MAX_QUERY_ENTRY_LINES = 1_800;
 const MAX_QUERY_METADATA_LINE_BYTES = 2_048;
 const MAX_QUERY_TRANSCRIPT_PATH_BYTES = 1_024;
@@ -27,7 +27,7 @@ const utf8Encoder = new TextEncoder();
 const VALID_KINDS = new Set<SessionQueryKind>(["all", "messages", "tool_calls", "tool_results"]);
 const VALID_ORDERS = new Set<SessionQueryOrder>(["newest", "oldest"]);
 
-export type QuerySessionOutcome = "matches" | "no_matches" | "transcript_unavailable" | "not_found" | "read_error";
+export type QuerySessionOutcome = "matches" | "no_matches" | "page_out_of_range" | "transcript_unavailable" | "not_found" | "read_error";
 
 export interface QuerySessionDetails {
   readonly outcome: QuerySessionOutcome;
@@ -46,10 +46,17 @@ export interface QuerySessionDetails {
   readonly kind?: SessionQueryKind;
   readonly order?: SessionQueryOrder;
   readonly limit?: number;
+  readonly offset?: number;
   readonly entries?: readonly SessionQueryEntry[];
   readonly totalMatches?: number;
+  readonly returnedCount?: number;
+  readonly nextOffset?: number;
+  readonly previousOffset?: number;
+  readonly omittedBefore?: number;
+  readonly omittedAfter?: number;
   readonly hasMore?: boolean;
-  readonly omittedCount?: number;
+  /** True means every searchable field was examined, not just a preview prefix. */
+  readonly searchComplete?: boolean;
   readonly truncation?: {
     readonly output: boolean;
     readonly omittedMatches: number;
@@ -79,6 +86,7 @@ export class QuerySessionTool {
       kind?: SessionQueryKind;
       order?: SessionQueryOrder;
       limit?: number;
+      offset?: number;
     },
     _signal: AbortSignal | undefined,
     _onUpdate: unknown,
@@ -131,18 +139,26 @@ export class QuerySessionTool {
       kind: params.kind,
       order: params.order,
       limit: params.limit,
+      offset: params.offset,
     });
     const summary = boundedOutputLine(summaryLine(base), MAX_QUERY_METADATA_LINE_BYTES);
     const sourceDescription = boundedOutputLine(
       `${source}${record.outputFile ? ` (${record.outputFile})` : ""}`,
       MAX_QUERY_METADATA_LINE_BYTES,
     );
-    const prefix = `${summary}\nSource: ${sourceDescription}\n`;
-    // Reserve the largest possible omission tail before selecting entries. This
-    // prevents a later bounds notice from pushing an otherwise-fitting body
-    // over Pi's byte or line ceiling.
-    const maximumOmittedCount = result.omittedCount + result.entries.length;
-    const reservedTail = omissionTail(maximumOmittedCount, record.outputFile);
+    const prefix = `${summary}\nSource: ${sourceDescription}\nSearch: complete (full transcript fields).\n`;
+    // Reserve the largest possible omission/navigation tail before selecting
+    // entries. This keeps a later bounds notice from pushing the body over
+    // Pi's byte or line ceiling.
+    const maximumOmittedCount = result.omittedBefore + result.omittedAfter + result.entries.length;
+    const reservedTail = omissionTail(
+      maximumOmittedCount,
+      maximumOmittedCount,
+      maximumOmittedCount,
+      result.nextOffset,
+      result.previousOffset,
+      record.outputFile,
+    );
     const output = formatEntries(
       result.entries,
       Math.min(
@@ -154,8 +170,16 @@ export class QuerySessionTool {
         Math.max(0, MAX_QUERY_OUTPUT_LINES - lineCount(prefix) - lineCount(reservedTail) - 1),
       ),
     );
-    const omittedCount = result.omittedCount + output.omittedCount;
-    const outcome: QuerySessionOutcome = result.entries.length > 0 ? "matches" : "no_matches";
+    const returnedCount = output.entries.length;
+    const omittedBefore = result.omittedBefore;
+    const omittedAfter = Math.max(0, result.totalMatches - result.offset - returnedCount);
+    // Recompute this from entries that really made it into the output. If the
+    // byte/line budget drops entries from a page, the next request starts after
+    // only those entries and cannot skip an unseen match.
+    const nextOffset = result.outcome === "matches" && returnedCount > 0 && result.offset + returnedCount < result.totalMatches
+      ? result.offset + returnedCount
+      : undefined;
+    const outcome = result.outcome;
     const details: QuerySessionDetails = {
       ...base,
       outcome,
@@ -165,22 +189,37 @@ export class QuerySessionTool {
       kind: params.kind ?? "all",
       order: params.order ?? "newest",
       limit: params.limit ?? DEFAULT_QUERY_LIMIT,
+      offset: result.offset,
       entries: output.entries,
       totalMatches: result.totalMatches,
-      hasMore: omittedCount > 0,
-      omittedCount,
-      ...(omittedCount > 0 ? {
+      returnedCount,
+      ...(nextOffset === undefined ? {} : { nextOffset }),
+      ...(result.previousOffset === undefined ? {} : { previousOffset: result.previousOffset }),
+      omittedBefore,
+      omittedAfter,
+      hasMore: nextOffset !== undefined,
+      searchComplete: true,
+      ...(output.omittedCount > 0 ? {
         truncation: {
-          output: output.omittedCount > 0,
-          omittedMatches: omittedCount,
+          output: true,
+          omittedMatches: output.omittedCount,
           ...(record.outputFile ? { transcriptPath: record.outputFile } : {}),
         },
       } : {}),
     };
-    const body = result.entries.length === 0
+    const body = outcome === "no_matches"
       ? "No transcript entries match the requested query."
-      : output.lines.join("\n");
-    const tail = omissionTail(omittedCount, record.outputFile);
+      : outcome === "page_out_of_range"
+        ? `No transcript page starts at offset ${result.offset}; ${result.totalMatches} matching entr${result.totalMatches === 1 ? "y is" : "ies are"} available.`
+        : output.lines.join("\n");
+    const tail = omissionTail(
+      omittedBefore,
+      omittedAfter,
+      output.omittedCount,
+      nextOffset,
+      result.previousOffset,
+      record.outputFile,
+    );
     return textResult(`${prefix}${body}${tail}`, details);
   }
 
@@ -189,10 +228,10 @@ export class QuerySessionTool {
       name: "query_subagent_session" as const,
       label: "Query Subagent Session",
       promptSnippet: "query_subagent_session: Search a bounded child transcript without steering it.",
-      description: "Query a subagent's recent or matching messages and tool calls. Search is case-insensitive literal text, bounded, and read-only; use get_subagent_result for the final result and list_subagents for fleet triage.",
+      description: "Query a subagent's recent or matching messages and tool calls. Search is complete, case-insensitive literal text over full fields, bounded only in returned excerpts/output, and read-only; use get_subagent_result for the final result and list_subagents for fleet triage.",
       parameters: Type.Object({
         agent_id: Type.String({ description: "The subagent ID to inspect." }),
-        query: Type.Optional(Type.String({ description: "Case-insensitive literal text. Omit or use an empty string for recent entries." })),
+        query: Type.Optional(Type.String({ description: "Case-insensitive literal text. Omit or use an empty string for beginning-of-entry previews." })),
         kind: Type.Optional(Type.Union([
           Type.Literal("all"),
           Type.Literal("messages"),
@@ -204,6 +243,7 @@ export class QuerySessionTool {
           Type.Literal("oldest"),
         ], { description: "Result order. Defaults to newest." })),
         limit: Type.Optional(Type.Integer({ minimum: MIN_QUERY_LIMIT, maximum: MAX_QUERY_LIMIT, description: "Maximum entries, 1-50; defaults to 20." })),
+        offset: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: "Non-negative safe integer offset into the ordered matching entries; defaults to 0." })),
       }),
       execute: (toolCallId: string, params: {
         agent_id?: string;
@@ -211,6 +251,7 @@ export class QuerySessionTool {
         kind?: SessionQueryKind;
         order?: SessionQueryOrder;
         limit?: number;
+        offset?: number;
       }, signal: AbortSignal | undefined, onUpdate: unknown, ctx: unknown) => this.execute(toolCallId, params, signal, onUpdate, ctx),
     });
   }
@@ -222,6 +263,7 @@ function validateParams(params: {
   kind?: SessionQueryKind;
   order?: SessionQueryOrder;
   limit?: number;
+  offset?: number;
 }): string | undefined {
   if (typeof params.agent_id !== "string" || params.agent_id.length === 0) return "agent_id must be a non-empty string";
   if (params.query !== undefined && typeof params.query !== "string") return "query must be a string";
@@ -230,6 +272,8 @@ function validateParams(params: {
   if (params.limit !== undefined && (!Number.isInteger(params.limit) || params.limit < MIN_QUERY_LIMIT || params.limit > MAX_QUERY_LIMIT)) {
     return `limit must be an integer from ${MIN_QUERY_LIMIT} to ${MAX_QUERY_LIMIT}`;
   }
+  if (params.offset !== undefined && !Number.isSafeInteger(params.offset)) return "offset must be a non-negative safe integer";
+  if (params.offset !== undefined && params.offset < 0) return "offset must be a non-negative safe integer";
   return undefined;
 }
 
@@ -277,7 +321,25 @@ function formatEntries(
     const addition = selected.length === 0 ? line : `\n${line}`;
     const additionBytes = utf8ByteLength(addition);
     const additionLines = lineCount(addition);
-    if (bytes + additionBytes > maxBytes || lineTotal + additionLines > maxLines) break;
+    if (bytes + additionBytes > maxBytes || lineTotal + additionLines > maxLines) {
+      // A newline-dense first entry can exceed the line budget even though its
+      // projection is character-bounded. Compact only this fallback
+      // representation so a real match can always make progress; later pages
+      // still use the normal output bounds and the returned count remains exact.
+      if (selected.length === 0) {
+        const compactLine = formatEntry(entry, true);
+        const compactAddition = compactLine;
+        const compactBytes = utf8ByteLength(compactAddition);
+        const compactLines = lineCount(compactAddition);
+        if (compactBytes <= maxBytes && compactLines <= maxLines) {
+          selected.push(entry);
+          lines.push(compactLine);
+          bytes = compactBytes;
+          lineTotal = compactLines;
+        }
+      }
+      break;
+    }
     selected.push(entry);
     lines.push(line);
     bytes += additionBytes;
@@ -286,13 +348,21 @@ function formatEntries(
   return { entries: selected, lines, omittedCount: entries.length - selected.length };
 }
 
-function formatEntry(entry: SessionQueryEntry): string {
+function formatEntry(entry: SessionQueryEntry, compact = false): string {
+  const display = (value: string): string => compact ? compactLineBreaks(value) : value;
+  const match = entry.match === undefined
+    ? ""
+    : ` · match=${entry.match.field} [${entry.match.sourceRange.start},${entry.match.sourceRange.end})`;
   if (entry.kind === "message") {
-    return `[${entry.role}] ${entry.id}\n${entry.text}`;
+    return `[${entry.role}] ${entry.id}${match}\n${display(entry.text)}`;
   }
-  const callId = entry.toolCallId ? ` id=${entry.toolCallId}` : "";
-  const result = entry.result === undefined ? "" : `\nresult: ${entry.result}`;
-  return `[tool ${entry.toolName}${callId} · ${entry.state}] ${entry.id}\narguments: ${entry.arguments}${result}`;
+  const callIdentity = entry.toolCallId ?? entry.id;
+  const result = entry.result === undefined ? "" : `\nresult: ${display(entry.result)}`;
+  return `[tool ${display(entry.toolName)} · ${entry.state}] id=${display(callIdentity)}${match}\narguments: ${display(entry.arguments)}${result}`;
+}
+
+function compactLineBreaks(value: string): string {
+  return value.replace(/\r\n|\r|\n/g, " ");
 }
 
 function utf8ByteLength(value: string): number {
@@ -321,10 +391,22 @@ function boundedOutputLine(value: string, maxBytes: number): string {
   return `${output}${ellipsis}`;
 }
 
-function omissionTail(omittedCount: number, transcriptPath: string | undefined): string {
-  if (omittedCount <= 0) return "";
-  const path = transcriptPath
-    ? ` Full transcript: ${boundedOutputLine(transcriptPath, MAX_QUERY_TRANSCRIPT_PATH_BYTES)}`
-    : "";
-  return `\n\n${omittedCount} matching entr${omittedCount === 1 ? "y was" : "ies were"} omitted by the bounds.${path}`;
+function omissionTail(
+  omittedBefore: number,
+  omittedAfter: number,
+  outputOmitted: number,
+  nextOffset: number | undefined,
+  previousOffset: number | undefined,
+  transcriptPath: string | undefined,
+): string {
+  const lines: string[] = [];
+  if (omittedBefore > 0) lines.push(`${omittedBefore} matching entr${omittedBefore === 1 ? "y precedes" : "ies precede"} this page.`);
+  if (omittedAfter > 0) lines.push(`${omittedAfter} matching entr${omittedAfter === 1 ? "y remains" : "ies remain"} after this page.`);
+  if (outputOmitted > 0) lines.push(`${outputOmitted} entries from this page were omitted by the output bounds.`);
+  if (nextOffset !== undefined) lines.push(`More matches available; repeat with offset: ${nextOffset}.`);
+  if (previousOffset !== undefined) lines.push(`Previous page available; repeat with offset: ${previousOffset}.`);
+  if (transcriptPath && outputOmitted > 0) {
+    lines.push(`Full transcript: ${boundedOutputLine(transcriptPath, MAX_QUERY_TRANSCRIPT_PATH_BYTES)}`);
+  }
+  return lines.length === 0 ? "" : `\n\n${lines.join("\n")}`;
 }

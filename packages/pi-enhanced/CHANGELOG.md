@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.1
+
+### Fixed
+
+- Rebundle `@nklisch/pi-plugins` 0.8.1 and `@nklisch/pi-subagents` 18.2.0-nklisch.1 with complete long-transcript search, match-centered excerpts, and stateless result paging.
+
 ## v0.3.0
 
 ### Changed

@@ -365,11 +365,18 @@ src/
 ### Transcript query boundary
 
 `query_subagent_session` is a parent-only, read-only pull surface. Its pure
-`session/query.ts` projection correlates tool results to calls, caps searchable
-fields and excerpts, and applies literal case-insensitive matching, scope,
-ordering, and a 1–50 result limit on every call. It reads a live child session
-when retained and otherwise uses the same Pi JSONL/context adapter as native
-session navigation. No index or query state is persisted.
+`session/query.ts` projection correlates tool results to calls, searches every
+complete visible field with literal case-insensitive matching, and returns
+match-centered bounded excerpts with source-range metadata. Tool names and call
+IDs remain complete only in the projection-local search/correlation data;
+returned display values are bounded while stable entry IDs remain intact for the
+overlay. Scope, ordering, 1–50 result limits, and stateless numeric offsets page
+the ordered matching set; byte and line output bounds may shorten a page without
+advancing beyond entries actually returned, but a non-empty page always emits a
+bounded first entry. It reads a live child session when retained and otherwise
+uses the same Pi JSONL/context adapter as native session navigation. No index,
+cursor, or query state is persisted, and successful reads report complete
+search rather than a partial-search state.
 
 `/subagents:sessions` keeps Pi's native message, markdown, and tool-execution
 components for the transcript body. Its overlay owns only ephemeral search

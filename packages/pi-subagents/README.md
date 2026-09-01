@@ -236,8 +236,9 @@ Search a child transcript without steering or changing the child. The tool reads
 | `kind` | `all`, `messages`, `tool_calls`, or `tool_results` | no | Search scope; defaults to `all` |
 | `order` | `newest` or `oldest` | no | Result order; defaults to `newest` |
 | `limit` | integer 1–50 | no | Maximum entries; defaults to 20 |
+| `offset` | non-negative safe integer | no | Offset into the ordered matching entries; defaults to 0 |
 
-Arguments and results are capped before matching and output is bounded. Results identify the source and retained transcript path when one exists; use `/subagents:sessions` for the complete native transcript and `get_subagent_result` for status or final output.
+Matching is complete and case-insensitive literal across visible message text, tool names and IDs, arguments, and correlated results. Returned excerpts are bounded and center the first match with omission markers and source-range metadata; an omitted or empty query keeps beginning-of-entry previews. Tool names and call IDs are searched in full but exposed as bounded display previews, while stable entry IDs remain intact for overlay correlation. Output is also byte- and line-bounded, and every non-empty matching page emits at least one bounded entry. Details report the total, returned, before, and after counts plus copyable next/previous offsets when applicable. Use the next offset only from the returned details; it advances by entries actually emitted when output bounds shorten a page and is always greater than the requested offset. A zero-match query reports `no_matches`, while an offset beyond a non-empty result set reports `page_out_of_range`. Results identify the source and retained transcript path when one exists; use `/subagents:sessions` for the complete native transcript and `get_subagent_result` for status or final output.
 
 ### `steer_subagent`
 

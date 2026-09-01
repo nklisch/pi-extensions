@@ -24,6 +24,33 @@ afterEach(() => {
 });
 
 describe("TranscriptOverlay search", () => {
+  it("searches complete message fields while keeping the visual match list bounded", () => {
+    initTheme(undefined, false);
+    const needle = "overlay phrase beyond the former search prefix";
+    const messages = [{
+      role: "assistant",
+      content: [{ type: "text", text: `${"x".repeat(9_000)}${needle}${"y".repeat(9_000)}` }],
+      timestamp: 1,
+      stopReason: "stop",
+    } as unknown as SessionMessage];
+    const overlay = new TranscriptOverlay({
+      tui: { terminal: { columns: 120, rows: 40 }, requestRender: vi.fn() } as unknown as TUI,
+      theme,
+      source: { getMessages: () => messages, subscribe: () => undefined, streaming: () => undefined, getToolDefinition: () => undefined },
+      run: { modelLabel: "model", thinkingLevel: "medium", startedAt: 1_000, completedAt: () => 2_000 },
+      done: vi.fn(),
+      cwd: "/repo",
+      markdownTheme: getMarkdownTheme(),
+    });
+
+    overlay.handleInput("/");
+    overlay.handleInput(needle);
+    expect(overlay.render(100).join("\\n")).toContain("1 matches");
+    overlay.handleInput("\r");
+    expect(overlay.render(100).join("\\n")).toContain("MATCH 1/1");
+    overlay.dispose();
+  });
+
   it("preserves a selected match and reports newly arriving matches", () => {
     initTheme(undefined, false);
     let messages: readonly SessionMessage[] = [{ role: "user", content: "needle", timestamp: 1 } as SessionMessage];

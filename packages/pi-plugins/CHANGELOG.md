@@ -1,3 +1,9 @@
+## v0.8.1
+
+### Fixed
+
+- Rebundle `@nklisch/pi-subagents` 18.2.0-nklisch.1 so transcript queries search complete long fields, return match-centered passages, and page without skipping or repeating bounded results.
+
 ## v0.8.0
 
 ### Added
