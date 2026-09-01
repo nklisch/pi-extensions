@@ -6,7 +6,7 @@ The source tree was reviewed against `@gotgenes/pi-subagents` 19.2.1 and `@tinti
 
 ## Shared core
 
-All three implementations provide in-process foreground and background agents, custom agent definitions, concurrency control, steering, result retrieval, session resume, model selection, thinking control, and completion notifications.
+All three implementations provide in-process subagents, custom agent definitions, concurrency control, steering, result retrieval, session resume, model selection, thinking control, and completion notifications. This fork exposes joined and detached delivery rather than separate foreground/background APIs.
 
 The direct `gotgenes` lineage and this fork also share a focused-core architecture:
 
@@ -34,8 +34,8 @@ A mechanical rebase is unsafe because direct upstream may change or remove these
 
 This fork selectively carries the useful 18.1–19.2 reliability work:
 
-- queued and resumed runs are awaitable through the current record promise;
-- interrupting `get_subagent_result(wait: true)` ends only the wait;
+- queued and resumed runs settle through the current run lease;
+- `get_subagent_result` is bounded and nonblocking, so status inspection never waits on child execution;
 - queued stops follow the terminal lifecycle and state that no work started;
 - consumption-aware retention keeps terminal records for the parent session while releasing heavy live sessions on separate consumed and unconsumed windows;
 - completion notifications wait for the parent `agent_settled` boundary and recheck consumption;

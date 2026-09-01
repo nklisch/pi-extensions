@@ -1,14 +1,17 @@
 import { debugLog } from "#src/debug";
 import { getLifetimeTotal } from "#src/lifecycle/usage";
-import type { Subagent } from "#src/types";
+import type { Subagent } from "#src/lifecycle/subagent";
+import type { SubagentTerminalReason } from "#src/lifecycle/subagent-state";
 
-/** Details attached to custom notification messages for visual rendering. */
 export interface NotificationDetails {
   id: string;
   description: string;
+  runId: number;
+  mode: string;
   modelLabel: string;
   thinkingLevel: Subagent["effectiveThinkingLevel"];
   status: string;
+  terminalReason?: SubagentTerminalReason;
   toolUses: number;
   turnCount: number;
   maxTurns?: number;
@@ -19,170 +22,129 @@ export interface NotificationDetails {
   resultPreview: string;
 }
 
-// ---- Pure helpers (exported for unit testing) ----
-
-/** Escape XML text and attribute delimiters in structured notifications. */
 export function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
-/** Human-readable status label for agent completion. */
-export function getStatusLabel(status: string, error?: string): string {
-  switch (status) {
-    case "error":
-      return `Error: ${error ?? "unknown"}`;
-    case "aborted":
-      return "Aborted (max turns exceeded)";
-    case "steered":
-      return "Wrapped up (turn limit)";
-    case "stopped":
-      return "Stopped";
-    default:
-      return "Done";
-  }
+export function getStatusLabel(status: string, reason?: SubagentTerminalReason, error?: string): string {
+  if (status === "error") return `Error: ${error ?? "unknown"}`;
+  if (reason === "turn_limit_graceful") return "Completed (turn limit)";
+  if (reason === "turn_limit_hard") return "Stopped (turn limit)";
+  if (status === "stopped") return reason ? `Stopped (${reason.replaceAll("_", " ")})` : "Stopped";
+  return "Done";
 }
 
-/** Format a structured <task-notification> XML block for the parent agent to parse. */
 export function formatTaskNotification(record: Subagent, resultMaxLen: number): string {
-  const status = getStatusLabel(record.status, record.error);
-  const durationMs = record.completedAt ? record.completedAt - record.startedAt : 0;
-  const totalTokens = getLifetimeTotal(record.lifetimeUsage);
-  const contextPercent = record.getContextPercent();
-  const ctxXml = contextPercent !== null ? `<context_percent>${Math.round(contextPercent)}</context_percent>` : "";
-  const compactXml = record.compactionCount ? `<compactions>${record.compactionCount}</compactions>` : "";
-
-  const resultPreview = record.stoppedWhileQueued
-    ? "Agent was stopped while queued and never started. No work was performed."
-    : record.result
-    ? record.result.length > resultMaxLen
-      ? record.result.slice(0, resultMaxLen) + "\n...(truncated, use get_subagent_result for full output)"
-      : record.result
+  const status = getStatusLabel(record.status, record.stateTerminalReason, record.error);
+  const resultPreview = record.result
+    ? record.result.length > resultMaxLen ? record.result.slice(0, resultMaxLen) + "\n...(truncated, use get_subagent_result for full output)" : record.result
     : "No output.";
-
-  const toolCallId = record.toolCallId;
   const outputFile = record.outputFile;
   return [
     "<task-notification>",
     `<task-id>${record.id}</task-id>`,
-    toolCallId ? `<tool-use-id>${escapeXml(toolCallId)}</tool-use-id>` : null,
-    outputFile ? `<output-file>${escapeXml(outputFile)}</output-file>` : null,
+    `<run-id>${record.runId}</run-id>`,
+    `<mode>${record.mode}</mode>`,
     `<status>${escapeXml(status)}</status>`,
+    record.stateTerminalReason ? `<terminal-reason>${record.stateTerminalReason}</terminal-reason>` : null,
     `<model>${escapeXml(record.modelLabel)}</model>`,
     `<thinking_level>${escapeXml(record.effectiveThinkingLevel)}</thinking_level>`,
-    `<summary>Subagent "${escapeXml(record.description)}" ${record.status}</summary>`,
+    `<summary>Subagent "${escapeXml(record.description)}" ${escapeXml(record.status)}</summary>`,
     `<result>${escapeXml(resultPreview)}</result>`,
-    `<usage><total_tokens>${totalTokens}</total_tokens><tool_uses>${record.toolUses}</tool_uses>${ctxXml}${compactXml}<duration_ms>${durationMs}</duration_ms></usage>`,
+    `<usage><total_tokens>${getLifetimeTotal(record.lifetimeUsage)}</total_tokens><tool_uses>${record.toolUses}</tool_uses><duration_ms>${record.activeRuntimeMs}</duration_ms></usage>`,
+    outputFile ? `<output-file>${escapeXml(outputFile)}</output-file>` : null,
     "</task-notification>",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  ].filter((line): line is string => line !== null).join("\n");
 }
 
-/** Build notification details for the custom message renderer. */
-export function buildNotificationDetails(
-  record: Subagent,
-  resultMaxLen: number,
-): NotificationDetails {
-  const totalTokens = getLifetimeTotal(record.lifetimeUsage);
-
+export function buildNotificationDetails(record: Subagent, resultMaxLen: number): NotificationDetails {
   return {
     id: record.id,
     description: record.description,
+    runId: record.runId,
+    mode: record.mode,
     modelLabel: record.modelLabel,
     thinkingLevel: record.effectiveThinkingLevel,
     status: record.status,
+    terminalReason: record.stateTerminalReason,
     toolUses: record.toolUses,
     turnCount: record.turnCount,
     maxTurns: record.maxTurns,
-    totalTokens,
-    durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
+    totalTokens: getLifetimeTotal(record.lifetimeUsage),
+    durationMs: record.activeRuntimeMs,
     outputFile: record.outputFile,
     error: record.error,
-    resultPreview: record.stoppedWhileQueued
-      ? "Agent was stopped while queued and never started. No work was performed."
-      : record.result
-      ? record.result.length > resultMaxLen
-        ? record.result.slice(0, resultMaxLen) + "…"
-        : record.result
-      : "No output.",
+    resultPreview: record.result ? record.result.slice(0, resultMaxLen) : "No output.",
   };
 }
 
-/** Build event data for lifecycle events from a Subagent. */
 export function buildEventData(record: Subagent) {
-  const durationMs = record.completedAt ? record.completedAt - record.startedAt : Date.now() - record.startedAt;
-  const u = record.lifetimeUsage;
-  const total = getLifetimeTotal(u);
-  const tokens =
-    total > 0
-      ? { input: u.input, output: u.output, total }
-      : undefined;
+  const usage = record.lifetimeUsage;
+  const total = getLifetimeTotal(usage);
   return {
     id: record.id,
+    runId: record.runId,
+    mode: record.mode,
     type: record.type,
     description: record.description,
     result: record.result,
     error: record.error,
     status: record.status,
+    terminalReason: record.stateTerminalReason,
+    modelLabel: record.modelLabel,
+    thinkingLevel: record.effectiveThinkingLevel,
     toolUses: record.toolUses,
-    durationMs,
-    tokens,
+    activeRuntimeMs: record.activeRuntimeMs,
+    tokens: total > 0 ? { input: usage.input, output: usage.output, total } : undefined,
   };
 }
 
-// ---- Notification system factory ----
-
 export interface NotificationSystem {
-  sendCompletion: (record: Subagent) => void;
-  dispose: () => void;
+  sendCompletion(record: Subagent): void;
+  dispose(): void;
 }
 
 export class NotificationManager implements NotificationSystem {
-  // Pi cannot recall a queued followUp. Hold records while the parent run is
-  // active so consumption can be rechecked at the actual delivery boundary.
-  private pendingNudges = new Map<string, Subagent>();
+  private readonly pendingNudges = new Map<string, { record: Subagent; runId: number; content: string; details: NotificationDetails }>();
   private parentRunActive = false;
   private disposed = false;
 
-  constructor(
-    private sendMessage: (
-      msg: { customType: string; content: string; display: boolean; details?: unknown },
-      opts?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
-    ) => void,
-  ) {}
+  constructor(private readonly sendMessage: (msg: { customType: string; content: string; display: boolean; details?: unknown }, opts?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }) => void) {}
 
   sendCompletion(record: Subagent): void {
-    // A blocking get-result request has already selected direct delivery for
-    // this terminal outcome. Never enqueue the same payload as a follow-up,
-    // even if Pi's parent lifecycle currently appears idle.
-    if (this.disposed || record.consumed || record.hasPendingResultWait) return;
+    if (this.disposed || record.mode !== "detached" || record.consumed) return;
     if (this.parentRunActive) {
-      this.pendingNudges.set(record.id, record);
-      return;
-    }
-    this.emitIndividualNudge(record);
+      this.pendingNudges.set(`${record.id}:${record.runId}`, {
+        record,
+        runId: record.runId,
+        content: formatTaskNotification(record, 500),
+        details: buildNotificationDetails(record, 500),
+      });
+    } else this.emitIndividualNudge(record);
   }
 
-  onParentAgentStart(): void {
-    if (!this.disposed) this.parentRunActive = true;
-  }
+  onParentAgentStart(): void { if (!this.disposed) this.parentRunActive = true; }
 
   onParentAgentSettled(): void {
     if (this.disposed) return;
     this.parentRunActive = false;
-    const withheld = [...this.pendingNudges.values()];
+    const pending = [...this.pendingNudges.values()];
     this.pendingNudges.clear();
-    for (const record of withheld) {
+    for (const nudge of pending) {
       try {
-        this.emitIndividualNudge(record);
-      } catch (err) {
-        debugLog("notification render", err);
-      }
+        // A resume may advance the record while the parent is running. The
+        // queued notification describes the old run and must not wake the
+        // parent after that run has been superseded (or after delivery mode
+        // changed to joined).
+        if (
+          nudge.runId === nudge.record.runId &&
+          nudge.record.mode === "detached" &&
+          !nudge.record.isActive() &&
+          !nudge.record.consumed
+        ) {
+          this.emitNudge(nudge.record, nudge.content, nudge.details);
+        }
+      } catch (error) { debugLog("notification render", error); }
     }
   }
 
@@ -192,24 +154,18 @@ export class NotificationManager implements NotificationSystem {
   }
 
   private emitIndividualNudge(record: Subagent): void {
-    if (this.disposed || record.consumed) return;
+    if (this.disposed || record.consumed || record.mode !== "detached") return;
+    this.emitNudge(record, formatTaskNotification(record, 500), buildNotificationDetails(record, 500));
+  }
 
-    const notification = formatTaskNotification(record, 500);
-    const outputFile = record.outputFile;
-    const footer = !record.stoppedWhileQueued && outputFile
-      ? `\nFull transcript available at: ${outputFile}`
-      : "";
-
-    this.sendMessage(
-      {
-        customType: "subagent-notification",
-        content: notification + footer,
-        display: true,
-        details: buildNotificationDetails(record, 500),
-      },
-      { deliverAs: "followUp", triggerTurn: true },
-    );
-    // Push delivery collected the terminal outcome just as surely as a pull.
-    record.markConsumed();
+  private emitNudge(record: Subagent, notification: string, details: NotificationDetails, markConsumed = true): void {
+    const footer = record.outputFile ? `\nFull transcript available at: ${record.outputFile}` : "";
+    this.sendMessage({
+      customType: "subagent-notification",
+      content: notification + footer,
+      display: true,
+      details,
+    }, { deliverAs: "followUp", triggerTurn: true });
+    if (markConsumed) record.markConsumed();
   }
 }

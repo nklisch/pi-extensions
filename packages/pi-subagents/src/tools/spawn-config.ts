@@ -15,7 +15,7 @@ import type { ModelRegistry } from "#src/session/model-resolver";
 import { formatModelLabel } from "#src/session/model-label";
 import { resolveInvocationModel } from "#src/session/model-resolver";
 import { resolveEffectiveThinkingLevel } from "#src/session/thinking-level";
-import type { AgentInvocation, SubagentType, ThinkingLevel } from "#src/types";
+import type { AgentInvocation, SubagentMode, SubagentType, ThinkingLevel } from "#src/types";
 import {
   type AgentDetails,
   buildInvocationTags,
@@ -50,7 +50,8 @@ export interface SpawnExecution {
   /** Exact level passed to the child session after model-capability clamping. */
   effectiveThinkingLevel: ThinkingLevel;
   inheritContext: boolean;
-  runInBackground: boolean;
+  mode: SubagentMode;
+  timeoutSeconds?: number;
   agentInvocation: AgentInvocation;
 }
 
@@ -88,6 +89,13 @@ export function resolveSpawnConfig(
     readonly fallbackSubagent?: string | false;
   },
 ): ResolvedSpawnConfig | SpawnConfigError {
+  const removedField = ["run_in_background", "foreground", "resume"].find((field) =>
+    Object.prototype.hasOwnProperty.call(params, field),
+  );
+  if (removedField) {
+    return { error: `Removed field "${removedField}"; use mode: joined|detached${removedField === "resume" ? " and resume_subagent" : ""}.` };
+  }
+
   const rawType = params.subagent_type as SubagentType;
   const typeResolution = resolveDispatchAgentType(
     rawType,
@@ -122,21 +130,30 @@ export function resolveSpawnConfig(
     modelInfo.parentThinkingLevel,
   );
   const inheritContext = resolvedConfig.inheritContext;
-  const runInBackground = resolvedConfig.runInBackground;
+  const mode = resolvedConfig.mode;
+  if (mode !== "joined" && mode !== "detached") {
+    return { error: "mode must be joined or detached" };
+  }
+  const maxTurns = resolvedConfig.maxTurns ?? settings.defaultMaxTurns;
+  if (maxTurns != null && (!Number.isInteger(maxTurns) || maxTurns < 0)) {
+    return { error: "max_turns must be a non-negative integer" };
+  }
+  if (resolvedConfig.timeoutSeconds != null && (!Number.isInteger(resolvedConfig.timeoutSeconds) || resolvedConfig.timeoutSeconds <= 0)) {
+    return { error: "timeout_seconds must be a positive integer" };
+  }
 
   // Every status surface shows the exact effective model, including inheritance.
   const modelName = formatModelLabel(model);
 
-  const effectiveMaxTurns = normalizeMaxTurns(
-    resolvedConfig.maxTurns ?? settings.defaultMaxTurns,
-  );
+  const effectiveMaxTurns = normalizeMaxTurns(maxTurns);
 
   const agentInvocation: AgentInvocation = {
     modelName,
     thinking,
     maxTurns: normalizeMaxTurns(resolvedConfig.maxTurns),
     inheritContext,
-    runInBackground,
+    mode,
+    timeoutSeconds: resolvedConfig.timeoutSeconds,
   };
 
   const modeLabel = getPromptModeLabel(subagentType, registry);
@@ -162,7 +179,8 @@ export function resolveSpawnConfig(
       thinking,
       effectiveThinkingLevel,
       inheritContext,
-      runInBackground,
+      mode,
+      timeoutSeconds: resolvedConfig.timeoutSeconds,
       agentInvocation,
     },
     presentation: { modelName, agentTags, detailBase },

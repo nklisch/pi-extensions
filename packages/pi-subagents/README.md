@@ -4,7 +4,7 @@
 
 A [pi](https://pi.dev) extension that gives pi **a focused, in-process sub-agent core** — autonomous agents that run inside the same pi runtime (no spawned subprocesses), plus a typed API and lifecycle events other extensions build on.
 Spawn specialized agents that run in isolated sessions — each with its own tools, system prompt, model, and thinking level.
-Run them in foreground or background, steer them mid-run, resume completed sessions, and define your own custom agent types.
+Run them in joined or detached mode, steer them while active, resume retained sessions, and define your own custom agent types.
 
 > A maintained MIT fork of [`@gotgenes/pi-subagents`](https://www.npmjs.com/package/@gotgenes/pi-subagents), preserving its upstream execution core while adding a generic ordered lifecycle-interceptor provider seam.
 > See [Fork maintenance](./docs/FORK-MAINTENANCE.md) for provenance, qualification, and upstream-return policy.
@@ -15,10 +15,10 @@ Run them in foreground or background, steer them mid-run, resume completed sessi
 
 ## Features
 
-- **In-process & native** — agents run inside the same pi runtime (no spawned subprocesses), sharing tool names, calling conventions, and UI patterns (`subagent`, `get_subagent_result`, `steer_subagent`) — feels native
-- **Parallel background agents** — spawn multiple agents that run concurrently with automatic queuing (configurable concurrency limit, default 4) and individual completion notifications
+- **In-process & native** — agents run inside the same pi runtime (no spawned subprocesses), sharing tool names, calling conventions, and UI patterns (`subagent`, `resume_subagent`, `stop_subagent`, `list_subagents`, `get_subagent_result`, `steer_subagent`) — feels native
+- **Joined and detached delivery** — join a child result into the current parent turn or detach it for a completion notification; every run shares FIFO admission (configurable concurrency limit, default 4)
 - **Live widget UI** — persistent above-editor widget with animated spinners, live tool activity, token counts, and colored status icons
-- **Session transcripts** — open any subagent's full session transcript, including records whose heavy live session has been released, in pi's native read-only viewer via `/subagents:sessions`
+- **Session transcripts** — open any subagent's full session transcript, including records whose heavy live session has been released, in pi's native read-only viewer via `/subagents:sessions`; search literal text and cycle matches without steering the child
 - **Custom agent types** — define project agents in `.pi/agents/<name>.md` or the shared `.agents/agents/<name>.md` convention, with YAML frontmatter for prompts, models, thinking, and built-in tools
 - **Mid-run steering** — inject messages into running agents to redirect their work without restarting
 - **Session resume** — pick up where an agent left off, preserving full conversation context
@@ -26,8 +26,8 @@ Run them in foreground or background, steer them mid-run, resume completed sessi
 - **Policy-aware agent types** — unambiguous names resolve case-insensitively. Unknown names default to `general-purpose`, can target another enabled fallback, or can fail closed via `fallbackSubagent`
 - **Fuzzy model selection** — specify models by name (`"haiku"`, `"sonnet"`) instead of full IDs, with automatic filtering to only available/configured models
 - **Context inheritance** — optionally fork the parent conversation into a sub-agent so it knows what's been discussed
-- **Styled completion notifications** — background agent results render as themed, compact notification boxes (icon, stats, result preview) instead of raw XML.
-  Expandable to show full output
+- **Styled completion notifications** — detached agent results render as themed, compact notification boxes (icon, stats, result preview) instead of raw XML.
+  Expandable to show the bounded preview; use the transcript path for the full session
 - **Event bus** — lifecycle events (`subagents:created`, `started`, `completed`, `failed`, `resumed`, `steered`, `compacted`) emitted via `pi.events`, enabling other extensions to react to sub-agent activity
 
 ## Install
@@ -50,16 +50,16 @@ subagent({
   subagent_type: "Explore",
   prompt: "Find all files that handle authentication",
   description: "Find auth files",
-  run_in_background: true,
+  mode: "joined",
 })
 ```
 
-Foreground agents block until complete and return results inline.
-Background agents return an ID immediately and notify you on completion.
+Joined agents return their settled result inline. Detached agents return an ID
+immediately and notify you once on completion (the default).
 
 ## UI
 
-The extension renders a persistent widget above the editor showing active background agents (foreground runs are rendered inline by the `subagent` tool's progress stream):
+The extension renders a persistent widget above the editor showing active detached agents (joined runs are rendered inline by the `subagent` tool's progress stream):
 
 ```text
 ● Agents
@@ -86,13 +86,12 @@ Individual agent results render inline in the conversation:
 | **Running**    | `⠹ ⟳3≤30 · 3 tool uses · 12.4k token (8%)` / `⎿ searching, reading 3 files…`             |
 | **Completed**  | `✓ ⟳8 · 5 tool uses · 33.8k token (62%) · 12.3s` / `⎿ Done`                              |
 | **Wrapped up** | `✓ ⟳50≤50 · 50 tool uses · 89.1k token (84% · ↻2) · 45.2s` / `⎿ Wrapped up (turn limit)` |
-| **Stopped**    | `■ ⟳3 · 3 tool uses · 12.4k token (8%)` / `⎿ Stopped`                                    |
+| **Stopped**    | `■ ⟳3 · 3 tool uses · 12.4k token (8%)` / `⎿ Stopped (explicit stop)`                  |
 | **Error**      | `✗ ⟳3 · 3 tool uses · 12.4k token (8%)` / `⎿ Error: timeout`                             |
-| **Aborted**    | `✗ ⟳55≤50 · 55 tool uses · 102.3k token (95% · ↻3)` / `⎿ Aborted (max turns exceeded)`   |
 
 Completed results can be expanded (ctrl+o in pi) to show the full agent output inline.
 
-Background agent completion notifications render as styled boxes:
+Detached agent completion notifications render as styled boxes:
 
 ```text
 ✓ Find auth files completed
@@ -101,7 +100,7 @@ Background agent completion notifications render as styled boxes:
   transcript: .pi/output/agent-abc123.jsonl
 ```
 
-The LLM receives structured `<task-notification>` XML for parsing, while the user sees the themed visual.
+The LLM receives structured `<task-notification>` XML for parsing, while the user sees the themed visual. The notification contains a bounded preview; use `get_subagent_result` or the transcript path for longer output.
 
 ## Default Agent Types
 
@@ -174,12 +173,21 @@ All fields are optional — sensible defaults for everything.
 | `max_turns`         | unlimited      | Max agentic turns before graceful shutdown. `0` or omit for unlimited                                                                                                                                                                                                                                                   |
 | `prompt_mode`       | `append`       | `replace`: parent prompt is the cacheable base; body is appended last with full control (no `<sub_agent_context>` bridge, no `<agent_instructions>` wrapper). `append`: parent prompt is the base; body is wrapped in `<agent_instructions>` and a sub-agent context bridge is injected (agent acts as a "parent twin") |
 | `inherit_context`   | `false`        | Fork parent conversation into agent                                                                                                                                                                                                                                                                                     |
-| `run_in_background` | `false`        | Run in background by default                                                                                                                                                                                                                                                                                            |
+| `mode`              | `detached`     | Default result delivery: `detached` or `joined`                                                                                                                                                                                                                                                                          |
+| `timeout_seconds`   | —              | Positive active-runtime deadline; queued time is excluded                                                                                                                                                                                                                                                                |
 | `enabled`           | `true`         | Set to `false` to disable an agent (useful for hiding a default agent per-project)                                                                                                                                                                                                                                      |
 
 Frontmatter is authoritative.
-If an agent file sets `model`, `thinking`, `max_turns`, `inherit_context`, or `run_in_background`, those values are locked for that agent.
-`subagent` tool parameters only fill fields the agent config leaves unspecified.
+If an agent file sets `model`, `thinking`, `max_turns`, `inherit_context`, or `mode`, those values are used as defaults for that agent.
+`subagent` tool parameters only fill fields the agent config leaves unspecified. Legacy `run_in_background` and `foreground` fields are rejected with a diagnostic; they are never silently remapped.
+
+Migration is direct:
+
+```yaml
+# Before                     # After
+run_in_background: true      mode: detached
+run_in_background: false     mode: joined
+```
 
 ## Tools
 
@@ -195,27 +203,41 @@ Launch a sub-agent.
 | `model`             | string       | no       | Model — `provider/modelId` or fuzzy name (`"haiku"`, `"sonnet"`) |
 | `thinking`          | string       | no       | Thinking level: off, minimal, low, medium, high, xhigh, max      |
 | `max_turns`         | number       | no       | Max agentic turns. Omit for unlimited (default)                  |
-| `run_in_background` | boolean      | no       | Run without blocking                                             |
-| `resume`            | string       | no       | Retained, finished agent ID to continue with the same history    |
+| `mode`              | `joined` or `detached` | no | Result delivery mode; defaults to `detached`                  |
+| `timeout_seconds`   | integer      | no       | Positive active-runtime deadline; queued time is excluded       |
 | `inherit_context`   | boolean      | no       | Fork parent conversation into agent                              |
 
 ### Choosing the next action
 
-- Let background agents finish normally. Completion automatically wakes the parent with a result preview; do not poll.
-- Use `steer_subagent` to redirect an agent that is still running.
-- Use `resume` after an agent finishes when it should continue with the same retained conversation history.
-- Launch a new subagent without `resume` when prior conversation history is unnecessary.
-- Use `get_subagent_result` only for full output, verbose conversation, an explicit status check or synchronization point, or recovery after a missed notification.
+- Use `mode: "joined"` when this parent turn needs the settled result; use the default `mode: "detached"` for independent work.
+- Let detached agents finish normally. Completion automatically wakes the parent with one bounded result preview; do not poll.
+- Use `steer_subagent` to redirect an active agent and `stop_subagent` for cooperative cancellation.
+- Use `resume_subagent` after an agent finishes when it should continue with the same retained conversation history.
+- Use `get_subagent_result` for a bounded status/result check or recovery after a missed notification; it never waits or dumps the full conversation.
 
 ### `get_subagent_result`
 
-Inspect status or retrieve full results from a background agent. It is not the normal completion path because completion notifications wake the parent automatically.
+Inspect a bounded status or final result from a subagent. It is not the normal completion path because detached completion notifications wake the parent automatically.
 
-| Parameter  | Type    | Required | Description                   |
-| ---------- | ------- | -------- | ----------------------------- |
-| `agent_id` | string  | yes      | Agent ID to check             |
-| `wait`     | boolean | no       | Wait for completion           |
-| `verbose`  | boolean | no       | Include full conversation log |
+| Parameter  | Type   | Required | Description                                      |
+| ---------- | ------ | -------- | ------------------------------------------------ |
+| `agent_id` | string | yes      | Agent ID to check                                |
+
+The result is nonblocking and bounded. Live records report current status and activity; terminal records include a transcript pointer when output is truncated. Use `/subagents:sessions` for the full retained transcript.
+
+### `query_subagent_session`
+
+Search a child transcript without steering or changing the child. The tool reads the live in-memory session when available and falls back to the retained JSONL transcript after release.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `agent_id` | string | yes | Agent ID to inspect |
+| `query` | string | no | Case-insensitive literal text; omit for recent entries |
+| `kind` | `all`, `messages`, `tool_calls`, or `tool_results` | no | Search scope; defaults to `all` |
+| `order` | `newest` or `oldest` | no | Result order; defaults to `newest` |
+| `limit` | integer 1–50 | no | Maximum entries; defaults to 20 |
+
+Arguments and results are capped before matching and output is bounded. Results identify the source and retained transcript path when one exists; use `/subagents:sessions` for the complete native transcript and `get_subagent_result` for status or final output.
 
 ### `steer_subagent`
 
@@ -242,13 +264,20 @@ Changes persist across pi restarts (see [Persistent Settings](#persistent-settin
 ### `/subagents:sessions`
 
 Pick any subagent — running, completed, or retained after its live session was released — and read its full session transcript in pi's native per-entry viewer.
-Read-only: no steering, no session takeover (steering lives in the `steer_subagent` tool and the background widget).
+Read-only: no steering, no session takeover (steering lives in the `steer_subagent` tool and the detached widget).
+
+In the viewer, press `/` to enter literal search, type a query, and press `Enter`
+(or `n`) for the next match. Press `N` or `Shift+Enter` for the previous match.
+Press `Tab` to toggle the tool-only filter without discarding the query. While
+search is active, the first `Esc` clears the search and returns to the transcript;
+a second `Esc` closes the viewer. Outside search, `q` or `Esc` closes it directly.
+Ordinary `↑`/`↓` (or `j`/`k`) and Page Up/Page Down scrolling remain available.
 
 Creating and editing agent definitions is not a command — write an agent `.md` file in your editor, or ask a pi session to generate one (see [Custom Agents](#custom-agents)).
 
 ## Graceful Max Turns
 
-Instead of hard-aborting at the turn limit, agents get a graceful shutdown:
+Instead of immediately hard-aborting at the turn limit, agents get a graceful shutdown:
 
 1. At `max_turns` — steering message: *"Wrap up immediately — provide your final answer now."*
 2. Up to 5 grace turns to finish cleanly
@@ -256,23 +285,22 @@ Instead of hard-aborting at the turn limit, agents get a graceful shutdown:
 
 | Status      | Meaning                       | Icon       |
 | ----------- | ----------------------------- | ---------- |
-| `completed` | Finished naturally            | `✓` green  |
-| `steered`   | Hit limit, wrapped up in time | `✓` yellow |
-| `aborted`   | Grace period exceeded         | `✗` red    |
-| `stopped`   | User-initiated abort          | `■` dim    |
+| `completed` | Finished naturally or within the grace window | `✓` green  |
+| `stopped`   | Explicit stop, parent cancellation, timeout, hard limit, or lifecycle abort | `■` dim |
+| `error`     | Provider, execution, or workspace teardown failure | `✗` red |
 
 ## Concurrency
 
-Background agents are subject to a configurable concurrency limit (default: 4).
-Excess agents are automatically queued and start as running agents complete. The widget shows each queued agent with its effective model and queued state. Stopping a queued agent follows the normal terminal lifecycle and reports that no work started.
+Joined and detached agents share a configurable FIFO concurrency limit (default: 4).
+Excess agents are automatically queued and start as running agents complete. The widget shows each queued detached agent with its effective model and queued state. Stopping queued work settles it immediately and reports that no work started.
 
-Foreground agents bypass the queue — they block the parent anyway. Completion nudges are held while the parent is running and flushed at the parent run boundary, preventing a pulled result from also arriving as a duplicate notification.
+Joined agents do not bypass the queue: sibling joined tool calls use Pi's native parallel execution and share the same admission limit. Detached completion nudges are held while the parent is running and flushed at the parent run boundary, suppressing stale or consumed notifications.
 
 Resume requests are serialized per retained session. A second request while a turn is genuinely active gets a deterministic busy result; after an abort or extension-driven continuation, resume waits for both the prior invocation and Pi's authoritative idle boundary instead of racing `AgentSession.prompt()`. Session teardown likewise emits and awaits `session_shutdown` before Pi revokes child extension contexts, allowing child-owned processes and timers to stop cleanly.
 
 ## Persistent Settings
 
-Runtime tuning values set via `/subagents:settings` persist across pi restarts. Terminal records remain available for the whole parent session. Their heavy live sessions are released after the consumed or unconsumed retention window; the result and persisted transcript pointer remain available, but a released session cannot resume without starting a new subagent. A completion notification, foreground result, or `get_subagent_result` collection marks a result consumed, so the shorter consumed window normally governs after delivery.
+Runtime tuning values set via `/subagents:settings` persist across pi restarts. Terminal records remain available for the whole parent session. Their heavy live sessions are released after the consumed or unconsumed retention window; the result and persisted transcript pointer remain available, but a released session cannot resume without starting a new subagent. A completion notification, joined result, or `get_subagent_result` collection marks a result consumed, so the shorter consumed window normally governs after delivery.
 Two files, merged on load:
 
 - **Global:** `~/.pi/agent/subagents.json` — your machine-wide defaults.
@@ -298,7 +326,7 @@ cat > ~/.pi/agent/subagents.json <<'EOF'
 EOF
 ```
 
-Every project now starts with concurrency 16, grace 10, a one-day unconsumed retention cap, background agents surviving parent ESC, and unknown agent types failing closed.
+Every project now starts with concurrency 16, grace 10, a one-day unconsumed retention cap, detached agents surviving parent ESC, and unknown agent types failing closed.
 Individual projects can still override via `/subagents:settings`.
 
 **Failure behavior:** missing file is silent; malformed JSON logs a `[pi-subagents] Ignoring malformed settings at …` warning to stderr; invalid/out-of-range field values are dropped per-field; write failures downgrade the `/subagents:settings` toast to a warning with `(session only; failed to persist)`.
@@ -309,11 +337,11 @@ Agent lifecycle events are emitted via `pi.events.emit()` so other extensions ca
 
 | Event                        | When                                                    | Key fields                                                                                                           |
 | ---------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `subagents:created`          | Background agent registered                             | `id`, `type`, `description`, `isBackground`                                                                          |
-| `subagents:started`          | Agent transitions to running (including queued→running) | `id`, `type`, `description`                                                                                          |
-| `subagents:completed`        | Agent finished successfully                             | `id`, `type`, `durationMs`, `tokens` (lifetime `{ input, output, total }`), `toolUses`, `result`                     |
-| `subagents:resumed`          | A resumed turn reached a terminal state                 | completed-event shape plus `status` and `error`                                                                     |
-| `subagents:failed`           | Agent errored, stopped, or aborted                      | same as completed + `error`, `status`                                                                                |
+| `subagents:created`          | Agent record registered                                | `id`, `type`, `description`, `runId`, `mode`                                                                          |
+| `subagents:started`          | Agent transitions to running (including queued→running) | `id`, `type`, `description`, `runId`, `mode`                                                                         |
+| `subagents:completed`        | Agent reaches a terminal state                          | `id`, `type`, `runId`, `mode`, `status`, `terminalReason`, `activeRuntimeMs`, `tokens`, `toolUses`, `result`       |
+| `subagents:resumed`          | A resumed turn reaches a terminal state                 | completed-event shape plus `runId`, `status`, `terminalReason`, and `error`                                         |
+| `subagents:failed`           | Agent ends in an error or stopped state                 | same as completed + `error`, `status`, `terminalReason`                                                              |
 | `subagents:steered`          | Steering message sent                                   | `id`, `message`                                                                                                      |
 | `subagents:compacted`        | Agent's session successfully compacted                  | `id`, `type`, `description`, `reason` (`"manual"` / `"threshold"` / `"overflow"`), `tokensBefore`, `compactionCount` |
 | `subagents:settings_loaded`  | Persisted settings applied at extension init            | `settings` (merged global + project)                                                                                 |
@@ -373,7 +401,7 @@ Access the subagent service from another extension at runtime:
 ```typescript
 const { getSubagentsService } = await import("@nklisch/pi-subagents");
 const svc = getSubagentsService();
-svc?.spawn("Explore", "Check for stale TODOs");
+void svc?.launch("Explore", "Check for stale TODOs", { mode: "detached" });
 ```
 
 Declare this package as an optional peer dependency.

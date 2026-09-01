@@ -34,11 +34,12 @@ only, not lifecycle semantics or consumer contracts.
 
 ## Scope guard
 
-The published package keeps the narrow built-in background widget, session
+The published package keeps the narrow built-in detached widget, session
 navigator, and settings command accepted by ADR 0004. These status surfaces
-show each subagent's exact effective model, exact effective thinking level, and elapsed or final runtime. The
-package excludes the retired agent editors, wizards, and bespoke conversation
-viewer from the import branch. Reviving those surfaces is a new decision, not
-a restoration. Children inherit extension tools through a registration-open
-denylist policy; scheduling, memory, nested delegation, worktrees, and RPC stay
-outside the core.
+show each subagent's exact effective model, exact effective thinking level,
+active or final runtime, run id, mode, and terminal reason. The package
+excludes the retired agent editors, wizards, and bespoke conversation viewer
+from the import branch. Reviving those surfaces is a new decision, not a
+restoration. Children inherit extension tools through a registration-open
+denylist policy; batch identity, hard process termination, and RPC stay outside
+the core.

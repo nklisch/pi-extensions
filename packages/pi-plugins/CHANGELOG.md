@@ -1,3 +1,17 @@
+## v0.8.0
+
+### Added
+
+- Bundle `@nklisch/pi-subagents` 18.2.0-nklisch.0 with joined/detached execution, truthful cooperative stopping, dedicated orchestration controls, bounded session queries, and searchable live transcripts.
+
+### Changed
+
+- Register the complete parent orchestration tool family from the bundled production extension and pin its service/tool contract with a compiled consumer test.
+
+### Breaking changes
+
+- Subagent callers and custom-agent files must use `mode: joined | detached` instead of `run_in_background`; blocking result waits and full-conversation result retrieval are no longer available.
+
 ## v0.7.0
 
 ### Fixed

@@ -17,7 +17,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
       description: "General-purpose agent for complex, multi-step tasks",
       toolGuideline: "- Use general-purpose for complex tasks that need file editing.",
       // builtinToolNames omitted — means "all available tools" (resolved at lookup time)
-      // inheritContext / runInBackground omitted — strategy fields, callers decide per-call.
+      // inheritContext / mode omitted — delivery strategy is selected by the caller.
       // Setting them to false would lock callsite intent (see resolveAgentInvocationConfig in invocation-config.ts).
       systemPrompt: "",
       promptMode: "append",

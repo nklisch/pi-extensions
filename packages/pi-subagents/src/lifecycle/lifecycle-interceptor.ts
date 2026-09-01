@@ -8,21 +8,22 @@
  */
 
 import { debugLog } from "#src/debug";
+import type { SubagentMode } from "#src/types";
 
 /** The fixed bound prevents a provider from turning completion into an unbounded loop. */
 export const MAX_LIFECYCLE_CONTINUATION_ROUNDS = 3;
 
 export type SubagentExecutionPhase = "initial" | "resume";
 export type SubagentExecutionOrigin = "tool" | "service";
-export type SubagentExecutionMode = "foreground" | "background";
+export type SubagentExecutionMode = SubagentMode;
 export type SubagentExecutionAdmission = "immediate" | "queued";
-export type SubagentLifecycleOutcome = "completed" | "steered" | "aborted";
+export type SubagentLifecycleOutcome = "completed" | "turn_limit_graceful" | "turn_limit_hard";
 
 /** Immutable identifiers for one initial or resumed execution attempt. */
 export interface SubagentLifecycleIdentity {
   readonly agentId: string;
   readonly sessionId: string;
-  readonly runId: string;
+  readonly runId: number;
   readonly agentType: string;
   readonly parentSessionId?: string;
 }

@@ -171,8 +171,7 @@ describe("SubagentSession — runTurnLoop turn limits", () => {
     const result = await sub.runTurnLoop("go", { maxTurns: 2, graceTurns: 1 });
     expect(session.steer).toHaveBeenCalledWith(expect.stringContaining("turn limit"));
     expect(session.abort).toHaveBeenCalled();
-    expect(result.aborted).toBe(true);
-    expect(result.steered).toBe(true);
+    expect(result.terminalReason).toBe("turn_limit_hard");
   });
 
   it("contains rejected detached steer and abort controls", async () => {
@@ -188,7 +187,7 @@ describe("SubagentSession — runTurnLoop turn limits", () => {
     try {
       const result = await sub.runTurnLoop("go", { maxTurns: 1, graceTurns: 1 });
       await Promise.resolve();
-      expect(result).toMatchObject({ aborted: true, steered: true });
+      expect(result).toMatchObject({ terminalReason: "turn_limit_hard" });
       expect(warnings).toHaveBeenCalledWith(
         expect.stringContaining("turn-limit steer"),
         expect.any(Error),
@@ -209,8 +208,7 @@ describe("SubagentSession — runTurnLoop turn limits", () => {
     programTurns(session, listeners, 3);
     const { sub } = makeSubagentSession(session);
     const result = await sub.runTurnLoop("go", { maxTurns: 1, graceTurns: 3 });
-    expect(result.steered).toBe(true);
-    expect(result.aborted).toBe(false);
+    expect(result.terminalReason).toBe("turn_limit_graceful");
     expect(session.abort).not.toHaveBeenCalled();
   });
 
@@ -229,7 +227,7 @@ describe("SubagentSession — runTurnLoop turn limits", () => {
     const { sub } = makeSubagentSession(session, { agentMaxTurns: 1 });
     const result = await sub.runTurnLoop("go", { defaultMaxTurns: 9 });
     expect(session.steer).toHaveBeenCalledWith(expect.stringContaining("turn limit"));
-    expect(result.steered).toBe(true);
+    expect(result.terminalReason).toBe("turn_limit_graceful");
   });
 
   it("falls back to defaultMaxTurns when neither per-call nor agentMaxTurns is set", async () => {
@@ -238,7 +236,7 @@ describe("SubagentSession — runTurnLoop turn limits", () => {
     const { sub } = makeSubagentSession(session);
     const result = await sub.runTurnLoop("go", { defaultMaxTurns: 1, graceTurns: 5 });
     expect(session.steer).toHaveBeenCalledWith(expect.stringContaining("turn limit"));
-    expect(result.steered).toBe(true);
+    expect(result.terminalReason).toBe("turn_limit_graceful");
   });
 });
 
@@ -278,8 +276,7 @@ describe("SubagentSession — runTurnLoop lifecycle events", () => {
     expect(lifecycle.completed).toHaveBeenCalledWith({
       sessionDir: "/d",
       agentName: "Explore",
-      aborted: false,
-      steered: false,
+      terminalReason: "completed",
     });
   });
 
@@ -341,11 +338,15 @@ describe("SubagentSession — resumeTurnLoop", () => {
     expect(result).toEqual({ text: "RESUMED", failure: undefined });
   });
 
-  it("does not emit completed or disposed", async () => {
+  it("does not emit disposed, while the child lifecycle records completion", async () => {
     const { session } = createSession("RESUMED");
     const { sub } = makeSubagentSession(session, { lifecycle });
     await sub.resumeTurnLoop("Continue");
-    expect(lifecycle.completed).not.toHaveBeenCalled();
+    expect(lifecycle.completed).toHaveBeenCalledWith({
+      sessionDir: "/sessions/dir",
+      agentName: "Explore",
+      terminalReason: "completed",
+    });
     expect(lifecycle.disposed).not.toHaveBeenCalled();
   });
 });

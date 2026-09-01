@@ -23,7 +23,7 @@ describe("InterruptHandler", () => {
       expect(mockAbortAll).toHaveBeenCalledOnce();
     });
 
-    it("leaves background agents running when policy disables abort-all", () => {
+    it("leaves detached agents running when policy disables abort-all", () => {
       const controller = new AbortController();
       handler = new InterruptHandler(manager, () => false);
       handler.handleTurnStart({ signal: controller.signal });

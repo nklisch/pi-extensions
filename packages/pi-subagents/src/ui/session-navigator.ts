@@ -2,17 +2,9 @@
  * session-navigator.ts — The `/subagents:sessions` command: pick a subagent and
  * read its transcript through Pi's own per-entry session components.
  *
- * SDK/TUI consumer half of native session navigation. The unit-testable core
- * (selection, sourcing) lives in `session-navigation.ts`; this module wires that
- * core to the command picker and a read-only scrollable overlay, and owns the
- * renderer — it mounts Pi's interactive components (`AssistantMessageComponent`,
- * `ToolExecutionComponent`, …) into a `Container`, mirroring Pi's own
- * `renderSessionContext` mapping. Rendering lives here, not in the pure module,
- * because the components require a `TUI`, `cwd`, and markdown theme.
- *
- * The overlay is strictly read-only — steering stays in the `steer_subagent` tool
- * and the widget. It consumes a `TranscriptSource`, so the evicted-agent-source
- * follow-up swaps the source without touching the renderer or the overlay.
+ * The overlay remains a read-only native Pi transcript. Query state is local to
+ * this view and uses the same projection as the parent query tool; it never
+ * becomes a persisted index or a second message renderer.
  */
 
 import {
@@ -30,6 +22,9 @@ import {
 import {
   type Component,
   Container,
+  type Focusable,
+  Input,
+  Key,
   type MarkdownTheme,
   matchesKey,
   Spacer,
@@ -41,7 +36,16 @@ import type { AgentConfigLookup } from "#src/config/agent-types";
 import { debugLog } from "#src/debug";
 import type { SessionMessage } from "#src/types";
 import { describeActivity, formatDuration, formatModelThinking, type Theme } from "#src/ui/display";
-import { fileSnapshotSource, listNavigableAgents, liveSource, type NavigableSubagent, type RunDisplayMetadata, type TranscriptSource } from "#src/ui/session-navigation";
+import {
+  fileSnapshotSource,
+  liveFileSource,
+  listNavigableAgents,
+  type NavigableSubagent,
+  type RunDisplayMetadata,
+  type TranscriptSource,
+  type TranscriptSourceAvailability,
+} from "#src/ui/session-navigation";
+import { projectSessionMessages, querySession, type SessionQueryEntry } from "#src/session/query";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -49,6 +53,9 @@ import { fileSnapshotSource, listNavigableAgents, liveSource, type NavigableSuba
 const CHROME_LINES = 6;
 const MIN_VIEWPORT = 3;
 const VIEWPORT_HEIGHT_PCT = 70;
+const OVERLAY_QUERY_LIMIT = 50;
+
+type MatchMark = { readonly index: number; readonly total: number; readonly selected: boolean };
 
 /** Component factory shape Pi's `ui.custom` invokes to mount an overlay. */
 export type OverlayComponentFactory<R> = (
@@ -111,7 +118,9 @@ export class SessionNavigatorHandler {
 
     let source: TranscriptSource;
     try {
-      source = entry.kind === "live" ? liveSource(entry.record) : fileSnapshotSource(entry.outputFile, readFile);
+      source = entry.kind === "live"
+        ? liveFileSource(entry.record, readFile)
+        : fileSnapshotSource(entry.outputFile, readFile);
     } catch {
       ui.notify("Could not read the session transcript file.", "error");
       return;
@@ -129,20 +138,20 @@ export class SessionNavigatorHandler {
 }
 
 /**
- * Read-only scrollable transcript overlay.
+ * Read-only scrollable transcript overlay with literal query navigation.
  *
- * Caches a `Container` of Pi's per-entry components and rebuilds it only when the
- * source changes (live agents) — each paint reuses the cached tree, so markdown
- * highlighting does not re-run per frame. This class owns scroll state, chrome,
- * and the running-agent streaming indicator; the component mapping lives in
- * `buildTranscriptComponents`.
+ * Pi's message/tool components remain the body renderer. `MatchChrome` only
+ * adds block-level rails and a bounded match label around those components,
+ * which is the intentional fallback because the native components do not expose
+ * substring-highlighting hooks.
  */
-export class TranscriptOverlay implements Component {
+export class TranscriptOverlay implements Component, Focusable {
   private scrollOffset = 0;
   private autoScroll = true;
   private unsubscribe: (() => void) | undefined;
   private runtimeInterval: ReturnType<typeof setInterval> | undefined;
   private closed = false;
+  private _focused = false;
 
   private readonly tui: TUI;
   private readonly theme: Theme;
@@ -151,7 +160,24 @@ export class TranscriptOverlay implements Component {
   private readonly done: (result: undefined) => void;
   private readonly cwd: string;
   private readonly markdownTheme: MarkdownTheme;
+  private readonly searchInput = new Input();
   private content: Container;
+  private sourceMessages: readonly SessionMessage[] = [];
+  private matches: readonly SessionQueryEntry[] = [];
+  /** Query total, not the capped visible match list; keeps overflow truthful. */
+  private totalMatches = 0;
+  private matchMarks = new Map<string, MatchMark>();
+  private selectedMatchId: string | undefined;
+  private searchActive = false;
+  private searchCommitted = false;
+  private toolsOnly = false;
+  private newMatchCount = 0;
+
+  get focused(): boolean { return this._focused; }
+  set focused(value: boolean) {
+    this._focused = value;
+    this.searchInput.focused = value;
+  }
 
   constructor({ tui, theme, source, run, done, cwd, markdownTheme }: TranscriptOverlayOptions) {
     this.tui = tui;
@@ -162,7 +188,7 @@ export class TranscriptOverlay implements Component {
     this.cwd = cwd;
     this.markdownTheme = markdownTheme;
     try {
-      this.content = this.rebuild();
+      this.content = this.rebuildFromSource(false);
     } catch (error) {
       debugLog("session navigator initial render", error);
       this.content = new Container();
@@ -172,43 +198,27 @@ export class TranscriptOverlay implements Component {
     } catch (error) {
       debugLog("session navigator subscribe", error);
     }
-    if (this.isRunning()) {
-      this.runtimeInterval = setInterval(() => this.refreshRuntime(), 100);
-    }
+    if (this.isRunning()) this.runtimeInterval = setInterval(() => this.refreshRuntime(), 100);
   }
 
   handleInput(data: string): void {
     try {
-      if (matchesKey(data, "escape") || matchesKey(data, "q")) {
-        this.closed = true;
-        this.clearRuntimeInterval();
-        this.done(undefined);
+      if (this.searchActive) {
+        this.handleSearchInput(data);
         return;
       }
 
-      const totalLines = this.buildContentLines(this.innerWidth()).length;
-      const viewportHeight = this.viewportHeight();
-      const maxScroll = Math.max(0, totalLines - viewportHeight);
-
-      if (matchesKey(data, "up") || matchesKey(data, "k")) {
-        this.scrollOffset = Math.max(0, this.scrollOffset - 1);
-        this.autoScroll = this.scrollOffset >= maxScroll;
-      } else if (matchesKey(data, "down") || matchesKey(data, "j")) {
-        this.scrollOffset = Math.min(maxScroll, this.scrollOffset + 1);
-        this.autoScroll = this.scrollOffset >= maxScroll;
-      } else if (matchesKey(data, "pageUp") || matchesKey(data, "shift+up")) {
-        this.scrollOffset = Math.max(0, this.scrollOffset - viewportHeight);
-        this.autoScroll = false;
-      } else if (matchesKey(data, "pageDown") || matchesKey(data, "shift+down")) {
-        this.scrollOffset = Math.min(maxScroll, this.scrollOffset + viewportHeight);
-        this.autoScroll = this.scrollOffset >= maxScroll;
-      } else if (matchesKey(data, "home")) {
-        this.scrollOffset = 0;
-        this.autoScroll = false;
-      } else if (matchesKey(data, "end")) {
-        this.scrollOffset = maxScroll;
-        this.autoScroll = true;
+      if (data === "/") {
+        this.beginSearch();
+        this.requestRender();
+        return;
       }
+      if (matchesKey(data, Key.escape) || data === "q") {
+        this.close();
+        return;
+      }
+      this.handleScrollInput(data);
+      this.requestRender();
     } catch (error) {
       debugLog("session navigator input", error);
     }
@@ -225,6 +235,7 @@ export class TranscriptOverlay implements Component {
 
   private renderSafe(width: number): string[] {
     if (width < 6) return [];
+    this.refreshProjectionIfSourceChanged();
     const th = this.theme;
     const innerW = width - 4;
     const lines: string[] = [];
@@ -250,30 +261,22 @@ export class TranscriptOverlay implements Component {
     for (let i = 0; i < viewportHeight; i++) lines.push(row(visible[i] ?? ""));
 
     lines.push(hrMid);
-    const scrollPct =
-      contentLines.length <= viewportHeight
-        ? "100%"
-        : `${Math.round(((visibleStart + viewportHeight) / contentLines.length) * 100)}%`;
-    const footerLeft = th.fg("dim", `${contentLines.length} lines · ${scrollPct}`);
-    const footerRight = th.fg("dim", "↑↓ scroll · PgUp/PgDn · Esc close");
-    const footerGap = Math.max(1, innerW - visibleWidth(footerLeft) - visibleWidth(footerRight));
-    lines.push(row(footerLeft + " ".repeat(footerGap) + footerRight));
+    lines.push(row(this.footer(innerW, contentLines.length, visibleStart, viewportHeight)));
     lines.push(hrBot);
-
     return lines;
   }
 
-  // fallow-ignore-next-line unused-class-member
   invalidate(): void {
     try {
       this.content.invalidate();
+      this.searchInput.invalidate();
     } catch (error) {
       debugLog("session navigator invalidate", error);
     }
   }
 
   dispose(): void {
-    this.closed = true;
+    this.close(false);
     const unsubscribe = this.unsubscribe;
     this.unsubscribe = undefined;
     if (unsubscribe) {
@@ -283,32 +286,276 @@ export class TranscriptOverlay implements Component {
         debugLog("session navigator unsubscribe", error);
       }
     }
-    this.clearRuntimeInterval();
   }
 
-  // ---- Private ----
+  // ---- Search and source updates -------------------------------------------
+
+  private beginSearch(): void {
+    this.searchActive = true;
+    this.searchInput.focused = true;
+    this.searchCommitted = false;
+    this.toolsOnly = false;
+    this.newMatchCount = 0;
+    this.selectedMatchId = undefined;
+    this.autoScroll = false;
+    this.searchInput.setValue("");
+    this.matches = [];
+    this.totalMatches = 0;
+    this.matchMarks.clear();
+  }
+
+  private handleSearchInput(data: string): void {
+    if (matchesKey(data, Key.escape)) {
+      this.clearSearch();
+      this.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.tab)) {
+      this.toolsOnly = !this.toolsOnly;
+      this.reproject(false);
+      this.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.ctrl("u"))) {
+      this.searchInput.setValue("");
+      this.searchCommitted = false;
+      this.reproject(false);
+      this.requestRender();
+      return;
+    }
+
+    const previous = this.searchInput.getValue();
+    const shiftEnter = matchesKey(data, "shift+enter");
+    const enter = matchesKey(data, Key.enter);
+    if (shiftEnter) {
+      this.searchCommitted = true;
+      this.selectNextMatch(-1);
+      this.requestRender();
+      return;
+    }
+    if (enter) {
+      this.searchCommitted = true;
+      this.selectNextMatch(1);
+      this.requestRender();
+      return;
+    }
+    // Printable n/N are literal while editing. Once Enter has committed the
+    // query, the mock's n/N navigation shortcuts become active.
+    if (this.searchCommitted && (data === "n" || data === "N")) {
+      this.selectNextMatch(data === "n" ? 1 : -1);
+      this.requestRender();
+      return;
+    }
+
+    this.searchInput.handleInput(data);
+    if (this.searchInput.getValue() !== previous) {
+      this.searchCommitted = false;
+      this.selectedMatchId = undefined;
+      this.newMatchCount = 0;
+      this.reproject(false);
+      this.requestRender();
+    }
+  }
+
+  private clearSearch(): void {
+    this.searchActive = false;
+    this.searchInput.focused = false;
+    this.searchCommitted = false;
+    this.toolsOnly = false;
+    this.newMatchCount = 0;
+    this.selectedMatchId = undefined;
+    this.searchInput.setValue("");
+    this.matches = [];
+    this.totalMatches = 0;
+    this.matchMarks.clear();
+    // Keep the current offset. Tail-following resumes only if the operator is
+    // already at the tail, so clearing cannot move the inspected block.
+    const maxScroll = Math.max(0, this.buildContentLines(this.innerWidth()).length - this.viewportHeight());
+    this.autoScroll = this.scrollOffset >= maxScroll;
+    this.content = this.rebuildFromSource(false);
+  }
+
+  private selectNextMatch(direction: 1 | -1): void {
+    if (this.matches.length === 0) return;
+    const current = this.selectedMatchId === undefined
+      ? -1
+      : this.matches.findIndex((entry) => entry.id === this.selectedMatchId);
+    const next = current < 0
+      ? direction > 0 ? 0 : this.matches.length - 1
+      : (current + direction + this.matches.length) % this.matches.length;
+    this.selectedMatchId = this.matches[next]!.id;
+    this.newMatchCount = 0;
+    this.rebuildFromCurrentMessages();
+    this.scrollToSelected();
+  }
+
+  private reproject(preserveSelection: boolean): void {
+    const oldMatches = this.matches;
+    const oldIds = new Set(oldMatches.map((entry) => entry.id));
+    const priorSelection = this.selectedMatchId;
+    const queryResult = this.searchActive && this.searchInput.getValue()
+      ? querySession(this.sourceMessages, {
+        query: this.searchInput.getValue(),
+        kind: "all",
+        order: "oldest",
+        limit: OVERLAY_QUERY_LIMIT,
+        entryFamily: this.toolsOnly ? "tools" : "all",
+      })
+      : { entries: [], totalMatches: 0 };
+    const matches = queryResult.entries;
+    this.matches = matches;
+    this.totalMatches = queryResult.totalMatches;
+    if (!preserveSelection) {
+      this.selectedMatchId = undefined;
+      this.newMatchCount = 0;
+    } else if (priorSelection && matches.some((entry) => entry.id === priorSelection)) {
+      this.selectedMatchId = priorSelection;
+    } else if (priorSelection && matches.length > 0) {
+      const priorIndex = oldMatches.findIndex((entry) => entry.id === priorSelection);
+      this.selectedMatchId = matches[Math.min(Math.max(priorIndex, 0), matches.length - 1)]!.id;
+    } else if (matches.length === 0) {
+      this.selectedMatchId = undefined;
+    }
+    if (preserveSelection && this.searchActive) {
+      this.newMatchCount = matches.filter((entry) => !oldIds.has(entry.id)).length;
+    }
+    this.matchMarks = new Map(matches.map((entry, index) => [entry.id, {
+      index: index + 1,
+      total: this.totalMatches,
+      selected: entry.id === this.selectedMatchId,
+    }]));
+  }
 
   private refreshFromSource(): void {
     if (this.closed) return;
     try {
-      this.content = this.rebuild();
+      const oldMessages = this.sourceMessages;
+      this.sourceMessages = this.source.getMessages();
+      if (this.sourceMessages !== oldMessages) this.reproject(this.searchActive);
+      this.content = this.buildComponents(this.sourceMessages);
       this.tui.requestRender();
     } catch (error) {
       debugLog("session navigator live refresh", error);
     }
   }
 
-  private refreshRuntime(): void {
+  private refreshProjectionIfSourceChanged(): void {
     try {
-      if (this.closed || !this.isRunning()) {
-        this.clearRuntimeInterval();
-        return;
+      const messages = this.source.getMessages();
+      if (messages !== this.sourceMessages) {
+        this.sourceMessages = messages;
+        this.reproject(true);
+        this.content = this.buildComponents(messages);
       }
-      this.tui.requestRender();
     } catch (error) {
-      debugLog("session navigator runtime refresh", error);
-      this.clearRuntimeInterval();
+      debugLog("session navigator source projection", error);
     }
+  }
+
+  private rebuildFromSource(preserveSelection: boolean): Container {
+    this.sourceMessages = this.source.getMessages();
+    this.reproject(preserveSelection);
+    return this.buildComponents(this.sourceMessages);
+  }
+
+  private rebuildFromCurrentMessages(): void {
+    this.reproject(true);
+    this.content = this.buildComponents(this.sourceMessages);
+  }
+
+  // ---- Ordinary transcript navigation -------------------------------------
+
+  private handleScrollInput(data: string): void {
+    const totalLines = this.buildContentLines(this.innerWidth()).length;
+    const viewportHeight = this.viewportHeight();
+    const maxScroll = Math.max(0, totalLines - viewportHeight);
+
+    if (matchesKey(data, Key.up) || data === "k") {
+      this.scrollOffset = Math.max(0, this.scrollOffset - 1);
+      this.autoScroll = this.scrollOffset >= maxScroll;
+    } else if (matchesKey(data, Key.down) || data === "j") {
+      this.scrollOffset = Math.min(maxScroll, this.scrollOffset + 1);
+      this.autoScroll = this.scrollOffset >= maxScroll;
+    } else if (matchesKey(data, Key.pageUp) || matchesKey(data, "shift+up")) {
+      this.scrollOffset = Math.max(0, this.scrollOffset - viewportHeight);
+      this.autoScroll = false;
+    } else if (matchesKey(data, Key.pageDown) || matchesKey(data, "shift+down")) {
+      this.scrollOffset = Math.min(maxScroll, this.scrollOffset + viewportHeight);
+      this.autoScroll = this.scrollOffset >= maxScroll;
+    } else if (matchesKey(data, Key.home)) {
+      this.scrollOffset = 0;
+      this.autoScroll = false;
+    } else if (matchesKey(data, Key.end)) {
+      this.scrollOffset = maxScroll;
+      this.autoScroll = true;
+    }
+  }
+
+  private scrollToSelected(): void {
+    if (!this.selectedMatchId) return;
+    const width = this.innerWidth();
+    let line = 0;
+    let selectedLine: number | undefined;
+    for (const child of this.content.children) {
+      if (isMatchChrome(child) && child.matchId === this.selectedMatchId) selectedLine = line;
+      line += child.render(width).length;
+    }
+    if (selectedLine === undefined) return;
+    const viewport = this.viewportHeight();
+    const maxScroll = Math.max(0, this.buildContentLines(width).length - viewport);
+    this.scrollOffset = Math.min(maxScroll, Math.max(0, selectedLine - Math.floor(viewport / 3)));
+    this.autoScroll = false;
+  }
+
+  // ---- Rendering and lifecycle --------------------------------------------
+
+  private footer(innerW: number, contentLineCount: number, visibleStart: number, viewportHeight: number): string {
+    if (this.searchActive) {
+      const input = this.searchInput.render(Math.max(8, Math.min(32, innerW - 48)))[0] ?? "> ";
+      const inputLine = "/" + input.slice(1);
+      const filter = `[${this.toolsOnly ? "tools" : "all"}]`;
+      const query = this.searchInput.getValue();
+      const count = !query
+        ? "type to search"
+        : this.totalMatches === 0
+          ? "0 matches"
+          : `${this.totalMatches > OVERLAY_QUERY_LIMIT ? `${OVERLAY_QUERY_LIMIT}+` : this.totalMatches} matches${this.selectedMatchId ? ` [${this.selectedIndex()}/${this.totalMatches}]` : ""}${this.newMatchCount > 0 ? ` (+${this.newMatchCount} new)` : ""}`;
+      const source = this.source.availability?.();
+      const sourceNote = sourceFooterNote(source);
+      const hints = "Enter/n next · Shift+Enter/N prev · Tab filter · Esc clear";
+      return truncateToWidth(`${inputLine} ${filter} ${count}${sourceNote} · ${hints}`, innerW, "");
+    }
+    const scrollPct = contentLineCount <= viewportHeight
+      ? "100%"
+      : `${Math.round(((visibleStart + viewportHeight) / contentLineCount) * 100)}%`;
+    const source = this.source.availability?.();
+    const sourceNote = sourceFooterNote(source);
+    const footerLeft = ` ${contentLineCount} lines · ${scrollPct}${sourceNote}`;
+    const footerRight = "↑↓/j/k scroll · PgUp/PgDn · / search · Esc/q close";
+    const gap = Math.max(1, innerW - visibleWidth(footerLeft) - visibleWidth(footerRight));
+    return truncateToWidth(footerLeft + " ".repeat(gap) + footerRight, innerW, "");
+  }
+
+  private selectedIndex(): number {
+    const index = this.matches.findIndex((entry) => entry.id === this.selectedMatchId);
+    return index < 0 ? 0 : index + 1;
+  }
+
+  private buildContentLines(innerW: number): string[] {
+    if (innerW <= 0) return [];
+    const lines = this.content.render(innerW);
+    const streaming = this.source.streaming();
+    if (streaming) lines.push("", `◍ ${describeActivity(streaming.activeTools, streaming.responseText)}`);
+    return lines.map((line) => truncateToWidth(line, innerW));
+  }
+
+  private buildComponents(messages: readonly SessionMessage[]): Container {
+    return buildTranscriptComponents(messages, {
+      tui: this.tui,
+      cwd: this.cwd,
+      markdownTheme: this.markdownTheme,
+      getToolDefinition: (name) => this.source.getToolDefinition(name),
+    }, this.matchMarks, this.theme);
   }
 
   private isRunning(): boolean {
@@ -320,6 +567,21 @@ export class TranscriptOverlay implements Component {
     }
   }
 
+  private refreshRuntime(): void {
+    try {
+      if (this.closed) {
+        this.clearRuntimeInterval();
+        return;
+      }
+      this.refreshProjectionIfSourceChanged();
+      if (!this.isRunning()) this.clearRuntimeInterval();
+      this.tui.requestRender();
+    } catch (error) {
+      debugLog("session navigator runtime refresh", error);
+      this.clearRuntimeInterval();
+    }
+  }
+
   private clearRuntimeInterval(): void {
     if (this.runtimeInterval !== undefined) {
       clearInterval(this.runtimeInterval);
@@ -327,33 +589,30 @@ export class TranscriptOverlay implements Component {
     }
   }
 
-  private innerWidth(): number {
-    return Math.max(0, this.tui.terminal.columns - 4);
-  }
-
+  private innerWidth(): number { return Math.max(0, this.tui.terminal.columns - 4); }
   private viewportHeight(): number {
     const maxRows = Math.floor((this.tui.terminal.rows * VIEWPORT_HEIGHT_PCT) / 100);
     return Math.max(MIN_VIEWPORT, maxRows - CHROME_LINES);
   }
+  private requestRender(): void {
+    try { this.tui.requestRender(); } catch (error) { debugLog("session navigator request render", error); }
+  }
 
-  private buildContentLines(innerW: number): string[] {
-    if (innerW <= 0) return [];
-    const lines = this.content.render(innerW);
-    const streaming = this.source.streaming();
-    if (streaming) {
-      lines.push("", `◍ ${describeActivity(streaming.activeTools, streaming.responseText)}`);
+  private close(notify = true): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.searchInput.focused = false;
+    this.clearRuntimeInterval();
+    if (notify) {
+      try { this.done(undefined); } catch (error) { debugLog("session navigator close", error); }
     }
-    return lines.map((l) => truncateToWidth(l, innerW));
   }
+}
 
-  private rebuild(): Container {
-    return buildTranscriptComponents(this.source.getMessages(), {
-      tui: this.tui,
-      cwd: this.cwd,
-      markdownTheme: this.markdownTheme,
-      getToolDefinition: (name) => this.source.getToolDefinition(name),
-    });
-  }
+function sourceFooterNote(source: TranscriptSourceAvailability | undefined): string {
+  if (source?.kind === "file") return " · released (snapshot)";
+  if (source?.kind === "unavailable") return " · released / transcript unavailable";
+  return "";
 }
 
 /** Dependencies the per-entry component tree needs from the SDK/TUI environment. */
@@ -368,17 +627,31 @@ interface TranscriptRenderOptions {
  * Build a `Container` of Pi's per-entry components from a message snapshot,
  * mirroring Pi's own interactive-mode `renderSessionContext` mapping. Tool
  * results are matched to their tool-call components by id, exactly as Pi does.
- * `custom`-role messages are skipped — rendering them needs the child session's
- * message-renderer registry, which the navigator does not hold.
  */
 function buildTranscriptComponents(
   messages: readonly SessionMessage[],
   opts: TranscriptRenderOptions,
+  marks: ReadonlyMap<string, MatchMark>,
+  theme: Theme,
 ): Container {
   const container = new Container();
   const pendingTools = new Map<string, ToolExecutionComponent>();
-  for (const message of messages) {
-    addMessageComponents(container, message, pendingTools, opts);
+  const entries = projectSessionMessages(messages);
+  const messageEntries = new Map(entries.filter((entry) => entry.kind === "message").map((entry) => [entry.sourceIndex, entry]));
+  const toolEntries = new Map(entries.filter((entry) => entry.kind === "tool_call").map((entry) => [entry.id, entry]));
+  for (let sourceIndex = 0; sourceIndex < messages.length; sourceIndex++) {
+    const message = messages[sourceIndex]!;
+    addMessageComponents(
+      container,
+      message,
+      pendingTools,
+      opts,
+      marks,
+      theme,
+      messageEntries.get(sourceIndex),
+      toolEntries,
+      sourceIndex,
+    );
   }
   return container;
 }
@@ -388,10 +661,19 @@ function addMessageComponents(
   message: SessionMessage,
   pendingTools: Map<string, ToolExecutionComponent>,
   opts: TranscriptRenderOptions,
+  marks: ReadonlyMap<string, MatchMark>,
+  theme: Theme,
+  messageEntry: SessionQueryEntry | undefined,
+  toolEntries: ReadonlyMap<string, SessionQueryEntry>,
+  sourceIndex: number,
 ): void {
+  const add = (component: Component, entry: SessionQueryEntry | undefined): void => {
+    const mark = entry ? marks.get(entry.id) : undefined;
+    container.addChild(mark ? new MatchChrome(component, entry!.id, mark, theme) : component);
+  };
   switch (message.role) {
     case "assistant": {
-      container.addChild(new AssistantMessageComponent(message, false, opts.markdownTheme));
+      add(new AssistantMessageComponent(message, false, opts.markdownTheme), messageEntry);
       for (const content of message.content) {
         if (content.type !== "toolCall") continue;
         const tool = new ToolExecutionComponent(
@@ -404,7 +686,7 @@ function addMessageComponents(
           opts.cwd,
         );
         tool.setExpanded(true);
-        container.addChild(tool);
+        add(tool, toolEntries.get(content.id));
         pendingTools.set(content.id, tool);
       }
       break;
@@ -414,31 +696,28 @@ function addMessageComponents(
       pendingTools.delete(message.toolCallId);
       break;
     }
-    case "user": {
-      addUserComponents(container, message.content, opts.markdownTheme);
+    case "user":
+      addUserComponents(container, message.content, opts.markdownTheme, messageEntry, marks, theme);
       break;
-    }
     case "bashExecution": {
       const bash = new BashExecutionComponent(message.command, opts.tui, message.excludeFromContext);
       if (message.output) bash.appendOutput(message.output);
       bash.setComplete(message.exitCode, message.cancelled, undefined, message.fullOutputPath);
-      container.addChild(bash);
+      add(bash, toolEntries.get(`bash:${sourceIndex}`));
       break;
     }
-    case "compactionSummary": {
+    case "compactionSummary":
       container.addChild(new Spacer(1));
       const summary = new CompactionSummaryMessageComponent(message, opts.markdownTheme);
       summary.setExpanded(true);
       container.addChild(summary);
       break;
-    }
-    case "branchSummary": {
+    case "branchSummary":
       container.addChild(new Spacer(1));
-      const summary = new BranchSummaryMessageComponent(message, opts.markdownTheme);
-      summary.setExpanded(true);
-      container.addChild(summary);
+      const branch = new BranchSummaryMessageComponent(message, opts.markdownTheme);
+      branch.setExpanded(true);
+      container.addChild(branch);
       break;
-    }
   }
 }
 
@@ -447,22 +726,25 @@ function addUserComponents(
   container: Container,
   content: string | readonly { type: string; text?: string }[],
   markdownTheme: MarkdownTheme,
+  entry: SessionQueryEntry | undefined,
+  marks: ReadonlyMap<string, MatchMark>,
+  theme: Theme,
 ): void {
   const text = userMessageText(content);
   if (!text) return;
+  const mark = entry ? marks.get(entry.id) : undefined;
+  const wrap = (component: Component): void => container.addChild(mark ? new MatchChrome(component, entry!.id, mark, theme) : component);
   if (container.children.length > 0) container.addChild(new Spacer(1));
 
   const skillBlock = parseSkillBlock(text);
   if (!skillBlock) {
-    container.addChild(new UserMessageComponent(text, markdownTheme));
+    wrap(new UserMessageComponent(text, markdownTheme));
     return;
   }
-  const skill = new SkillInvocationMessageComponent(skillBlock, markdownTheme);
-  skill.setExpanded(true);
-  container.addChild(skill);
+  wrap(new SkillInvocationMessageComponent(skillBlock, markdownTheme));
   if (skillBlock.userMessage) {
     container.addChild(new Spacer(1));
-    container.addChild(new UserMessageComponent(skillBlock.userMessage, markdownTheme));
+    wrap(new UserMessageComponent(skillBlock.userMessage, markdownTheme));
   }
 }
 
@@ -473,4 +755,40 @@ function userMessageText(content: string | readonly { type: string; text?: strin
     .filter((block) => block.type === "text")
     .map((block) => block.text ?? "")
     .join("");
+}
+
+/**
+ * Block-level chrome intentionally wraps native rendering; it does not inspect
+ * or reformat the child body, so Pi's tool and markdown renderers stay in use.
+ */
+class MatchChrome implements Component {
+  readonly matchId: string;
+  private readonly component: Component;
+  private readonly mark: MatchMark;
+  private readonly theme: Theme;
+
+  constructor(component: Component, matchId: string, mark: MatchMark, theme: Theme) {
+    this.component = component;
+    this.mark = mark;
+    this.matchId = matchId;
+    this.theme = theme;
+  }
+
+  render(width: number): string[] {
+    if (width <= 2) return this.component.render(Math.max(1, width));
+    const bodyWidth = width - 2;
+    const lines = this.component.render(bodyWidth);
+    const color = this.mark.selected ? "accent" : "warning";
+    const label = `${this.mark.selected ? "▶ " : ""}MATCH ${this.mark.index}/${this.mark.total}`;
+    const header = truncateToWidth(this.theme.fg(color, `╭─ ${label} ─`), width, "");
+    return [header, ...lines.map((line) =>
+      truncateToWidth(this.theme.fg(color, "│") + " " + line, width, ""),
+    )];
+  }
+
+  invalidate(): void { this.component.invalidate(); }
+}
+
+function isMatchChrome(component: Component): component is MatchChrome {
+  return component instanceof MatchChrome;
 }

@@ -33,6 +33,9 @@ export interface SubscribableSession {
 /** Agent type: any string name (built-in defaults or user-defined). */
 export type SubagentType = string;
 
+/** Delivery mode for one initial or resumed run. */
+export type SubagentMode = "joined" | "detached";
+
 /** UI display and agent listing — name, display name, description, prompt mode. */
 export interface AgentIdentity {
   name: string;
@@ -54,10 +57,12 @@ export interface AgentConfig extends AgentIdentity, AgentPromptConfig {
   model?: string;
   thinking?: ThinkingLevel;
   maxTurns?: number;
-  /** Default for spawn: fork parent conversation. undefined = caller decides. */
+  /** Active runtime deadline in seconds for launch/resume. */
+  timeoutSeconds?: number;
+  /** Default for launch/resume: fork parent conversation. undefined = caller decides. */
   inheritContext?: boolean;
-  /** Default for spawn: run in background. undefined = caller decides. */
-  runInBackground?: boolean;
+  /** Default delivery mode for launch/resume. */
+  mode?: SubagentMode;
   /** One-line usage guideline for the subagent tool's Guidelines: block. Omitted — no guideline line. */
   toolGuideline?: string;
   /** true = this is an embedded default agent (informational) */
@@ -74,7 +79,8 @@ export interface AgentInvocation {
   thinking?: ThinkingLevel;
   maxTurns?: number;
   inheritContext?: boolean;
-  runInBackground?: boolean;
+  mode?: SubagentMode;
+  timeoutSeconds?: number;
 }
 
 /**
@@ -115,7 +121,7 @@ export interface ParentSessionInfo {
 	parentSessionFile?: string;
 	/** Session ID of the parent agent (stored in the child session's parentSession header). */
 	parentSessionId?: string;
-	/** Tool call ID for background notification wiring. Exposed on the record via Subagent.toolCallId. */
+	/** Tool call ID for detached completion notification wiring. Exposed on the record via Subagent.toolCallId. */
 	toolCallId?: string;
 }
 

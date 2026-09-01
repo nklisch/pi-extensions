@@ -281,4 +281,13 @@ describe("createSubagentSession — post-bind recursion guard", () => {
     expect(session.setActiveToolsByName).toHaveBeenCalledTimes(1);
     expect(session.setActiveToolsByName.mock.calls[0][0]).toEqual(expected);
   });
+
+  it("matches the exact parent-only registry when building the child exclusion list", async () => {
+    const session = arrangeFactory({ toolsBeforeBind: ["read"], toolsAfterBind: ["read", "extension_tool", "subagent", "resume_subagent", "stop_subagent", "steer_subagent", "list_subagents", "get_subagent_result"] });
+    await createSubagentSession({ snapshot: STUB_SNAPSHOT, type: "Explore" }, defaultDeps());
+    const options = io.createSession.mock.calls[0][0];
+    const parentOnly = ["subagent", "resume_subagent", "stop_subagent", "steer_subagent", "list_subagents", "get_subagent_result"];
+    expect(options.excludeTools.filter((name: string) => parentOnly.includes(name))).toEqual(parentOnly);
+    expect(session.setActiveToolsByName).toHaveBeenCalledWith(["read", "extension_tool"]);
+  });
 });

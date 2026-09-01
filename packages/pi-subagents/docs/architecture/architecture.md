@@ -9,11 +9,11 @@ This document describes the architecture of the pi-subagents fork: a focused, co
 2. **Composable by default** — other extensions can spawn agents, observe their lifecycle, and display their state without importing this package directly.
 3. **Typed API boundary** — this package exports a `SubagentsService` interface and `Symbol.for()` accessors (`publishSubagentsService` / `getSubagentsService`).
    Consumers declare this package as an optional peer dependency and use dynamic import for compile-time types.
-   The runtime bridge is `Symbol.for("@gotgenes/pi-subagents:service")` on `globalThis` — no separate API package.
+   The runtime bridge is `Symbol.for("@nklisch/pi-subagents:service")` on `globalThis` — no separate API package.
 4. **No time-based scheduling** — cron-style timed dispatch (upstream's `schedule.ts` subsystem) is removed from the core (#52).
-   Timed dispatch is a separate concern that any extension can implement by calling `spawn()` on the published API.
+   Timed dispatch is a separate concern that any extension can implement by calling `launch()` on the published API.
    The max-concurrent admission gate is not scheduling in this sense — concurrency management stays in core.
-5. **UI is an in-core, substitutable consumer** — [ADR-0004](../decisions/0004-reconsider-ui-direction.md) records the per-component decision: the widget shrinks to background agents only, the bespoke conversation viewer is replaced by native session navigation, the `/agents` command is dissolved into focused surfaces, and the surviving UI stays in the core as a reactive consumer (not extracted to a separate package).
+5. **UI is an in-core, substitutable consumer** — [ADR-0004](../decisions/0004-reconsider-ui-direction.md) records the per-component decision: the widget shows detached agents only, the bespoke conversation viewer is replaced by native session navigation, the `/agents` command is dissolved into focused surfaces, and the surviving UI stays in the core as a reactive consumer (not extracted to a separate package).
    Extraction remains an available future option because the composition invariant holds — the core is byte-for-byte identical with or without a given UI consumer.
 6. **Snapshot identity; share the canonical runtime** — mutable parent identity and prompt state are frozen into `ParentSnapshot` at spawn. The parent `ModelRuntime` is deliberately shared so child sessions preserve runtime provider and authentication registrations; no live session context is captured.
 7. **Subscribe, don't thread** — observation of agent progress uses direct session-event subscription, not callback parameters threaded through multiple layers.
@@ -51,11 +51,11 @@ flowchart TB
 
     subgraph lifecycle["Lifecycle domain"]
         direction TB
-        SubagentManager["SubagentManager<br/>(spawn, abort, collection)"]
-        ConcurrencyLimiter["ConcurrencyLimiter<br/>(thunk admission gate)"]
+        SubagentManager["SubagentManager<br/>(launch, resume, stop, collection)"]
+        ConcurrencyLimiter["ConcurrencyLimiter<br/>(cancellable FIFO admission)"]
         CreateSubagentSession["createSubagentSession<br/>(assembly factory)"]
         SubagentSession["SubagentSession<br/>(turn loop, steer, dispose)"]
-        Subagent["Subagent<br/>(status, behavior: abort/steer/run lifecycle)"]
+        Subagent["Subagent<br/>(status, run lease, stop/steer lifecycle)"]
         ParentSnapshot["ParentSnapshot<br/>(frozen parent state)"]
         Workspace["workspace<br/>(provider seam: child cwd + teardown)"]
     end
@@ -69,12 +69,15 @@ flowchart TB
     subgraph tools["Tools domain"]
         direction TB
         AgentTool["subagent tool<br/>(dispatch)"]
+        QueryTool["query_subagent_session<br/>(bounded read)"]
         ResultRenderer["result-renderer<br/>(pure rendering)"]
         SpawnConfig["spawn-config<br/>(resolve params)"]
-        FgRunner["foreground-runner"]
-        BgSpawner["background-spawner"]
+        Resume["resume_subagent"]
+        Stop["stop_subagent"]
+        List["list_subagents"]
         GetResult["get_subagent_result"]
         Steer["steer_subagent"]
+        Query["query_subagent_session"]
     end
 
     subgraph ui["UI domain"]
@@ -115,11 +118,11 @@ classDiagram
         +subagentSession?: SubagentSession
         +toolCallId?: string
         +markRunning() delegates
-        +markCompleted() delegates
-        +run()
-        +resume(prompt, signal)
-        +abort(): boolean
+        +launch()
+        +resume(prompt, mode, signal)
+        +requestStop(reason): boolean
         +steer(message): Promise~SteerOutcome~
+        +settlement: Promise~void~
         +isSessionReady(): boolean
         +getConversation(): string | undefined
         +getContextPercent(): number | null
@@ -163,11 +166,11 @@ classDiagram
 
     class SubagentManager {
         +spawn(snapshot, type, prompt, config)
-        +spawnAndWait(snapshot, type, prompt, config)
-        +resume(id, prompt, signal)
+        +launch(snapshot, type, prompt, config)
+        +resume(id, prompt, mode, signal)
+        +stop(id, timeout): StopOutcome
         +getRecord(id): Subagent
         +listAgents(): Subagent[]
-        +abort(id)
     }
 
     class AgentTypeRegistry {
@@ -187,11 +190,13 @@ classDiagram
     }
 
     class SubagentsService {
-        +spawn(type, prompt, options?)
+        +launch(type, prompt, options?): Promise~LaunchDelivery~
+        +resume(id, prompt, options?): Promise~ResumeDelivery~
+        +stop(id, timeout?): Promise~StopDelivery~
+        +steer(id, message): Promise~SteerDelivery~
+        +list(options?): SubagentRecord[]
+        +getResult(id): ResultDelivery
         +getRecord(id): SubagentRecord
-        +listAgents(): SubagentRecord[]
-        +abort(id)
-        +steer(id, message)
         +waitForAll()
         +hasRunning(): boolean
     }
@@ -208,32 +213,20 @@ classDiagram
 
 ```mermaid
 stateDiagram-v2
-    [*] --> queued : spawn (background, at capacity)
-    [*] --> running : spawn (foreground or under limit)
+    [*] --> queued : launch / resume through FIFO admission
     queued --> running : capacity available
-    queued --> stopped : stopped before admission
-    running --> completed : all turns finished
-    running --> error : unhandled exception
-    running --> aborted : abort() called
-    running --> stopped : max turns reached
-    running --> steered : steer message injected
-    steered --> running : continues with message
+    queued --> stopped : queued stop or joined cancellation
+    running --> completed : success or graceful turn limit
+    running --> stopped : explicit stop, parent cancellation, timeout, hard limit, lifecycle abort
+    running --> error : provider, execution, or workspace teardown failure
     completed --> resume_wait : reserve resume
-    stopped --> resume_wait : reserve after abort
+    stopped --> resume_wait : reserve resume
     error --> resume_wait : reserve resume
-    aborted --> resume_wait : reserve resume
     resume_wait --> running : prior execution settled + Pi idle
-    resume_wait --> stopped : abort resume wait
+    resume_wait --> stopped : stop during wind-down
     completed --> [*]
-    error --> [*]
-    aborted --> [*]
     stopped --> [*]
-
-    note right of running
-        markCompleted, markAborted,
-        markSteered, and markError
-        are no-ops when status is stopped
-    end note
+    error --> [*]
 ```
 
 Note: `markStopped` always succeeds regardless of current status.
@@ -241,7 +234,7 @@ Other terminal transitions guard against overwriting `stopped` — once an agent
 
 Resume admission is a record-owned lease. A genuinely running or already-reserved record rejects a second resume before reaching Pi. A stopped record may still own a winding-down prompt, and Pi may still be finishing post-run continuation after the domain result looks terminal; the lease therefore spans the prior execution promise and Pi's authoritative `agent_settled`/`isIdle` boundary. Retention, abort, result waiting, and manager shutdown all treat the lease as active.
 
-Terminal outcomes also carry orthogonal consumption state. Foreground delivery, `get_subagent_result`, and a queued completion notification mark the outcome consumed. Records remain available for the parent session; only their heavy live child sessions are released after the configured consumed or unconsumed retention window. Released records keep their result and persisted transcript pointer but cannot resume. Release detaches the session synchronously before awaiting teardown, so it cannot race a new resume.
+Terminal outcomes also carry orthogonal consumption state. Joined delivery, `get_subagent_result`, and a queued detached completion notification mark the outcome consumed. Records remain available for the parent session; only their heavy live child sessions are released after the configured consumed or unconsumed retention window. Released records keep their result and persisted transcript pointer but cannot resume. Release detaches the session synchronously before awaiting teardown, so it cannot race a new resume.
 
 Completion notifications are held while the parent agent run is active and flushed on `agent_settled`, rechecking consumption before enqueueing a follow-up. A blocking `get_subagent_result` request claims direct delivery before awaiting, so the same terminal outcome cannot also enqueue a completion follow-up. Child session creation shares the parent model runtime and leaves extension-tool registration open; a denylist removes disallowed built-ins and recursive orchestration tools across registry refreshes. Child teardown mirrors Pi's managed root lifecycle: it emits and awaits `session_shutdown` before `AgentSession.dispose()` revokes extension contexts, then publishes the child `disposed` event.
 
@@ -259,11 +252,11 @@ sequenceDiagram
     participant Sub as SubagentSession
     participant Child as Child session
 
-    LLM->>Tool: subagent(type, prompt, ...)
+    LLM->>Tool: subagent(type, prompt, mode, ...)
     Tool->>Spawn: resolveSpawnConfig(params)
     Spawn-->>Tool: ResolvedSpawnConfig
-    Tool->>Mgr: spawn(snapshot, type, prompt, config)
-    Mgr->>Ag: run()
+    Tool->>Mgr: launch(snapshot, type, prompt, config)
+    Mgr->>Ag: schedule lease through FIFO admission
     Ag->>Factory: createSubagentSession(params, deps)
     Factory->>Asm: assembleSessionConfig(type, ctx, opts, env, registry, io)
     Asm-->>Factory: SessionConfig
@@ -275,14 +268,14 @@ sequenceDiagram
     Child-->>Sub: result text
     Sub-->>Ag: TurnLoopResult
     Ag-->>Mgr: update Subagent
-    Mgr-->>Tool: Subagent
-    Tool-->>LLM: formatted result
+    Mgr-->>Tool: detached identity or joined settled record
+    Tool-->>LLM: bounded result or delivery identity
     Note over Mgr: retention releases heavy sessions but keeps terminal records and transcript pointers
 ```
 
 ## Module organization
 
-The extension has 62 source files organized into six domains plus entry-point wiring.
+The extension has 67 source files organized into six domains plus entry-point wiring.
 All eight domains have directories: `config/`, `session/`, `lifecycle/`, `observation/`, `service/`, `tools/`, `ui/`, and `handlers/`.
 Issue #164 moved the 26 previously flat root-level files into five new domain directories, reducing the root to 5 files + 8 directories.
 
@@ -295,7 +288,7 @@ src/
 ├── types.ts                        shared type definitions
 ├── settings.ts                     SettingsManager (persistent operational settings)
 ├── debug.ts                        debug logging utility
-├── layered-settings.ts             loadLayeredSettings helper (published as @gotgenes/pi-subagents/settings)
+├── layered-settings.ts             loadLayeredSettings helper (published as @nklisch/pi-subagents/settings)
 │
 ├── config/                         agent type definitions and resolution
 │   ├── agent-types.ts              AgentTypeRegistry class
@@ -308,6 +301,8 @@ src/
 │   ├── prompts.ts                  system prompt building
 │   ├── content-items.ts            shared message content parsing (tool-call names, assistant content)
 │   ├── context.ts                  parent conversation extraction
+│   ├── query.ts                     bounded live/file transcript projection and search
+│   ├── query-source.ts              shared JSONL adapter for query and native navigation
 │   ├── conversation.ts             render a session's messages as formatted text
 │   ├── env.ts                      git/platform detection
 │   ├── model-resolver.ts           fuzzy model name resolution
@@ -318,11 +313,11 @@ src/
 │   ├── create-subagent-session.ts  assembly factory: session creation, binding, tool filtering
 │   ├── subagent-session.ts         born-complete child session: turn loop, steer, dispose
 │   ├── turn-limits.ts              normalizeMaxTurns (turn-count policy)
-│   ├── subagent.ts                 owns full execution lifecycle (run, abort, steer)
-│   ├── subagent-state.ts           lifecycle status + metrics value object (transitions, accumulators)
-│   ├── run-listeners.ts            per-run observer-unsub and signal-detach handles
+│   ├── subagent.ts                 authoritative run lease and stop/resume lifecycle
+│   ├── subagent-state.ts           coarse status, terminal reasons, and metrics
+│   ├── run-listeners.ts            per-run observer-unsubscribe handle
 │   ├── workspace-bracket.ts        child workspace prepare/dispose lifecycle
-│   ├── concurrency-limiter.ts       background admission gate: schedules run thunks FIFO against the limit
+│   ├── concurrency-limiter.ts      cancellable FIFO admission gate for all run modes
 │   ├── parent-snapshot.ts          immutable spawn-time parent state
 │   ├── child-lifecycle.ts          child-execution lifecycle event publisher
 │   ├── workspace.ts                workspace provider seam (generative extension surface)
@@ -343,10 +338,12 @@ src/
 │   ├── agent-tool.ts               subagent tool definition, validation, dispatch
 │   ├── result-renderer.ts          pure per-status result rendering
 │   ├── spawn-config.ts             pure config resolution
-│   ├── foreground-runner.ts        foreground execution loop
-│   ├── background-spawner.ts       background spawn setup
+│   ├── resume-tool.ts              resume_subagent tool
+│   ├── stop-tool.ts                stop_subagent tool
+│   ├── list-tool.ts                list_subagents tool
 │   ├── get-result-tool.ts          get_subagent_result tool
-│   ├── get-result-report.ts        pure get_subagent_result report formatter
+│   ├── query-session-tool.ts       query_subagent_session tool
+│   ├── parent-tool-registry.ts     authoritative parent-only tool names
 │   ├── steer-tool.ts               steer_subagent tool
 │   └── helpers.ts                  shared tool utilities
 │
@@ -356,7 +353,7 @@ src/
 │   ├── display.ts                  pure formatters and shared types
 │   ├── subagents-settings.ts       /subagents:settings command handler
 │   ├── session-navigation.ts       pure session-selection and transcript-source logic
-│   └── session-navigator.ts        /subagents:sessions command handler
+│   └── session-navigator.ts        /subagents:sessions command handler and search overlay
 │
 └── handlers/                       event handlers
     ├── index.ts                    barrel re-export
@@ -365,21 +362,36 @@ src/
     └── tool-start.ts               tool_execution_start handler
 ```
 
+### Transcript query boundary
+
+`query_subagent_session` is a parent-only, read-only pull surface. Its pure
+`session/query.ts` projection correlates tool results to calls, caps searchable
+fields and excerpts, and applies literal case-insensitive matching, scope,
+ordering, and a 1–50 result limit on every call. It reads a live child session
+when retained and otherwise uses the same Pi JSONL/context adapter as native
+session navigation. No index or query state is persisted.
+
+`/subagents:sessions` keeps Pi's native message, markdown, and tool-execution
+components for the transcript body. Its overlay owns only ephemeral search
+state and block-level match chrome; a release notification swaps the source to
+the file snapshot, while an unavailable snapshot preserves the last readable
+content and labels the degraded state.
+
 ### Observation model
 
 Record statistics (tool uses, token usage, compaction counts) and live activity (active tools, response text, turn counts) are updated by `record-observer.ts`, which subscribes directly to session events.
 This is the single per-child session subscription — all run state lives on the `Subagent` record.
 
-The widget maintains a bounded reactive read model of active background records and the small terminal linger set, populated by `SubagentManagerObserver` lifecycle callbacks. While active it refreshes that model at 500 ms; each refresh reads only those retained records and requests the normal Pi widget render, rather than cloning or sorting the manager's full terminal history. When only terminal linger records remain, it renders the completion state once and leaves the static widget registered without an interval until turn aging or clear removes it. The `/subagents:sessions` navigator reads messages via `Subagent.agentMessages` and subscribes to updates via `Subagent.subscribeToUpdates()` — no direct `AgentSession` reference (#277).
+The widget maintains a bounded reactive read model of active detached records and the small terminal linger set, populated by `SubagentManagerObserver` lifecycle callbacks. While active it refreshes that model at 500 ms; each refresh reads only those retained records and requests the normal Pi widget render, rather than cloning or sorting the manager's full terminal history. When only terminal linger records remain, it renders the completion state once and leaves the static widget registered without an interval until turn aging or clear removes it. The `/subagents:sessions` navigator reads messages via `Subagent.agentMessages`, falls back to the retained JSONL source after release, and subscribes to both session and record-release updates — no direct `AgentSession` reference (#277).
 
 ## Cross-extension architecture
 
 ```mermaid
 flowchart TD
-    subgraph core["@gotgenes/pi-subagents"]
+    subgraph core["@nklisch/pi-subagents"]
         direction TB
         exports["SubagentsService API<br/>publish / getSubagentsService<br/>SubagentRecord, SubagentStatus"]
-        engine["Tools: subagent, get_subagent_result,<br/>steer_subagent<br/>SubagentManager, createSubagentSession, SubagentSession"]
+        engine["Tools: subagent, resume_subagent, stop_subagent,<br/>list_subagents, get_subagent_result, steer_subagent,<br/>query_subagent_session<br/>SubagentManager, createSubagentSession, SubagentSession"]
         ui_int["Internal UI: widget, session-navigator,<br/>subagents-settings"]
     end
 
@@ -388,14 +400,14 @@ flowchart TD
     core -- "Symbol.for on globalThis" --> future["any future extension"]
 ```
 
-Consumers call `getSubagentsService()?.spawn(...)` at runtime.
+Consumers call `getSubagentsService()?.launch(...)` at runtime.
 They declare this package as an optional peer dependency and use dynamic import for compile-time types.
 
 ### What the core owns
 
-- The three tools: `subagent` (née `Agent`), `get_subagent_result`, `steer_subagent`.
-- `SubagentManager` — spawn, abort, resume, collection management, observer wiring.
-- `ConcurrencyLimiter` — background admission gate: schedules run thunks FIFO against a configurable concurrency limit.
+- The parent-only tools: `subagent`, `resume_subagent`, `stop_subagent`, `list_subagents`, `get_subagent_result`, `steer_subagent`, and `query_subagent_session`.
+- `SubagentManager` — launch, resume, cooperative stop, collection management, and observer wiring.
+- `ConcurrencyLimiter` — cancellable FIFO admission gate shared by joined and detached runs.
 - `createSubagentSession` — assembly factory: session creation and extension binding; returns a born-complete `SubagentSession`.
 - `SubagentSession` — the born-complete child session: drives turn loops, exposes Pi's idle boundary, steers, and performs idempotent asynchronous teardown (`session_shutdown` → `AgentSession.dispose()` → child `disposed`).
 - `child-lifecycle` — publishes the child-execution lifecycle (`spawning`, `session-created` before `bindExtensions()`, `completed`, `disposed`) on `pi.events`.
@@ -426,7 +438,7 @@ They declare this package as an optional peer dependency and use dynamic import 
 
 ## SubagentsService
 
-The `SubagentsService` interface, accessor functions, and serializable types are exported from `@gotgenes/pi-subagents` via the `./service` export map entry.
+The `SubagentsService` interface, accessor functions, and serializable types are exported from `@nklisch/pi-subagents` via the root export.
 No separate API package is needed.
 
 Consumers declare this package as an optional peer dependency:
@@ -434,10 +446,10 @@ Consumers declare this package as an optional peer dependency:
 ```json
 {
   "peerDependencies": {
-    "@gotgenes/pi-subagents": ">=5.0.0"
+    "@nklisch/pi-subagents": ">=18.0.0"
   },
   "peerDependenciesMeta": {
-    "@gotgenes/pi-subagents": { "optional": true }
+    "@nklisch/pi-subagents": { "optional": true }
   }
 }
 ```
@@ -445,31 +457,31 @@ Consumers declare this package as an optional peer dependency:
 At runtime, consumers use dynamic import for type-safe access to the accessor functions:
 
 ```typescript
-const { getSubagentsService } = await import("@gotgenes/pi-subagents");
+const { getSubagentsService } = await import("@nklisch/pi-subagents");
 const svc = getSubagentsService();
 if (svc) {
-  svc.spawn("Explore", "Check for stale TODOs");
+  void svc.launch("Explore", "Check for stale TODOs", { mode: "detached" });
 }
 ```
 
 Pi's extension loader creates a fresh `jiti` instance per extension with `moduleCache: false`, so module-scoped singletons don't survive across extensions.
-The accessor functions use `Symbol.for("@gotgenes/pi-subagents:service")` on `globalThis`, which is process-global by spec, to bridge this gap.
+The accessor functions use `Symbol.for("@nklisch/pi-subagents:service")` on `globalThis`, which is process-global by spec, to bridge this gap.
 The dynamic import provides compile-time types; the `Symbol.for()` key is the actual runtime channel.
 
 ### Interface
 
-See `src/service.ts` for the canonical definition.
+See `src/service/service.ts` for the canonical definition.
 Key types:
 
-- `SubagentsService` — `spawn`, `getRecord`, `listAgents`, `abort`, `steer`, `waitForAll`, `hasRunning`.
-- `SubagentRecord` — serializable agent snapshot (no live session objects).
-- `SpawnOptions` — `description`, `model`, `maxTurns`, `thinkingLevel`, `inheritContext`, `foreground`, `bypassQueue`.
+- `SubagentsService` — `launch`, `resume`, `stop`, `steer`, `list`, `getResult`, `getRecord`, `waitForAll`, and `hasRunning`.
+- `SubagentRecord` — serializable agent snapshot with run id, mode, status, terminal reason, active runtime, model, and thinking level.
+- `LaunchOptions` — `description`, `model`, `maxTurns`, `thinkingLevel`, `inheritContext`, `mode`, `timeoutSeconds`, and `signal`.
 - `SUBAGENT_EVENTS` — channel constants for `pi.events` subscriptions.
 
 ### Accessor pattern
 
 ```typescript
-const SERVICE_KEY = Symbol.for("@gotgenes/pi-subagents:service");
+const SERVICE_KEY = Symbol.for("@nklisch/pi-subagents:service");
 
 export function publishSubagentsService(service: SubagentsService): void {
   (globalThis as Record<symbol, unknown>)[SERVICE_KEY] = service;
@@ -490,12 +502,12 @@ The core emits events on `pi.events` that any extension can observe:
 
 | Channel               | Payload                                                                             | When                                          |
 | --------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------- |
-| `subagents:started`   | `{ id, type, description }`                                                         | Agent begins running                          |
-| `subagents:completed` | `{ id, type, description, status, result?, error?, toolUses, durationMs, tokens? }` | Agent finishes successfully                   |
+| `subagents:started`   | `{ id, type, description, runId, mode }`                                             | Agent begins running                          |
+| `subagents:completed` | `{ id, type, runId, mode, status, terminalReason, result?, error?, toolUses, activeRuntimeMs, tokens? }` | Agent reaches a terminal state |
 | `subagents:resumed`   | same as `completed` (`buildEventData` shape)                                        | A retained session's resumed turn finishes    |
-| `subagents:failed`    | same as `completed` (`buildEventData` shape)                                        | Agent ends in `error`/`stopped`/`aborted`     |
+| `subagents:failed`    | same as `completed` (`buildEventData` shape)                                        | Agent ends in `error` or `stopped`             |
 | `subagents:compacted` | `{ id, type, description, reason, tokensBefore, compactionCount }`                  | Child session compacts                        |
-| `subagents:created`   | `{ id, type, description, isBackground }`                                           | Background agent created (pre-admission)      |
+| `subagents:created`   | `{ id, type, description, runId, mode }`                                             | Agent record created (pre-admission)           |
 | `subagents:steered`   | `{ id, message }`                                                                   | Steering message delivered to a running agent |
 
 These are fire-and-forget broadcast events — no request IDs, no reply channels.
@@ -624,7 +636,7 @@ The axis that decides push versus pull is whether a need is reactive or discrete
 - **Reactive** (ambient state that changes underneath you) → subscribe to the broadcast; be told.
   The state-owner announces; the consumer maintains its own read-model; nobody pulls.
 - **Discrete** (a one-shot question: current value, full transcript) → pull a query.
-  `get_subagent_result`, opening a transcript, and the external `SubagentsService.getRecord` are queries by nature and stay pull, in-package or not.
+  `get_subagent_result`, `query_subagent_session`, opening a transcript, and the external `SubagentsService.getRecord` are queries by nature and stay pull, in-package or not.
 
 Behavior is a third interface: **tell by id, with outcomes**.
 `steer` and `abort` own their own rules — a non-running agent rejects a steer from inside `steer`, not via a caller's status pre-check — so coordinators never ask-then-tell.
@@ -676,8 +688,8 @@ Bags with 10+ fields are the highest priority for decomposition.
 
 | Interface                     | Fields                                                       | Consumers                                         | Severity  |
 | ----------------------------- | ------------------------------------------------------------ | ------------------------------------------------- | --------- |
-| `ResolvedSpawnConfig`         | 3 nested                                                     | foreground-runner, background-spawner, agent-tool | ✓ done    |
-| `AgentSpawnConfig`            | 13 → 13 (ParentSessionInfo nested)                           | agent-manager (internal)                          | ✓ done    |
+| `ResolvedSpawnConfig`         | 3 nested                                                     | spawn-config, agent-tool                          | ✓ done    |
+| `AgentSpawnConfig`            | execution options + parent identity                          | subagent-manager (internal)                       | ✓ done    |
 | `CreateSubagentSessionParams` | 6 (snapshot, type, cwd, parentSession, model, thinkingLevel) | create-subagent-session                           | ✓ done    |
 | `TurnLoopOptions`             | 4 (maxTurns, defaultMaxTurns, graceTurns, signal)            | subagent-session                                  | ✓ done    |
 | `SessionConfig`               | 6 (flat fields; extensions/noSkills/extras removed in #264)  | session-config (output of assembler)              | ✓ done    |
@@ -704,7 +716,7 @@ Files with highest commit frequency × complexity:
 | 27.1  | `index.ts`                    | 109     | ▼ cooling      |
 | 9.6   | `tools/agent-tool.ts`         | 56      | ▼ cooling      |
 | 8.8   | `ui/agent-widget.ts`          | 22      | ▼ cooling      |
-| 7.3   | `tools/foreground-runner.ts`  | 22      | ▼ cooling      |
+| 7.3   | `lifecycle/subagent.ts`        | 22      | ▼ cooling      |
 | 6.6   | `service/service-adapter.ts`  | 15      | ▲ accelerating |
 | 6.3   | `config/custom-agents.ts`     | 13      | ▼ cooling      |
 
@@ -712,9 +724,8 @@ Files with highest commit frequency × complexity:
 
 ### Production duplication
 
-The prior clone group between `agent-runner.ts` and `message-formatters.ts` was resolved in #172.
-The 20-line clone group between `agent-config-editor.ts` and `agent-creation-wizard.ts` was resolved in #217 — extracted into `ui/agent-file-writer.ts` (`writeAgentFile`).
-The final 11-line internal clone group within `agent-config-editor.ts` was eliminated in Phase 19 Step 6 ([#441]) when the file itself was deleted; production duplication is 0 lines.
+The prior clone group between the execution and formatting paths was resolved in #172.
+The definition-management clone groups were removed with the `/agents` terminal cut in Phase 19 ([#441]); the supporting file-writer module was removed with them. Production duplication remains 0 lines.
 
 ### Session encapsulation debt (Law of Demeter) — resolved by [#277] ✔️
 
@@ -725,11 +736,10 @@ The intent-revealing replacements added by [#277]:
 | Reach-through                            | Sites                                                                              | Replacement                                        |
 | ---------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------- |
 | Steer buffer-or-deliver (was duplicated) | `service-adapter.ts`, `steer-tool.ts`                                              | `Subagent.steer(message)`                          |
-| Conversation viewing                     | `get-result-tool.ts`, `agent-menu.ts`, `conversation-viewer.ts`                    | `Subagent.getConversation()` / `Subagent.messages` |
+| Conversation viewing                     | `session-navigation.ts`, `session-navigator.ts`                                   | `Subagent.agentMessages` / transcript sources     |
 | Session-readiness guard                  | `agent-tool.ts`, `subagent-manager.ts`                                             | `Subagent.isSessionReady()`                        |
-| Context-window stats                     | `steer-tool.ts`, `get-result-tool.ts`, `notification.ts`, `conversation-viewer.ts` | `Subagent.getContextPercent()`                     |
-| Live updates (subscription)              | `conversation-viewer.ts`                                                           | `Subagent.subscribeToUpdates(fn)`                  |
-| Observer callback session param          | `background-spawner.ts`, `foreground-runner.ts`                                    | `subagent.subagentSession` (narrowed callback)     |
+| Context-window stats                     | `steer-tool.ts`, `get-result-tool.ts`, `notification.ts`                           | `Subagent.getContextPercent()`                     |
+| Live updates (subscription)              | `session-navigator.ts`                                                             | `Subagent.subscribeToUpdates(fn)`                  |
 | Session disposal                         | `subagent-manager.ts`                                                              | `SubagentSession.dispose()` — resolved by [#265]   |
 
 ### Proposed bag decompositions
@@ -756,7 +766,8 @@ interface SpawnExecution {
   effectiveMaxTurns: number | undefined;
   thinking: ThinkingLevel | undefined;
   inheritContext: boolean;
-  runInBackground: boolean;
+  mode: SubagentMode;
+  timeoutSeconds?: number;
   agentInvocation: AgentInvocation;
 }
 
@@ -768,8 +779,8 @@ interface SpawnPresentation {
 }
 ```
 
-`foreground-runner` and `background-spawner` primarily consume `SpawnExecution` + `SpawnIdentity`.
-`agent-tool` uses all three to build the `AgentSpawnConfig` and the result text.
+`agent-tool` consumes all three to build the internal `AgentSpawnConfig` and the result text.
+The joined/detached mode lives in `SpawnExecution`; no separate foreground/background runner exists.
 After decomposition, each consumer declares its real dependencies explicitly.
 
 #### AgentSpawnConfig — ParentSessionInfo extracted (done, [#166][166])
@@ -800,8 +811,7 @@ export interface RunContext {
 }
 ```
 
-The remaining `RunOptions` fields (`model`, `maxTurns`, `signal`, `thinkingLevel`, `defaultMaxTurns`, `graceTurns`, `onSessionCreated`) are genuine execution parameters.
-`RunOptions` now has 9 fields: 1 nested `context: RunContext` (2 per-call fields) plus 8 flat execution fields.
+The current execution seam is `SubagentExecution` in `lifecycle/subagent.ts`; it carries the immutable parent snapshot, joined/detached mode, runtime deadline, session factory, and lifecycle collaborators directly. The old runner-specific `RunOptions` bag is no longer part of the source tree.
 
 #### SessionConfig (11 fields → extract ToolFilterConfig) — done ([#168][168])
 
@@ -809,7 +819,7 @@ The tool-filtering cluster (`toolNames`, `disallowedSet`, `extensions`) was extr
 `filterActiveTools` now accepts a single `ToolFilterConfig` argument instead of three positional parameters.
 `SessionConfig` reduced from 10 to 8 top-level fields.
 
-#### RunnerIO (9 methods → 2 focused interfaces) — done ([#167][167])
+#### Session factory IO (9 methods → 2 focused interfaces) — done ([#167][167])
 
 The IO boundary was split into two focused interfaces:
 
@@ -834,13 +844,9 @@ export interface SessionFactoryIO {
   ) => Promise<{ session: AgentSession }>;
   assemblerIO: AssemblerIO;
 }
-
-/** Backward-compatible intersection of the two focused interfaces. */
-export type RunnerIO = EnvironmentIO & SessionFactoryIO;
 ```
 
-`RunnerIO` is kept as a type alias for the intersection.
-All existing consumers satisfy both sub-interfaces via structural typing with no call-site changes.
+The factory consumes the `EnvironmentIO & SessionFactoryIO` boundary directly; no runner implementation or compatibility alias remains.
 
 ## Phase 11 (complete)
 
@@ -924,6 +930,10 @@ See [phase-19-implement-ui-decisions.md](history/phase-19-implement-ui-decisions
 
 ## Phase 20 improvement roadmap
 
+> Planning note: this roadmap records the pre-execution-control baseline. The
+> joined/detached execution-control work below supersedes any obsolete runner,
+> unbounded-result, and foreground/background vocabulary in these notes.
+
 Phase 20 realizes the last un-extracted domain from the [first-principles refinement](#first-principles-refinement-and-the-deeper-target) — **result delivery** — and clears the residual boundary and complexity debt discovery surfaced around it.
 
 Discovery findings (fallow + entry-point trace + test-constructibility audit, 2026-07-03):
@@ -969,9 +979,8 @@ Target files:
 
 Outcome: `execute` ≤ 30 lines with cyclomatic < 10; off the fallow high-complexity list.
 
-Landed: `src/tools/get-result-report.ts` added — `AgentReport` value object plus `renderStatsParts` / `renderReportBody` / `formatAgentReport` pure functions, unit-tested directly in `test/tools/get-result-report.test.ts`.
-`GetResultTool.execute` now owns only record lookup and the wait/consume policy (13 lines), delegating report assembly to a private `buildReport` + `formatAgentReport`; output is byte-identical.
-`get-result-tool.execute` is off the HIGH-CRAP list (3 → 2 remaining: `service-adapter.spawn`, the notification renderer arrow).
+Landed: bounded result formatting was extracted while the earlier result-delivery design was active. The later execution-control clean break removed the standalone report module and its unbounded wait path; `GetResultTool` now owns a nonblocking, bounded status/result projection.
+`get-result-tool.execute` remains a focused lookup-and-render boundary.
 
 `Release: batch "result-delivery"`
 
@@ -1016,8 +1025,6 @@ Target files:
 
 - `src/ui/agent-widget.ts` — replace `tui: any` with a lean local interface (`terminal.columns`, `requestRender()`); shrink the 4-rule file-level disable.
 - `src/tools/agent-tool.ts` — type `renderCall`/`renderResult` params (`theme`, `result`) with lean local interfaces; shrink the 6-rule file-level disable to the genuinely SDK-gapped lines.
-- `src/tools/foreground-runner.ts` — retire the line-level `details as any` cast if the SDK surface allows.
-
 Some disables are irreducible SDK export gaps; the goal is line-level precision, not zero.
 
 Outcome: file-level eslint-disable headers 5 → ≤ 2; remaining suppressions are line-level with named rules.

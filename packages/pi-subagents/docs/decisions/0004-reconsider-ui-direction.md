@@ -5,6 +5,11 @@ date: 2026-06-18
 
 # 0004 — Reconsider the UI direction from first principles
 
+> Historical vocabulary note: this decision predates the joined/detached clean
+> break. In current code, its "background-only widget" means detached-only;
+> joined runs use their inline result surface. Historical delivery labels below
+> are retained as decision history, not as current API contracts.
+
 ## Status
 
 Accepted.

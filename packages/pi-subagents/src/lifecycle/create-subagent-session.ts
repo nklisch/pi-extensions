@@ -24,9 +24,7 @@ import { SubagentSession } from "#src/lifecycle/subagent-session";
 import type { EnvInfo } from "#src/session/env";
 import { type AssemblerIO, assembleSessionConfig } from "#src/session/session-config";
 import type { ParentSessionInfo, ShellExec, SubagentType, ThinkingLevel } from "#src/types";
-
-/** Names of tools registered by this extension that subagents must NOT inherit. */
-const EXCLUDED_TOOL_NAMES = ["subagent", "get_subagent_result", "steer_subagent"];
+import { PARENT_ONLY_TOOL_NAMES, PARENT_ONLY_TOOL_SET } from "#src/tools/parent-tool-registry";
 
 /**
  * Apply the recursion guard: remove this extension's dispatch tools from the
@@ -36,7 +34,7 @@ const EXCLUDED_TOOL_NAMES = ["subagent", "get_subagent_result", "steer_subagent"
 function applyRecursionGuard(session: AgentSession): void {
   const filtered = session
     .getActiveToolNames()
-    .filter((t) => !EXCLUDED_TOOL_NAMES.includes(t));
+    .filter((t) => !PARENT_ONLY_TOOL_SET.has(t));
   session.setActiveToolsByName(filtered);
 }
 
@@ -212,7 +210,7 @@ export async function createSubagentSession(
     modelRegistry: snapshot.modelRegistry,
     modelRuntime: snapshot.modelRuntime,
     model: cfg.model,
-    excludeTools: [...new Set([...cfg.excludedBuiltinToolNames, ...EXCLUDED_TOOL_NAMES])],
+    excludeTools: [...new Set([...cfg.excludedBuiltinToolNames, ...PARENT_ONLY_TOOL_NAMES])],
     resourceLoader: loader,
     thinkingLevel: cfg.thinkingLevel,
   });

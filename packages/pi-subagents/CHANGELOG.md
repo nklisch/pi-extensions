@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [18.2.0-nklisch.0] - 2026-09-01
+
+### Added
+
+- Add explicit joined and detached launch/resume delivery, defaulting to detached, with shared FIFO concurrency and per-run active-runtime deadlines.
+- Add dedicated `resume_subagent`, `stop_subagent`, `list_subagents`, and `query_subagent_session` parent tools.
+- Add literal search and tool filtering to `/subagents:sessions`, preserving native transcript rendering across live updates and retained-file fallback.
+
+### Changed
+
+- Make stopping cooperative and truthful: running work remains active until execution, lifecycle callbacks, workspace cleanup, and observers settle; bounded stop calls report `stop_pending` when settlement has not completed.
+- Make `get_subagent_result` nonblocking and bounded, with explicit terminal reasons and consumption-aware retention.
+- Centralize parent-only orchestration tool registration and publish discriminated service outcomes for launch, resume, stop, steer, list, and result retrieval.
+
+### Breaking changes
+
+- Replace foreground/background vocabulary and `run_in_background` with `mode: joined | detached` across tools, custom-agent configuration, events, and public service types.
+- Remove indefinite result waiting, full-conversation result dumps, queue bypass, and the legacy foreground/background runner modules.
+
 ## [18.1.0-nklisch.4] - 2026-08-27
 
 ### Fixed

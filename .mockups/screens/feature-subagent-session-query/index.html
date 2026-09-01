@@ -1,0 +1,1629 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pi Subagents — Transcript Search Interaction Walkthrough</title>
+  <style>
+    :root {
+      --bg-canvas: #070a0f;
+      --bg-terminal: #0d1117;
+      --bg-overlay: #151b23;
+      --bg-block: #1c2128;
+      
+      --border-subtle: #21262d;
+      --border-default: #30363d;
+      --border-tui: #3d444e;
+      --border-active: #58a6ff;
+      --border-match: #d29922;
+      --border-match-active: #58a6ff;
+      
+      --text-bright: #f0f6fc;
+      --text-default: #c9d1d9;
+      --text-muted: #8b949e;
+      --text-dim: #6e7681;
+      
+      --accent-blue: #58a6ff;
+      --accent-blue-subtle: #1f6feb;
+      --accent-amber: #e3b341;
+      --accent-amber-subtle: #d2992233;
+      --accent-green: #3fb950;
+      --accent-red: #f85149;
+      --accent-purple: #bc8cff;
+      --accent-cyan: #39c5cf;
+      
+      --font-mono: "SF Mono", "Cascadia Code", "Fira Code", "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", -apple-system, Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      background-color: var(--bg-canvas);
+      color: var(--text-default);
+      font-family: var(--font-sans);
+      font-size: 13.5px;
+      line-height: 1.5;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Top Walkthrough Navigation Strip */
+    .mock-meta {
+      background: #010409;
+      border-bottom: 1px solid var(--border-default);
+      padding: 8px 18px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-shrink: 0;
+      z-index: 100;
+    }
+
+    .meta-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .meta-badge {
+      background: #1f6feb2a;
+      color: var(--accent-blue);
+      border: 1px solid #1f6feb66;
+      border-radius: 4px;
+      padding: 2px 7px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+    }
+
+    .meta-heading {
+      font-weight: 600;
+      color: var(--text-bright);
+      font-size: 13.5px;
+    }
+
+    .meta-summary {
+      color: var(--text-muted);
+      font-size: 12.5px;
+    }
+
+    /* Step Selector Buttons */
+    .step-bar {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      overflow-x: auto;
+      padding: 2px 0;
+    }
+
+    .step-btn {
+      background: #161b22;
+      border: 1px solid var(--border-default);
+      color: var(--text-muted);
+      padding: 4px 9px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      transition: all 0.12s ease;
+    }
+
+    .step-btn:hover {
+      background: #21262d;
+      color: var(--text-bright);
+      border-color: #484f58;
+    }
+
+    .step-btn.active {
+      background: #1f6feb22;
+      border-color: var(--accent-blue);
+      color: var(--accent-blue);
+      font-weight: 600;
+    }
+
+    .step-num {
+      background: #30363d;
+      color: var(--text-default);
+      border-radius: 50%;
+      width: 15px;
+      height: 15px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9.5px;
+      font-family: var(--font-mono);
+    }
+
+    .step-btn.active .step-num {
+      background: var(--accent-blue);
+      color: #010409;
+      font-weight: bold;
+    }
+
+    /* Main Workspace Layout */
+    .app-body {
+      display: grid;
+      grid-template-columns: 1fr 370px;
+      flex: 1;
+      height: calc(100vh - 53px);
+      overflow: hidden;
+    }
+
+    @media (max-width: 1120px) {
+      .app-body {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Terminal Workspace Container */
+    .terminal-stage {
+      background: radial-gradient(circle at 50% 30%, #101620 0%, #06090e 100%);
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Virtual Terminal Window */
+    .terminal-window {
+      width: 100%;
+      max-width: 950px;
+      height: 610px;
+      background: var(--bg-terminal);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      box-shadow: 0 24px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.45;
+    }
+
+    /* Terminal Window Chrome */
+    .window-header {
+      background: #010409;
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      user-select: none;
+      flex-shrink: 0;
+    }
+
+    .window-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #30363d;
+    }
+    .dot-red { background: #f8514999; }
+    .dot-yellow { background: #e3b34199; }
+    .dot-green { background: #3fb95099; }
+
+    .window-title {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .window-actions {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    /* Terminal Canvas (Parent session background behind overlay) */
+    .terminal-canvas {
+      flex: 1;
+      padding: 16px;
+      color: var(--text-dim);
+      position: relative;
+      background: var(--bg-terminal);
+      overflow: hidden;
+      user-select: none;
+    }
+
+    .canvas-bg-line {
+      margin-bottom: 4px;
+      opacity: 0.35;
+      white-space: pre;
+    }
+
+    .canvas-bg-line.active-prompt {
+      opacity: 0.9;
+      color: var(--text-bright);
+    }
+
+    .prompt-sym {
+      color: var(--accent-green);
+      font-weight: bold;
+    }
+
+    /* Overlay Scrim & TUI Box */
+    .tui-overlay-scrim {
+      position: absolute;
+      inset: 0;
+      background: rgba(1, 4, 9, 0.76);
+      backdrop-filter: blur(2px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+      z-index: 10;
+      transition: opacity 0.15s ease;
+    }
+
+    .tui-overlay-scrim.hidden {
+      display: none;
+    }
+
+    /* Pi TUI Overlay Box with Box-Drawing Border */
+    .tui-overlay-box {
+      width: 94%;
+      height: 92%;
+      background: var(--bg-overlay);
+      border: 1px solid var(--border-tui);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 16px 36px rgba(0,0,0,0.85);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* TUI Box Header Line */
+    .tui-box-header {
+      padding: 6px 12px;
+      border-bottom: 1px solid var(--border-default);
+      background: #111720;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-bright);
+      font-weight: 600;
+      font-size: 12px;
+      flex-shrink: 0;
+      user-select: none;
+    }
+
+    .header-meta {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .header-tag {
+      color: var(--accent-cyan);
+      font-weight: normal;
+    }
+
+    .header-time {
+      color: var(--accent-green);
+      font-weight: normal;
+    }
+
+    .header-pulse {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      box-shadow: 0 0 6px var(--accent-green);
+    }
+
+    /* TUI Scrollable Transcript Content Body */
+    .tui-transcript-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      scroll-behavior: smooth;
+    }
+
+    /* Custom subtle dark scrollbar for TUI feel */
+    .tui-transcript-body::-webkit-scrollbar {
+      width: 5px;
+    }
+    .tui-transcript-body::-webkit-scrollbar-track {
+      background: #11161f;
+    }
+    .tui-transcript-body::-webkit-scrollbar-thumb {
+      background: #2d333b;
+      border-radius: 3px;
+    }
+    .tui-transcript-body::-webkit-scrollbar-thumb:hover {
+      background: #444c56;
+    }
+
+    /* Message / Tool Native Components */
+    .msg-block {
+      border-radius: 3px;
+      padding: 7px 9px;
+      position: relative;
+      transition: all 0.12s ease;
+      background: rgba(255,255,255,0.015);
+      border: 1px solid transparent;
+    }
+
+    .msg-user {
+      border-left: 3px solid var(--accent-purple);
+      background: #131922;
+    }
+
+    .msg-assistant {
+      border-left: 3px solid var(--accent-blue);
+      background: #11171f;
+    }
+
+    .msg-tool {
+      background: #0d121a;
+      border: 1px solid #252b35;
+      border-left: 3px solid #484f58;
+      font-size: 12px;
+    }
+
+    .msg-bash {
+      background: #090d14;
+      border: 1px solid #202630;
+      border-left: 3px solid #388bfd;
+      font-size: 12px;
+    }
+
+    .block-header {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      user-select: none;
+    }
+
+    .block-title {
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .block-title .icon {
+      font-size: 11px;
+    }
+
+    .block-content {
+      color: var(--text-default);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .bash-output {
+      color: #9da7b3;
+      margin-top: 4px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      line-height: 1.4;
+      background: #05080c;
+      padding: 5px 8px;
+      border-radius: 3px;
+      border: 1px solid #1a2029;
+    }
+
+    .badge-status {
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: #21262d;
+      color: var(--text-muted);
+    }
+    .badge-status.success { color: var(--accent-green); background: #3fb9501a; }
+
+    /* Streaming live activity indicator */
+    .stream-indicator {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 9px;
+      color: var(--accent-cyan);
+      font-size: 11.5px;
+      background: #0e1923;
+      border: 1px dashed #1d3b50;
+      border-radius: 3px;
+    }
+
+    /* MATCH CHROME: Block-Level Match Visual Representation */
+    .msg-block.is-match {
+      background: rgba(210, 153, 34, 0.08);
+      border-color: var(--border-match);
+      border-left-width: 3px;
+      border-left-color: var(--accent-amber);
+    }
+
+    .msg-block.is-match .match-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      background: #332304;
+      color: #e3b341;
+      border: 1px solid #9e6a03;
+      border-radius: 3px;
+      padding: 0 5px;
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+    }
+
+    /* SELECTED ACTIVE MATCH CHROME */
+    .msg-block.is-selected-match {
+      background: rgba(56, 139, 253, 0.14);
+      border-color: var(--accent-blue);
+      border-left-width: 4px;
+      border-left-color: var(--accent-blue);
+      box-shadow: 0 0 10px rgba(88, 166, 255, 0.2);
+    }
+
+    .msg-block.is-selected-match .match-pill {
+      background: #1f6feb;
+      color: #ffffff;
+      border-color: #58a6ff;
+      box-shadow: 0 0 6px rgba(88, 166, 255, 0.5);
+    }
+
+    /* Substring / target token emphasis inside matched blocks */
+    .hl-match {
+      background: rgba(227, 179, 65, 0.28);
+      color: #fff;
+      font-weight: 600;
+      border-radius: 2px;
+      padding: 0 2px;
+      text-decoration: underline;
+      text-decoration-color: #e3b341;
+    }
+
+    .msg-block.is-selected-match .hl-match {
+      background: rgba(88, 166, 255, 0.4);
+      text-decoration-color: #58a6ff;
+    }
+
+    /* TUI BOX FOOTER */
+    .tui-box-footer {
+      border-top: 1px solid var(--border-default);
+      background: #111720;
+      padding: 5px 10px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-shrink: 0;
+      user-select: none;
+      min-height: 32px;
+    }
+
+    .footer-resting {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+    }
+
+    .footer-search {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      gap: 10px;
+    }
+
+    .search-input-wrap {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: #090d13;
+      border: 1px solid var(--accent-blue);
+      border-radius: 3px;
+      padding: 1px 7px;
+      color: var(--text-bright);
+      min-width: 160px;
+    }
+
+    .search-input-wrap.no-match {
+      border-color: var(--accent-amber);
+    }
+
+    .search-prompt {
+      color: var(--accent-blue);
+      font-weight: bold;
+    }
+
+    .search-text {
+      color: var(--text-bright);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .cursor-blink {
+      display: inline-block;
+      width: 6px;
+      height: 13px;
+      background: var(--accent-blue);
+      margin-left: 2px;
+      animation: cursorBlink 1s infinite;
+      vertical-align: middle;
+    }
+
+    @keyframes cursorBlink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0; }
+    }
+
+    .search-filter-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: #21262d;
+      color: var(--text-muted);
+      border: 1px solid #30363d;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+
+    .search-filter-badge.active-tool {
+      background: #1f6feb22;
+      color: var(--accent-blue);
+      border-color: var(--accent-blue);
+      font-weight: 600;
+    }
+
+    .match-count-badge {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent-amber);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .match-count-badge.has-selected {
+      color: var(--accent-cyan);
+    }
+
+    .match-count-badge.zero {
+      color: var(--accent-amber);
+    }
+
+    .match-count-badge.new-match {
+      color: var(--accent-green);
+    }
+
+    .search-hints {
+      font-size: 11px;
+      color: var(--text-dim);
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-left: auto;
+    }
+
+    .kbd-chip {
+      background: #21262d;
+      color: var(--text-muted);
+      padding: 1px 4px;
+      border-radius: 3px;
+      border: 1px solid #30363d;
+      font-family: var(--font-mono);
+      font-size: 10px;
+    }
+
+    /* SIDEBAR: Design Inspector & State Documentation */
+    .sidebar {
+      background: #0d1117;
+      border-left: 1px solid var(--border-default);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow-y: auto;
+    }
+
+    .sidebar-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-default);
+      background: #161b22;
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      flex-shrink: 0;
+    }
+
+    .sidebar-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 2px;
+    }
+
+    .sidebar-desc {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      line-height: 1.35;
+    }
+
+    .sidebar-content {
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      flex: 1;
+    }
+
+    .state-card {
+      background: #161b22;
+      border: 1px solid var(--border-default);
+      border-radius: 6px;
+      padding: 10px 12px;
+    }
+
+    .state-card-header {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent-blue);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .state-field {
+      margin-bottom: 6px;
+    }
+
+    .state-field-label {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-bottom: 1px;
+    }
+
+    .state-field-val {
+      font-size: 11.5px;
+      color: var(--text-bright);
+      font-family: var(--font-mono);
+      line-height: 1.35;
+    }
+
+    .key-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      margin-top: 2px;
+    }
+
+    .key-table td {
+      padding: 3px 4px;
+      border-bottom: 1px solid #21262d;
+    }
+
+    .key-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .key-table td:first-child {
+      font-family: var(--font-mono);
+      color: var(--accent-blue);
+      width: 40%;
+    }
+
+    .key-table td:last-child {
+      color: var(--text-muted);
+    }
+
+    .annotation-box {
+      background: #1b222c;
+      border-left: 3px solid var(--accent-cyan);
+      border-radius: 0 4px 4px 0;
+      padding: 7px 9px;
+      font-size: 11px;
+      color: var(--text-default);
+      line-height: 1.4;
+    }
+
+    .annotation-title {
+      font-weight: 600;
+      color: var(--accent-cyan);
+      margin-bottom: 2px;
+    }
+
+    /* Simulation Control Buttons */
+    .sim-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 2px;
+    }
+
+    .sim-btn {
+      background: #21262d;
+      border: 1px solid var(--border-default);
+      color: var(--text-bright);
+      padding: 5px 10px;
+      border-radius: 4px;
+      font-size: 11.5px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background 0.12s;
+    }
+
+    .sim-btn:hover {
+      background: #30363d;
+    }
+
+    .sim-btn.primary {
+      background: var(--accent-blue-subtle);
+      border-color: var(--accent-blue);
+    }
+
+    .sim-btn.primary:hover {
+      background: #388bfd;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Walkthrough Navigation Strip -->
+  <header class="mock-meta">
+    <div class="meta-title">
+      <span class="meta-badge">Interactive Walkthrough</span>
+      <strong class="meta-heading">Pi Subagents: Transcript Search Interaction</strong>
+      <span class="meta-summary">/subagents:sessions overlay search modal</span>
+    </div>
+
+    <!-- Step Navigation Buttons -->
+    <div class="step-bar" id="stepBar">
+      <button class="step-btn active" data-step="1" onclick="goToStep(1)">
+        <span class="step-num">1</span> Resting
+      </button>
+      <button class="step-btn" data-step="2" onclick="goToStep(2)">
+        <span class="step-num">2</span> Search Entry
+      </button>
+      <button class="step-btn" data-step="3" onclick="goToStep(3)">
+        <span class="step-num">3</span> Matches Selected
+      </button>
+      <button class="step-btn" data-step="4" onclick="goToStep(4)">
+        <span class="step-num">4</span> Next / Prev
+      </button>
+      <button class="step-btn" data-step="5" onclick="goToStep(5)">
+        <span class="step-num">5</span> Tool Filter
+      </button>
+      <button class="step-btn" data-step="6" onclick="goToStep(6)">
+        <span class="step-num">6</span> No-Match Recovery
+      </button>
+      <button class="step-btn" data-step="7" onclick="goToStep(7)">
+        <span class="step-num">7</span> Live Update
+      </button>
+      <button class="step-btn" data-step="8" onclick="goToStep(8)">
+        <span class="step-num">8</span> Search Cleared
+      </button>
+      <button class="step-btn" data-step="9" onclick="goToStep(9)">
+        <span class="step-num">9</span> Overlay Closed
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Application Body -->
+  <div class="app-body">
+    
+    <!-- Left Stage: Virtual Terminal Emulator -->
+    <main class="terminal-stage">
+      <div class="terminal-window" id="termWindow">
+        
+        <!-- Terminal Header -->
+        <div class="window-header">
+          <div class="window-dots">
+            <div class="dot dot-red"></div>
+            <div class="dot dot-yellow"></div>
+            <div class="dot dot-green"></div>
+          </div>
+          <div class="window-title">
+            <span>pi · subagents session viewer</span>
+          </div>
+          <div class="window-actions">
+            <span>120×35 · UTF-8</span>
+          </div>
+        </div>
+
+        <!-- Terminal Canvas (Parent session background behind overlay) -->
+        <div class="terminal-canvas" id="termCanvas">
+          <div class="canvas-bg-line active-prompt"><span class="prompt-sym">❯</span> pi --mode=interactive</div>
+          <div class="canvas-bg-line">Spawning subagent (model: openai-codex/gpt-5.6-sol, thinking: high)...</div>
+          <div class="canvas-bg-line">Child session active: worker-04 [feature-subagent-session-query]</div>
+          <div class="canvas-bg-line active-prompt"><span class="prompt-sym">❯</span> /subagents:sessions</div>
+          <div class="canvas-bg-line" id="closedResumeLine" style="display:none; color: var(--accent-green); margin-top: 14px; opacity: 1;">
+            ✓ Closed transcript viewer. Returned focus to main session prompt.
+          </div>
+          <div class="canvas-bg-line active-prompt" id="closedPromptLine" style="display:none; opacity: 1; margin-top: 6px;">
+            <span class="prompt-sym">❯</span> <span class="cursor-blink" style="margin-left: 0;"></span>
+          </div>
+        </div>
+
+        <!-- Overlay Scrim & TUI Container Box -->
+        <div class="tui-overlay-scrim" id="overlayScrim">
+          <div class="tui-overlay-box" id="overlayBox">
+            
+            <!-- Overlay Header (Box top) -->
+            <div class="tui-box-header">
+              <div class="header-meta">
+                <span class="header-pulse"></span>
+                <span>Subagent session</span>
+                <span style="color:var(--text-dim)">·</span>
+                <span class="header-tag">openai-codex/gpt-5.6-sol · thinking: high</span>
+              </div>
+              <div class="header-time" id="headerRuntime">
+                24.8s (running)
+              </div>
+            </div>
+
+            <!-- Transcript Scrollable Body -->
+            <div class="tui-transcript-body" id="transcriptBody">
+              
+              <!-- Block 1: User Prompt -->
+              <div class="msg-block msg-user" id="block-1">
+                <div class="block-header">
+                  <span class="block-title"><span class="icon">👤</span> User Prompt</span>
+                  <span class="badge-status">initial prompt</span>
+                </div>
+                <div class="block-content">Implement the session query module and verify that transcript tests pass under <span style="font-family:var(--font-mono); color:var(--accent-cyan);">packages/pi-subagents/</span>.</div>
+              </div>
+
+              <!-- Block 2: Assistant Message -->
+              <div class="msg-block msg-assistant" id="block-2">
+                <div class="block-header">
+                  <span class="block-title"><span class="icon">🤖</span> Assistant Message</span>
+                  <span class="match-slot"></span>
+                </div>
+                <div class="block-content" id="content-block-2">I will inspect the test runner output first and verify the current session navigation test coverage before adding the query projection.</div>
+              </div>
+
+              <!-- Block 3: Bash Tool Execution (MATCH 1) -->
+              <div class="msg-block msg-bash" id="block-3">
+                <div class="block-header">
+                  <span class="block-title"><span class="icon">⚡</span> $ npm <span class="hl-target">test</span> --workspace @nklisch/pi-subagents</span>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="match-slot"></span>
+                    <span class="badge-status success">✓ exit 0</span>
+                  </div>
+                </div>
+                <div class="bash-output" id="content-block-3">✓ test/config/agent-types.test.ts (4 tests)
+✓ test/session-navigator.test.ts (2 tests)
+  ✓ shows the effective model and elapsed runtime
+  ✓ contains live subscription, timer, input, and disposal failures
+Tests: 6 passed, 6 total</div>
+              </div>
+
+              <!-- Block 4: Tool Call - grep (MATCH 2) -->
+              <div class="msg-block msg-tool" id="block-4">
+                <div class="block-header">
+                  <span class="block-title"><span class="icon">🔧</span> tool: grep</span>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="match-slot"></span>
+                    <span class="badge-status success">completed</span>
+                  </div>
+                </div>
+                <div class="block-content" id="content-block-4">path: "packages/pi-subagents/src/ui/"
+pattern: "TranscriptSource"
+matches:
+  src/ui/session-navigation.ts:42: export interface TranscriptSource {
+  src/ui/session-navigator.ts:60:   source: TranscriptSource;</div>
+              </div>
+
+              <!-- Block 5: Assistant Message (MATCH 3) -->
+              <div class="msg-block msg-assistant" id="block-5">
+                <div class="block-header">
+                  <span class="block-title"><span class="icon">🤖</span> Assistant Message</span>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="match-slot"></span>
+                  </div>
+                </div>
+                <div class="block-content" id="content-block-5">The <span class="hl-target">test</span> suite is clean. Now adding the pure session query model with case-insensitive literal search.</div>
+              </div>
+
+              <!-- Block 6: Tool Call - write -->
+              <div class="msg-block msg-tool" id="block-6">
+                <div class="block-header">
+                  <span class="block-title"><span class="icon">🔧</span> tool: write</span>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="match-slot"></span>
+                    <span class="badge-status success">completed</span>
+                  </div>
+                </div>
+                <div class="block-content" id="content-block-6">path: "packages/pi-subagents/src/session/query.ts"
+bytes written: 3,420</div>
+              </div>
+
+              <!-- Block 7: Live Stream Injected Message (MATCH 4 / Live Stream) -->
+              <div class="msg-block msg-bash" id="block-7" style="display:none;">
+                <div class="block-header">
+                  <span class="block-title"><span class="icon">⚡</span> $ bun <span class="hl-target">test</span> packages/pi-subagents/test/session/query.test.ts</span>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="match-slot"></span>
+                    <span class="badge-status success">✓ exit 0 (live)</span>
+                  </div>
+                </div>
+                <div class="bash-output" id="content-block-7">✓ querySubagentSession() returns matched tool calls and excerpts
+✓ bounds query results within 50KB limit
+Tests: 8 passed, 8 total</div>
+              </div>
+
+              <!-- Streaming Live Status Indicator -->
+              <div class="stream-indicator" id="streamIndicator">
+                <span class="header-pulse"></span>
+                <span id="streamIndicatorText">running tool: bash ($ npm test) · response text streaming…</span>
+              </div>
+
+            </div>
+
+            <!-- Overlay Footer (Resting vs Search Active) -->
+            <div class="tui-box-footer" id="overlayFooter">
+              
+              <!-- Resting Footer View -->
+              <div class="footer-resting" id="footerResting">
+                <div style="display:flex; gap:8px;">
+                  <span id="restingLineCount">148 lines</span>
+                  <span>·</span>
+                  <span id="restingScrollPct">100%</span>
+                </div>
+                <div class="search-hints">
+                  <span><span class="kbd-chip">↑↓/j/k</span> scroll</span>
+                  <span><span class="kbd-chip">PgUp/PgDn</span></span>
+                  <span><span class="kbd-chip" style="color:var(--accent-blue); font-weight:bold;">/</span> search</span>
+                  <span><span class="kbd-chip">Esc/q</span> close</span>
+                </div>
+              </div>
+
+              <!-- Search Active Footer View -->
+              <div class="footer-search" id="footerSearch" style="display:none;">
+                
+                <!-- Search Input Bar -->
+                <div class="search-input-wrap" id="searchInputWrap">
+                  <span class="search-prompt">/</span>
+                  <span class="search-text" id="queryDisplay">test</span>
+                  <span class="cursor-blink" id="cursorBlink"></span>
+                </div>
+
+                <!-- Kind Filter Toggle -->
+                <div class="search-filter-badge" id="filterBadge" onclick="toggleFilter()" title="Click or press Tab to toggle kind filter">
+                  <span id="filterLabel">all</span>
+                </div>
+
+                <!-- Match Count Status -->
+                <div class="match-count-badge" id="matchBadge">
+                  <span id="matchCountText">4 matches [1/4]</span>
+                </div>
+
+                <!-- Search Key Hints -->
+                <div class="search-hints" id="searchHints">
+                  <span><span class="kbd-chip">Enter/n</span> next</span>
+                  <span><span class="kbd-chip">Shift+Enter/N</span> prev</span>
+                  <span><span class="kbd-chip">Tab</span> filter</span>
+                  <span><span class="kbd-chip">Esc</span> clear</span>
+                </div>
+
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+    <!-- Right Sidebar: State & UX Documentation -->
+    <aside class="sidebar" id="sidebarEl">
+      <div class="sidebar-header">
+        <div class="sidebar-title" id="sideStateTitle">Step 1: Resting Transcript</div>
+        <div class="sidebar-desc" id="sideStateDesc">Read-only transcript viewer with auto-scroll and quick `/` entry hint.</div>
+      </div>
+
+      <div class="sidebar-content">
+        
+        <!-- State Details Card -->
+        <div class="state-card">
+          <div class="state-card-header">
+            <span>State Inspector</span>
+            <span class="meta-badge" id="sideStateKind">RESTING</span>
+          </div>
+          
+          <div class="state-field">
+            <div class="state-field-label">Trigger / Operator Action</div>
+            <div class="state-field-val" id="sideAction">Launched /subagents:sessions</div>
+          </div>
+
+          <div class="state-field">
+            <div class="state-field-label">Active Query & Kind Filter</div>
+            <div class="state-field-val" id="sideQuery">query: "" | filter: none</div>
+          </div>
+
+          <div class="state-field">
+            <div class="state-field-label">Matches & Selection</div>
+            <div class="state-field-val" id="sideMatches">0 matches (resting scroll)</div>
+          </div>
+
+          <div class="state-field">
+            <div class="state-field-label">Footer State Line</div>
+            <div class="state-field-val" style="color:var(--text-muted); font-size:11px;" id="sideFooterText">
+              148 lines · 100% | ↑↓ scroll · PgUp/PgDn · / search · Esc/q close
+            </div>
+          </div>
+        </div>
+
+        <!-- Keybindings Card -->
+        <div class="state-card">
+          <div class="state-card-header">
+            <span>Keyboard Contracts</span>
+            <span style="font-size:10px; color:var(--text-dim);">TUI keybindings</span>
+          </div>
+          <table class="key-table" id="keyTable">
+            <tr><td>/</td><td>Focus footer search input bar</td></tr>
+            <tr><td>↑ / ↓ / j / k</td><td>Scroll transcript lines</td></tr>
+            <tr><td>PgUp / PgDn</td><td>Page scroll</td></tr>
+            <tr><td>Esc / q</td><td>Close transcript overlay</td></tr>
+          </table>
+        </div>
+
+        <!-- UX Architectural Annotation -->
+        <div class="annotation-box" id="annotationBox">
+          <div class="annotation-title" id="annotTitle">Block-Level Match Chrome</div>
+          <div id="annotBody">
+            Pi message components (AssistantMessage, ToolExecution) lack substring-highlighting hooks. Matches are projected at the block level with distinct left rails, badge slots, and selection chrome without rewriting native renderers.
+          </div>
+        </div>
+
+        <!-- Simulation Interactive Buttons -->
+        <div class="sim-controls">
+          <button class="sim-btn primary" onclick="nextStep()">
+            <span>Next Step ➔</span>
+          </button>
+          <button class="sim-btn" onclick="prevStep()">
+            <span>⬅ Previous Step</span>
+          </button>
+          <button class="sim-btn" onclick="toggleTerminalSize()">
+            <span>⛶ Toggle Viewport (80x24 / 120x35)</span>
+          </button>
+        </div>
+
+      </div>
+    </aside>
+
+  </div>
+
+  <script>
+    // State definitions for the 9-step comprehensive walkthrough
+    const STEPS = {
+      1: {
+        name: "Resting Transcript",
+        kind: "RESTING",
+        desc: "Normal overlay viewer: auto-scroll is enabled, status footer shows line count, scroll % and key hints.",
+        action: "Operator opened /subagents:sessions",
+        query: '""',
+        filter: "none",
+        matches: "0 matches (unfiltered)",
+        footerText: "148 lines · 100% | ↑↓ scroll · PgUp/PgDn · / search · Esc/q close",
+        searchActive: false,
+        noMatch: false,
+        filterActive: false,
+        selectedMatchIdx: 0,
+        showLiveMessage: false,
+        overlayVisible: true,
+        annotTitle: "1. Resting Transcript Baseline",
+        annotBody: "Maintains full backward compatibility with the existing Pi transcript overlay. Ordinary keyboard navigation (Up/Down, j/k, PgUp/PgDn, Esc/q) is fully intact.",
+        keys: [
+          ["/", "Focus footer search input bar"],
+          ["↑ / ↓ / j / k", "Scroll transcript lines"],
+          ["PgUp / PgDn", "Page up / page down"],
+          ["Esc / q", "Close overlay and return to session"]
+        ]
+      },
+      2: {
+        name: "Search Entry Mode",
+        kind: "SEARCH-ENTRY",
+        desc: "Pressing `/` opens the footer search bar with cursor. Typing queries updates matching in real time.",
+        action: "Operator presses `/` and begins typing query: 'test'",
+        query: '"test"',
+        filter: "all",
+        matches: "4 matches found (typing query…)",
+        footerText: "/ test█  [all]  4 matches  · Enter/n next · Shift+Enter/N prev · Tab filter · Esc clear",
+        searchActive: true,
+        queryText: "test",
+        noMatch: false,
+        filterActive: false,
+        selectedMatchIdx: 0, // In entry mode, matches are detected, cursor active
+        showLiveMessage: false,
+        overlayVisible: true,
+        annotTitle: "2. Focused Search Entry Bar",
+        annotBody: "Focus moves into the footer input line. Auto-scroll is temporarily paused during active search so matches do not drift while the operator reads.",
+        keys: [
+          ["a-z / 0-9", "Type literal query characters"],
+          ["Enter / n", "Select and advance to next match [1/4]"],
+          ["Shift+Enter / N", "Select previous match [4/4]"],
+          ["Tab", "Toggle tool-only filter"],
+          ["Esc", "1st Esc: clear query & exit search"]
+        ]
+      },
+      3: {
+        name: "Matches & Selection Chrome",
+        kind: "MATCHED",
+        desc: "Literal matches highlighted with block-level chrome (amber rail, badges). Match 1 is selected (cyan accent).",
+        action: "Query 'test' matched 4 items; Match 1/4 selected",
+        query: '"test"',
+        filter: "all",
+        matches: "4 matches (Match 1 active: $ npm test)",
+        footerText: "/ test  [all]  4 matches [1/4] · Enter/n next · Shift+Enter/N prev · Tab filter · Esc clear",
+        searchActive: true,
+        queryText: "test",
+        noMatch: false,
+        filterActive: false,
+        selectedMatchIdx: 1,
+        showLiveMessage: false,
+        overlayVisible: true,
+        annotTitle: "3. Block-Level Match Architecture",
+        annotBody: "Matches show clear block-level boundary tags ([MATCH 1/4], [MATCH 2/4]) and selected block elevation. Avoids brittle substring replacement across complex TUI component renderers.",
+        keys: [
+          ["Enter / n", "Advance selection to Match 2/4"],
+          ["Shift+Enter / N", "Wrap back to Match 4/4"],
+          ["Tab", "Filter matches to tool calls only"],
+          ["Esc", "Clear search query and restore auto-scroll"]
+        ]
+      },
+      4: {
+        name: "Next / Previous Navigation",
+        kind: "NAVIGATING",
+        desc: "Pressing `Enter` or `n` advances focus to Match 2/4. Viewport centers the selected component block.",
+        action: "Operator pressed 'n' (or 'Enter') -> moved to Match 2",
+        query: '"test"',
+        filter: "all",
+        matches: "4 matches (Match 2 active: tool: grep)",
+        footerText: "/ test  [all]  4 matches [2/4] · Enter/n next · Shift+Enter/N prev · Tab filter · Esc clear",
+        searchActive: true,
+        queryText: "test",
+        noMatch: false,
+        filterActive: false,
+        selectedMatchIdx: 2,
+        showLiveMessage: false,
+        overlayVisible: true,
+        annotTitle: "4. Cyclic Navigation & Viewport Centering",
+        annotBody: "Navigation wraps cyclically (1 ➔ 2 ➔ 3 ➔ 4 ➔ 1). The overlay scroll offset adjusts so the full matching block is visible without manual scrolling.",
+        keys: [
+          ["n / Enter", "Advance to Match 3/4"],
+          ["N / Shift+Enter", "Return to Match 1/4"],
+          ["Tab", "Toggle tool-only filter"],
+          ["Esc", "Clear search query"]
+        ]
+      },
+      5: {
+        name: "Tool-Only Filter Qualifier",
+        kind: "FILTERED",
+        desc: "Toggling kind filter to [tools] scopes matches to ToolExecution and BashExecution blocks only.",
+        action: "Operator pressed 'Tab' -> filter toggled to [tools]",
+        query: '"test"',
+        filter: "tools (kind: tool_calls | tool_results)",
+        matches: "2 tool matches (filtered from 4)",
+        footerText: "/ test  [tools]  2 tool matches [1/2] · Enter/n next · Shift+Enter/N prev · Tab filter · Esc clear",
+        searchActive: true,
+        queryText: "test",
+        noMatch: false,
+        filterActive: true,
+        selectedMatchIdx: 1, // Only blocks 3 and 4 match under tool filter
+        showLiveMessage: false,
+        overlayVisible: true,
+        annotTitle: "5. Structured Kind Filtering",
+        annotBody: "Reuses pure query projection kind filters (messages, tool_calls, tool_results, all). Filters out non-tool text so operators can rapidly audit side effects.",
+        keys: [
+          ["Tab", "Toggle filter back to [all]"],
+          ["n / Enter", "Next tool match [2/2]"],
+          ["Backspace", "Edit query string"],
+          ["Esc", "Clear search"]
+        ]
+      },
+      6: {
+        name: "No-Match Recovery State",
+        kind: "NO-MATCH",
+        desc: "Unmatched query displays gentle amber status with clear edit and escape recovery paths.",
+        action: "Operator typed: 'foobar_missing' (0 results)",
+        query: '"foobar_missing"',
+        filter: "all",
+        matches: "0 matches",
+        footerText: "/ foobar_missing  [all]  0 matches · Backspace edit · Esc clear",
+        searchActive: true,
+        queryText: "foobar_missing",
+        noMatch: true,
+        filterActive: false,
+        selectedMatchIdx: 0,
+        showLiveMessage: false,
+        overlayVisible: true,
+        annotTitle: "6. Non-Destructive Empty State",
+        annotBody: "Empty results do NOT collapse or hide the transcript. Existing content remains readable with a distinct non-blocking warning footer and immediate escape path.",
+        keys: [
+          ["Backspace", "Delete characters to recover matching prefix"],
+          ["Esc", "Exit search mode and restore resting view"],
+          ["Ctrl+U", "Clear query text immediately"]
+        ]
+      },
+      7: {
+        name: "Live Update Behavior",
+        kind: "LIVE-STREAM",
+        desc: "Live subagent emits a new tool execution. Match count updates dynamically to 5 without jumping selection.",
+        action: "Child session emitted new tool event ($ bun test ...)",
+        query: '"test"',
+        filter: "all",
+        matches: "5 matches (+1 new match arrived, selection preserved)",
+        footerText: "/ test  [all]  5 matches [2/5] (+1 new) · Enter/n next · Shift+Enter/N prev · Esc clear",
+        searchActive: true,
+        queryText: "test",
+        noMatch: false,
+        filterActive: false,
+        selectedMatchIdx: 2,
+        showLiveMessage: true,
+        overlayVisible: true,
+        annotTitle: "7. Stable Identity During Streaming",
+        annotBody: "When live agents append messages, pure query model re-projects entries while preserving the operator's selected match by stable message/toolCallId.",
+        keys: [
+          ["n / Enter", "Advance to next match (including newly arrived items)"],
+          ["Esc", "Clear search"],
+          ["PgDn / End", "Jump to live tail"]
+        ]
+      },
+      8: {
+        name: "Clearing Search Mode",
+        kind: "CLEARED",
+        desc: "Pressing `Esc` clears query, removes match highlights, and restores resting transcript navigation.",
+        action: "Operator pressed 'Esc' (1st Escape stage)",
+        query: '""',
+        filter: "none",
+        matches: "0 matches (cleared)",
+        footerText: "156 lines · 88% | ↑↓ scroll · PgUp/PgDn · / search · Esc/q close",
+        searchActive: false,
+        noMatch: false,
+        filterActive: false,
+        selectedMatchIdx: 0,
+        showLiveMessage: true,
+        overlayVisible: true,
+        annotTitle: "8. Stage-1 Escape Semantics",
+        annotBody: "First `Esc` clears active search text and exits search mode without closing the transcript overlay. The scroll position stays at the inspected block.",
+        keys: [
+          ["/", "Re-enter search"],
+          ["↑ / ↓ / j / k", "Resume scrolling transcript"],
+          ["Esc / q", "2nd Esc: close overlay completely"]
+        ]
+      },
+      9: {
+        name: "Closing Semantics (Exit)",
+        kind: "CLOSED",
+        desc: "Pressing `Esc` or `q` while resting closes the overlay, cleanly returning focus to the parent session.",
+        action: "Operator pressed 'Esc' or 'q' from resting state",
+        query: "N/A",
+        filter: "N/A",
+        matches: "N/A",
+        footerText: "Transcript overlay closed. Focus returned to parent session prompt.",
+        searchActive: false,
+        noMatch: false,
+        filterActive: false,
+        selectedMatchIdx: 0,
+        showLiveMessage: false,
+        overlayVisible: false,
+        annotTitle: "9. Stage-2 Close & Resource Teardown",
+        annotBody: "Disposes live subscriptions, cancels intervals, unmounts custom overlay, and returns control cleanly to the parent command loop.",
+        keys: [
+          ["Enter", "Execute prompt in parent session"],
+          ["/subagents:sessions", "Re-open subagent picker"]
+        ]
+      }
+    };
+
+    let currentStep = 1;
+    let isCompactTerminal = false;
+
+    function renderStep(stepNum) {
+      currentStep = stepNum;
+      const s = STEPS[stepNum];
+
+      // Ensure sidebar resets scroll to top
+      const sidebar = document.getElementById("sidebarEl");
+      if (sidebar) sidebar.scrollTop = 0;
+
+      // Update Top Nav Button Active States
+      document.querySelectorAll(".step-btn").forEach(btn => {
+        const num = parseInt(btn.getAttribute("data-step"), 10);
+        btn.classList.toggle("active", num === stepNum);
+      });
+
+      // Update Sidebar Info
+      document.getElementById("sideStateTitle").textContent = `Step ${stepNum}: ${s.name}`;
+      document.getElementById("sideStateDesc").textContent = s.desc;
+      document.getElementById("sideStateKind").textContent = s.kind;
+      document.getElementById("sideAction").textContent = s.action;
+      document.getElementById("sideQuery").textContent = `query: ${s.query} | filter: ${s.filter}`;
+      document.getElementById("sideMatches").textContent = s.matches;
+      document.getElementById("sideFooterText").textContent = s.footerText;
+      document.getElementById("annotTitle").textContent = s.annotTitle;
+      document.getElementById("annotBody").textContent = s.annotBody;
+
+      // Update Key Table
+      const keyTable = document.getElementById("keyTable");
+      keyTable.innerHTML = s.keys.map(k => `<tr><td>${escapeHtml(k[0])}</td><td>${escapeHtml(k[1])}</td></tr>`).join("");
+
+      // Update Overlay Visibility
+      const overlayScrim = document.getElementById("overlayScrim");
+      const closedResumeLine = document.getElementById("closedResumeLine");
+      const closedPromptLine = document.getElementById("closedPromptLine");
+      if (!s.overlayVisible) {
+        overlayScrim.classList.add("hidden");
+        closedResumeLine.style.display = "block";
+        closedPromptLine.style.display = "flex";
+        return;
+      } else {
+        overlayScrim.classList.remove("hidden");
+        closedResumeLine.style.display = "none";
+        closedPromptLine.style.display = "none";
+      }
+
+      // Update Live Injected Message Visibility
+      const block7 = document.getElementById("block-7");
+      block7.style.display = s.showLiveMessage ? "block" : "none";
+
+      // Update Footer View (Resting vs Search Active)
+      const footerResting = document.getElementById("footerResting");
+      const footerSearch = document.getElementById("footerSearch");
+      const searchInputWrap = document.getElementById("searchInputWrap");
+      const queryDisplay = document.getElementById("queryDisplay");
+      const filterLabel = document.getElementById("filterLabel");
+      const filterBadge = document.getElementById("filterBadge");
+      const matchBadge = document.getElementById("matchBadge");
+      const matchCountText = document.getElementById("matchCountText");
+
+      if (s.searchActive) {
+        footerResting.style.display = "none";
+        footerSearch.style.display = "flex";
+        queryDisplay.textContent = s.queryText;
+        
+        // Filter badge styling
+        filterLabel.textContent = s.filterActive ? "tools" : "all";
+        filterBadge.classList.toggle("active-tool", s.filterActive);
+
+        // No match treatment
+        if (s.noMatch) {
+          searchInputWrap.classList.add("no-match");
+          matchBadge.className = "match-count-badge zero";
+          matchCountText.textContent = `0 matches for "${s.queryText}"`;
+        } else {
+          searchInputWrap.classList.remove("no-match");
+          if (s.filterActive) {
+            matchBadge.className = "match-count-badge has-selected";
+            matchCountText.textContent = `2 tool matches [${s.selectedMatchIdx}/2]`;
+          } else if (s.showLiveMessage) {
+            matchBadge.className = "match-count-badge new-match";
+            matchCountText.textContent = `5 matches [${s.selectedMatchIdx}/5] (+1 new)`;
+          } else if (s.selectedMatchIdx === 0) {
+            matchBadge.className = "match-count-badge";
+            matchCountText.textContent = `4 matches found`;
+          } else {
+            matchBadge.className = "match-count-badge has-selected";
+            matchCountText.textContent = `4 matches [${s.selectedMatchIdx}/4]`;
+          }
+        }
+      } else {
+        footerResting.style.display = "flex";
+        footerSearch.style.display = "none";
+        document.getElementById("restingLineCount").textContent = s.showLiveMessage ? "156 lines" : "148 lines";
+      }
+
+      // Update Match Blocks & Highlights
+      updateMatchBlocks(s);
+    }
+
+    function updateMatchBlocks(state) {
+      const container = document.getElementById("transcriptBody");
+
+      // Reset all block styling
+      document.querySelectorAll(".msg-block").forEach(b => {
+        b.classList.remove("is-match", "is-selected-match");
+        const slot = b.querySelector(".match-slot");
+        if (slot) slot.innerHTML = "";
+      });
+
+      if (!state.searchActive || state.noMatch) {
+        if (!state.searchActive) {
+          container.scrollTo({ top: 0, behavior: "instant" });
+        }
+        return;
+      }
+
+      // Determine matching items based on query & filter
+      let activeMatches = [];
+      if (state.filterActive) {
+        // Only tool blocks
+        activeMatches = [
+          { id: "block-3", matchIdx: 1, total: 2 },
+          { id: "block-4", matchIdx: 2, total: 2 }
+        ];
+      } else if (state.showLiveMessage) {
+        // 5 total matches
+        activeMatches = [
+          { id: "block-3", matchIdx: 1, total: 5 },
+          { id: "block-4", matchIdx: 2, total: 5 },
+          { id: "block-5", matchIdx: 3, total: 5 },
+          { id: "block-7", matchIdx: 4, total: 5 }
+        ];
+      } else {
+        // 4 total matches
+        activeMatches = [
+          { id: "block-3", matchIdx: 1, total: 4 },
+          { id: "block-4", matchIdx: 2, total: 4 },
+          { id: "block-5", matchIdx: 3, total: 4 }
+        ];
+      }
+
+      activeMatches.forEach(m => {
+        const el = document.getElementById(m.id);
+        if (!el) return;
+
+        const isSelected = (state.selectedMatchIdx > 0 && m.matchIdx === state.selectedMatchIdx);
+        el.classList.add("is-match");
+        if (isSelected) {
+          el.classList.add("is-selected-match");
+        }
+
+        const slot = el.querySelector(".match-slot");
+        if (slot) {
+          const badgeText = isSelected ? `▶ MATCH ${m.matchIdx}/${m.total}` : `MATCH ${m.matchIdx}/${m.total}`;
+          slot.innerHTML = `<span class="match-pill">${badgeText}</span>`;
+        }
+
+        if (isSelected) {
+          const targetTop = el.offsetTop - container.offsetTop - 20;
+          container.scrollTo({ top: Math.max(0, targetTop), behavior: "instant" });
+        }
+      });
+    }
+
+    function goToStep(n) {
+      if (n >= 1 && n <= 9) {
+        renderStep(n);
+      }
+    }
+
+    function nextStep() {
+      if (currentStep < 9) goToStep(currentStep + 1);
+      else goToStep(1);
+    }
+
+    function prevStep() {
+      if (currentStep > 1) goToStep(currentStep - 1);
+      else goToStep(9);
+    }
+
+    function toggleFilter() {
+      if (currentStep === 3 || currentStep === 4) {
+        goToStep(5);
+      } else if (currentStep === 5) {
+        goToStep(3);
+      }
+    }
+
+    function toggleTerminalSize() {
+      const win = document.getElementById("termWindow");
+      isCompactTerminal = !isCompactTerminal;
+      if (isCompactTerminal) {
+        win.style.maxWidth = "760px";
+        win.style.height = "520px";
+      } else {
+        win.style.maxWidth = "950px";
+        win.style.height = "610px";
+      }
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // Keyboard navigation inside mock
+    window.addEventListener("keydown", (e) => {
+      // Number keys 1-9
+      if (e.key >= "1" && e.key <= "9" && !e.metaKey && !e.ctrlKey) {
+        goToStep(parseInt(e.key, 10));
+        return;
+      }
+
+      if (e.key === "ArrowRight") {
+        nextStep();
+        return;
+      }
+
+      if (e.key === "ArrowLeft") {
+        prevStep();
+        return;
+      }
+
+      // '/' enters search if resting
+      if (e.key === "/" && currentStep === 1) {
+        goToStep(2);
+        e.preventDefault();
+        return;
+      }
+
+      // 'Escape' semantics
+      if (e.key === "Escape") {
+        if (currentStep >= 2 && currentStep <= 7) {
+          // 1st Escape: clear search -> step 8
+          goToStep(8);
+        } else if (currentStep === 1 || currentStep === 8) {
+          // 2nd Escape: close overlay -> step 9
+          goToStep(9);
+        } else if (currentStep === 9) {
+          // Re-open overlay -> step 1
+          goToStep(1);
+        }
+        e.preventDefault();
+        return;
+      }
+
+      // 'q' closes when resting
+      if (e.key === "q" && (currentStep === 1 || currentStep === 8)) {
+        goToStep(9);
+        e.preventDefault();
+        return;
+      }
+
+      // 'n' / 'Enter' moves next match
+      if ((e.key === "n" || e.key === "Enter") && (currentStep === 2 || currentStep === 3)) {
+        goToStep(4);
+        e.preventDefault();
+        return;
+      }
+
+      // 'Tab' toggles tool filter
+      if (e.key === "Tab" && (currentStep >= 2 && currentStep <= 5)) {
+        toggleFilter();
+        e.preventDefault();
+        return;
+      }
+    });
+
+    // Check URL parameters (e.g. ?step=3)
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialStep = parseInt(urlParams.get("step") || "1", 10);
+    renderStep(initialStep);
+  </script>
+</body>
+</html>

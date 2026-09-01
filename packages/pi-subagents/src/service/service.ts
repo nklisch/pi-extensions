@@ -1,19 +1,11 @@
-/**
- * service.ts — Public API surface for cross-extension access to subagents.
- *
- * Consumers declare this package as an optional peer dependency and use
- * dynamic import to access the accessor functions:
- *
- *   const { getSubagentsService } = await import("@nklisch/pi-subagents");
- *   const svc = getSubagentsService();
- *   svc?.spawn("Explore", "Check for stale TODOs");
- */
+/** Public cross-extension contract for subagent execution control. */
 
 import type {
   SubagentLifecycleInterceptor,
   SubagentLifecycleRegistration,
+  SubagentExecutionMode,
 } from "#src/lifecycle/lifecycle-interceptor";
-import type { SubagentStatus } from "#src/lifecycle/subagent";
+import type { SubagentStatus, SubagentStopReason, SubagentTerminalReason } from "#src/lifecycle/subagent-state";
 import type { LifetimeUsage } from "#src/lifecycle/usage";
 import type {
   Workspace,
@@ -22,7 +14,7 @@ import type {
   WorkspacePrepareContext,
   WorkspaceProvider,
 } from "#src/lifecycle/workspace";
-
+import type { ThinkingLevel } from "#src/types";
 
 export {
   MAX_LIFECYCLE_CONTINUATION_ROUNDS,
@@ -40,13 +32,7 @@ export {
   type SubagentLifecycleStartContext,
   type SubagentLifecycleStartDecision,
 } from "#src/lifecycle/lifecycle-interceptor";
-// SubagentStatus is defined in the lifecycle layer (single home) and re-exported
-// here for the public API surface — mirrors the LifetimeUsage / workspace pattern.
-export type { SubagentStatus } from "#src/lifecycle/subagent";
-// Generative extension seam (ADR 0002, Phase 16 Step 2). The provider type
-// and all four collaborator types it references are re-exported by name so
-// consumers can import them directly rather than recovering them via
-// indexed-access inference (e.g. `Parameters<WorkspaceProvider["prepare"]>[0]`).
+export type { SubagentStatus, SubagentStopReason, SubagentTerminalReason } from "#src/lifecycle/subagent-state";
 export type {
   LifetimeUsage,
   Workspace,
@@ -55,73 +41,86 @@ export type {
   WorkspacePrepareContext,
   WorkspaceProvider,
 };
+export type { SubagentExecutionMode as SubagentMode };
 
-/** Serializable snapshot of an agent's state — no live session objects. */
 export interface SubagentRecord {
   id: string;
   type: string;
   description: string;
+  runId: number;
+  mode: SubagentExecutionMode;
   status: SubagentStatus;
+  stopRequested: boolean;
+  terminalReason?: SubagentTerminalReason;
   result?: string;
   error?: string;
   toolUses: number;
   startedAt: number;
   completedAt?: number;
+  activeRuntimeMs: number;
+  modelLabel: string;
+  thinkingLevel: ThinkingLevel;
+  activeTools: string[];
+  currentActivity: string;
   lifetimeUsage: LifetimeUsage;
   compactionCount: number;
+  outputFile?: string;
 }
 
-/** Options for spawning an agent via the service. */
-export interface SpawnOptions {
+export interface LaunchOptions {
   description?: string;
   model?: string;
   maxTurns?: number;
-  thinkingLevel?: string;
+  thinkingLevel?: ThinkingLevel;
   inheritContext?: boolean;
-  foreground?: boolean;
-  bypassQueue?: boolean;
+  mode?: SubagentExecutionMode;
+  timeoutSeconds?: number;
+  signal?: AbortSignal;
 }
 
-/** The public service contract for cross-extension subagent access. */
+export type LaunchDelivery =
+  | { kind: "detached"; agentId: string; runId: number }
+  | { kind: "joined"; record: SubagentRecord };
+
+export type ResumeDelivery = LaunchDelivery |
+  { kind: "not_found"; agentId: string } |
+  { kind: "wrong_state"; agentId: string; status: SubagentStatus };
+
+export type StopDelivery =
+  | { kind: "stopped"; agentId: string; runId: number; reason: SubagentStopReason; record: SubagentRecord }
+  | { kind: "stop_pending"; agentId: string; runId: number; reason: SubagentStopReason; record: SubagentRecord }
+  | { kind: "already_terminal"; agentId: string; runId: number; record: SubagentRecord }
+  | { kind: "not_found"; agentId: string };
+
+export type SteerDelivery =
+  | { kind: "delivered" | "buffered"; agentId: string; runId: number }
+  | { kind: "rejected"; agentId: string; runId: number; status: SubagentStatus }
+  | { kind: "not_found"; agentId: string };
+
+export type ResultDelivery =
+  | { kind: "result"; record: SubagentRecord }
+  | { kind: "not_found"; agentId: string };
+
+export type SubagentListState = "active" | "terminal" | "all";
+export interface ListOptions {
+  state?: SubagentListState;
+  limit?: number;
+}
+
 export interface SubagentsService {
-  /** Spawn an agent. Returns the agent ID immediately. */
-  spawn(type: string, prompt: string, options?: SpawnOptions): string;
-
-  /** Get a snapshot of an agent's current state. */
-  getRecord(id: string): SubagentRecord | undefined;
-
-  /** List all tracked agents, most recent first. */
-  listAgents(): SubagentRecord[];
-
-  /** Abort a running or queued agent. Returns false if not found. */
-  abort(id: string): boolean;
-
-  /** Send a steering message to a running agent. */
-  steer(id: string, message: string): Promise<boolean>;
-
-  /** Wait for all running and queued agents to complete. */
+  launch(type: string, prompt: string, options?: LaunchOptions): Promise<LaunchDelivery>;
+  resume(agentId: string, prompt: string, options?: Pick<LaunchOptions, "mode" | "timeoutSeconds" | "signal">): Promise<ResumeDelivery>;
+  stop(agentId: string, settlementTimeoutSeconds?: number): Promise<StopDelivery>;
+  steer(agentId: string, message: string): Promise<SteerDelivery>;
+  list(options?: ListOptions): SubagentRecord[];
+  getResult(agentId: string): ResultDelivery;
+  getRecord(agentId: string): SubagentRecord | undefined;
   waitForAll(): Promise<void>;
-
-  /** Whether any agents are running or queued. */
   hasRunning(): boolean;
-
-  /**
-   * Register the single workspace provider that supplies a child's working
-   * directory plus bracketed setup/teardown. Throws if one is already
-   * registered. Returns a disposer that unregisters the provider.
-   */
   registerWorkspaceProvider(provider: WorkspaceProvider): () => void;
-
-  /**
-   * Register an ordered async lifecycle provider. It receives only immutable
-   * execution facts and prompt/result decisions, never a manager or session.
-   */
-  registerLifecycleInterceptor(
-    interceptor: SubagentLifecycleInterceptor,
-  ): SubagentLifecycleRegistration;
+  registerLifecycleInterceptor(interceptor: SubagentLifecycleInterceptor): SubagentLifecycleRegistration;
 }
 
-/** Event channel constants for pi.events subscriptions. */
 export const SUBAGENT_EVENTS = {
   STARTED: "subagents:started",
   COMPLETED: "subagents:completed",
@@ -132,24 +131,17 @@ export const SUBAGENT_EVENTS = {
   STEERED: "subagents:steered",
 } as const;
 
-// ---- Accessor functions ----
-
 const SERVICE_KEY = Symbol.for("@nklisch/pi-subagents:service");
 
-/** Publish the SubagentsService on globalThis for cross-extension access. */
 export function publishSubagentsService(service: SubagentsService): void {
   (globalThis as Record<symbol, unknown>)[SERVICE_KEY] = service;
 }
 
-/** Retrieve the published SubagentsService, or undefined if not yet published. */
 export function getSubagentsService(): SubagentsService | undefined {
-  return (globalThis as Record<symbol, unknown>)[SERVICE_KEY] as
-    | SubagentsService
-    | undefined;
+  return (globalThis as Record<symbol, unknown>)[SERVICE_KEY] as SubagentsService | undefined;
 }
 
-/** Remove the SubagentsService from globalThis (call on shutdown/reload). */
 export function unpublishSubagentsService(): void {
-  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Symbol-keyed global property; Map.delete() is not applicable
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Symbol-keyed global property
   delete (globalThis as Record<symbol, unknown>)[SERVICE_KEY];
 }

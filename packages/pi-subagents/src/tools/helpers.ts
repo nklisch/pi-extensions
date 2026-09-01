@@ -5,12 +5,8 @@ import { type AgentDetails, formatTokens } from "#src/ui/display";
 /** Parenthetical status note for completed agent result text. */
 export function getStatusNote(status: string): string {
   switch (status) {
-    case "aborted":
-      return " (aborted \u2014 max turns exceeded, output may be incomplete)";
-    case "steered":
-      return " (wrapped up \u2014 reached turn limit)";
     case "stopped":
-      return " (stopped by user)";
+      return " (stopped)";
     default:
       return "";
   }
@@ -23,7 +19,10 @@ export function buildDetails(
     toolUses: number;
     startedAt: number;
     completedAt?: number;
+    /** Active wall-clock duration for the current run lease. */
+    activeRuntimeMs?: number;
     status: string;
+    terminalReason?: import("#src/lifecycle/subagent-state").SubagentTerminalReason;
     error?: string;
     id?: string;
     lifetimeUsage: LifetimeUsage;
@@ -39,8 +38,12 @@ export function buildDetails(
     tokens: formatLifetimeTokens(record),
     turnCount: record.turnCount,
     maxTurns: record.maxTurns,
-    durationMs: (record.completedAt ?? Date.now()) - record.startedAt,
+    // Do not derive runtime from record timestamps: startedAt may represent a
+    // prior lease and completedAt includes queue/resume waiting time. The
+    // lifecycle record owns the active-runtime measurement.
+    durationMs: record.activeRuntimeMs ?? 0,
     status: record.status as AgentDetails["status"],
+    terminalReason: record.terminalReason,
     agentId: record.id,
     error: record.error,
     ...overrides,

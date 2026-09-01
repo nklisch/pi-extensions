@@ -59,7 +59,7 @@ export class SubagentsSettingsHandler {
 
     if (choice.startsWith("Max concurrency")) {
       const val = await ui.input(
-        "Max concurrent background agents",
+        "Max concurrent subagent runs",
         String(this.settings.maxConcurrent),
       );
       if (val) {

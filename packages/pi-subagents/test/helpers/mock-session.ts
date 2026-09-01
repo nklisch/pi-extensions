@@ -56,7 +56,7 @@ export function createSubagentSessionStub(
 		get model(): unknown { return session.model; },
 		get thinkingLevel(): unknown { return session.thinkingLevel; },
 		outputFile,
-		runTurnLoop: vi.fn().mockResolvedValue({ responseText: "done", aborted: false, steered: false }),
+		runTurnLoop: vi.fn().mockResolvedValue({ responseText: "done" }),
 		resumeTurnLoop: vi.fn().mockResolvedValue("resumed"),
 		get isIdle(): boolean { return session.isIdle; },
 		waitUntilIdle: vi.fn().mockResolvedValue(undefined),

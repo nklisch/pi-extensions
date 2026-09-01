@@ -9,6 +9,22 @@ import {
 
 const SERVICE_KEY = Symbol.for("@nklisch/pi-subagents:service");
 
+function mockService(): SubagentsService {
+  return {
+    launch: async () => ({ kind: "detached", agentId: "id", runId: 1 }),
+    resume: async () => ({ kind: "not_found", agentId: "id" }),
+    stop: async () => ({ kind: "not_found", agentId: "id" }),
+    steer: async () => ({ kind: "not_found", agentId: "id" }),
+    list: () => [],
+    getResult: () => ({ kind: "not_found", agentId: "id" }),
+    getRecord: () => undefined,
+    waitForAll: async () => undefined,
+    hasRunning: () => false,
+    registerWorkspaceProvider: () => () => undefined,
+    registerLifecycleInterceptor: () => ({ dispose: async () => undefined }),
+  };
+}
+
 describe("SubagentsService accessors", () => {
   afterEach(() => {
     // Clean up globalThis after each test
@@ -21,26 +37,26 @@ describe("SubagentsService accessors", () => {
   });
 
   it("publishSubagentsService stores service on globalThis", () => {
-    const mock = { spawn: () => "id" } as unknown as SubagentsService;
+    const mock = mockService();
     publishSubagentsService(mock);
     expect((globalThis as Record<symbol, unknown>)[SERVICE_KEY]).toBe(mock);
   });
 
   it("getSubagentsService retrieves the published service", () => {
-    const mock = { spawn: () => "id" } as unknown as SubagentsService;
+    const mock = mockService();
     publishSubagentsService(mock);
     expect(getSubagentsService()).toBe(mock);
   });
 
   it("unpublishSubagentsService removes the service from globalThis", () => {
-    const mock = { spawn: () => "id" } as unknown as SubagentsService;
+    const mock = mockService();
     publishSubagentsService(mock);
     unpublishSubagentsService();
     expect(getSubagentsService()).toBeUndefined();
   });
 
   it("getSubagentsService returns undefined after unpublish", () => {
-    const mock = { spawn: () => "id" } as unknown as SubagentsService;
+    const mock = mockService();
     publishSubagentsService(mock);
     unpublishSubagentsService();
     expect((globalThis as Record<symbol, unknown>)[SERVICE_KEY]).toBeUndefined();

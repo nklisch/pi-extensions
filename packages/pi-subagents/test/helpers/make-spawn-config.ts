@@ -1,63 +1,24 @@
 import type { ResolvedSpawnConfig } from "#src/tools/spawn-config";
 
-/** Flat options for {@link createResolvedSpawnConfig}; only the scalars tests vary. */
 export interface ResolvedSpawnConfigOptions {
-  subagentType?: string;
-  rawType?: string;
-  fellBack?: boolean;
-  displayName?: string;
-  prompt?: string;
-  description?: string;
-  model?: string;
-  runInBackground?: boolean;
+  subagentType?: string; rawType?: string; fellBack?: boolean; displayName?: string;
+  prompt?: string; description?: string; model?: string; mode?: "joined" | "detached";
 }
 
-/**
- * Build a `ResolvedSpawnConfig` for tool tests from flat options.
- *
- * Derives the mirrored regions the hand-built fixtures duplicate:
- * `execution.runInBackground` → `execution.agentInvocation.runInBackground`, and
- * `displayName`/`description`/`subagentType`/`model` → `presentation.detailBase`.
- * Flat options sidestep the `Partial<ResolvedSpawnConfig>` deep-merge trap.
- */
-export function createResolvedSpawnConfig(
-  options: ResolvedSpawnConfigOptions = {},
-): ResolvedSpawnConfig {
+export function createResolvedSpawnConfig(options: ResolvedSpawnConfigOptions = {}): ResolvedSpawnConfig {
   const subagentType = options.subagentType ?? "general-purpose";
   const displayName = options.displayName ?? "Agent";
   const description = options.description ?? "task";
-  const runInBackground = options.runInBackground ?? false;
+  const mode = options.mode ?? "detached";
   const modelName = options.model ?? "unknown model";
-  const effectiveThinkingLevel = "off" as const;
-
+  const invocation = { modelName, thinking: undefined, maxTurns: undefined, inheritContext: false, mode, timeoutSeconds: undefined };
   return {
-    identity: {
-      subagentType,
-      rawType: options.rawType ?? subagentType,
-      fellBack: options.fellBack ?? false,
-      displayName,
-    },
+    identity: { subagentType, rawType: options.rawType ?? subagentType, fellBack: options.fellBack ?? false, displayName },
     execution: {
-      prompt: options.prompt ?? "do the task",
-      description,
-      model: undefined,
-      effectiveMaxTurns: undefined,
-      thinking: undefined,
-      effectiveThinkingLevel,
-      inheritContext: false,
-      runInBackground,
-      agentInvocation: {
-        modelName,
-        thinking: undefined,
-        maxTurns: undefined,
-        inheritContext: false,
-        runInBackground,
-      },
+      prompt: options.prompt ?? "do the task", description, model: undefined, effectiveMaxTurns: undefined,
+      thinking: undefined, effectiveThinkingLevel: "off", inheritContext: false, mode, timeoutSeconds: undefined,
+      agentInvocation: invocation,
     },
-    presentation: {
-      modelName,
-      agentTags: [],
-      detailBase: { displayName, description, subagentType, modelName, thinkingLevel: effectiveThinkingLevel, tags: undefined },
-    },
+    presentation: { modelName, agentTags: [`mode: ${mode}`], detailBase: { displayName, description, subagentType, modelName, thinkingLevel: "off", tags: [`mode: ${mode}`] } },
   };
 }

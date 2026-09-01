@@ -12,7 +12,7 @@ function makeAgentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     systemPrompt: "You are a test agent.",
     promptMode: "replace",
     inheritContext: false,
-    runInBackground: false,
+    mode: "detached",
     ...overrides,
   };
 }
@@ -37,6 +37,18 @@ function makeModelInfo(overrides: Partial<Parameters<typeof resolveSpawnConfig>[
 }
 
 const defaultSettings = { defaultMaxTurns: undefined as number | undefined };
+
+describe("resolveSpawnConfig — removed invocation fields", () => {
+  it("rejects legacy delivery fields instead of silently choosing a mode", () => {
+    const result = resolveSpawnConfig(
+      { subagent_type: "general-purpose", prompt: "test", description: "d", run_in_background: true },
+      testRegistry,
+      makeModelInfo(),
+      defaultSettings,
+    );
+    expect(result).toEqual({ error: expect.stringContaining("run_in_background") });
+  });
+});
 
 describe("resolveSpawnConfig — type resolution", () => {
   it("resolves a known agent type", () => {
@@ -246,15 +258,15 @@ describe("resolveSpawnConfig — max turns normalization", () => {
 });
 
 describe("resolveSpawnConfig — invocation fields", () => {
-  it("sets runInBackground from params", () => {
+  it("sets mode from params", () => {
     const result = resolveSpawnConfig(
-      { subagent_type: "general-purpose", prompt: "test", description: "d", run_in_background: true },
+      { subagent_type: "general-purpose", prompt: "test", description: "d", mode: "joined" },
       testRegistry,
       makeModelInfo(),
       defaultSettings,
     );
     if ("error" in result) return;
-    expect(result.execution.runInBackground).toBe(true);
+    expect(result.execution.mode).toBe("joined");
   });
 
   it("builds agentInvocation snapshot", () => {
@@ -270,7 +282,8 @@ describe("resolveSpawnConfig — invocation fields", () => {
       thinking: "high",
       maxTurns: undefined,
       inheritContext: false,
-      runInBackground: false,
+      mode: "detached",
+      timeoutSeconds: undefined,
     });
   });
 });
@@ -308,8 +321,8 @@ describe("resolveSpawnConfig — detailBase and tags", () => {
       defaultSettings,
     );
     if ("error" in result) return;
-    // Explore has promptMode: "replace" → no mode label, no invocation overrides
-    expect(result.presentation.agentTags).toEqual([]);
+    // Delivery mode is explicit even for prompt-replacement agents.
+    expect(result.presentation.agentTags).toContain("mode: detached");
   });
 
   it("includes twin tag for append-mode agents like general-purpose", () => {
@@ -332,8 +345,8 @@ describe("resolveSpawnConfig — detailBase and tags", () => {
       defaultSettings,
     );
     if ("error" in result) return;
-    // Explore has promptMode: "replace" and no invocation overrides → no tags
-    expect(result.presentation.detailBase.tags).toBeUndefined();
+    // The default delivery mode is part of every invocation projection.
+    expect(result.presentation.detailBase.tags).toEqual(["mode: detached"]);
   });
 });
 

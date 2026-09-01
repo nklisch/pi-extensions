@@ -14,6 +14,8 @@ function makeDetails(overrides: Partial<NotificationDetails> = {}): Notification
   return {
     id: "agent-1",
     description: "Test agent",
+    runId: 1,
+    mode: "detached",
     modelLabel: "anthropic/claude-sonnet",
     thinkingLevel: "high",
     status: "completed",
@@ -60,14 +62,14 @@ describe("createNotificationRenderer", () => {
     expect(text).toContain("error");
   });
 
-  it("renders steered status as completed (steered)", () => {
+  it("renders a stopped status with its terminal reason", () => {
     const renderer = createNotificationRenderer();
     const result = renderer(
-      { details: makeDetails({ status: "steered" }) },
+      { details: makeDetails({ status: "stopped", terminalReason: "explicit_stop" }) },
       { expanded: false },
       stubTheme(),
     );
-    expect(renderText(result)).toContain("completed (steered)");
+    expect(renderText(result)).toContain("stopped (explicit_stop)");
   });
 
   it("shows full result lines when expanded", () => {

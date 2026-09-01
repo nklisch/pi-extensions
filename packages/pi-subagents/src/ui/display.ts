@@ -7,6 +7,7 @@
 
 import type { AgentConfigLookup } from "#src/config/agent-types";
 import { GLYPHS } from "#src/ui/glyphs";
+import type { SubagentTerminalReason } from "#src/lifecycle/subagent-state";
 import type { AgentInvocation, SubagentType, ThinkingLevel } from "#src/types";
 
 // ---- Types ----
@@ -24,7 +25,8 @@ export interface AgentDetails {
   toolUses: number;
   tokens: string;
   durationMs: number;
-  status: "queued" | "running" | "completed" | "steered" | "aborted" | "stopped" | "error" | "background";
+  status: "queued" | "running" | "completed" | "stopped" | "error";
+  terminalReason?: SubagentTerminalReason;
   /** Human-readable description of what the agent is currently doing. */
   activity?: string;
   /** Current spinner frame index (for animated running indicator). */
@@ -49,7 +51,7 @@ export interface AgentDetails {
 export const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /** Statuses that indicate an error/non-success outcome (used for linger behavior and icon rendering). */
-export const ERROR_STATUSES = new Set(["error", "aborted", "steered", "stopped"]);
+export const ERROR_STATUSES = new Set(["error", "stopped"]);
 
 /** Tool name → human-readable action for activity descriptions. */
 const TOOL_DISPLAY: Record<string, string> = {
@@ -146,8 +148,9 @@ export function buildInvocationTags(
   if (!invocation) return { tags };
   if (invocation.thinking) tags.push(`thinking: ${invocation.thinking}`);
   if (invocation.inheritContext) tags.push("inherit context");
-  if (invocation.runInBackground) tags.push("background");
+  if (invocation.mode) tags.push(`mode: ${invocation.mode}`);
   if (invocation.maxTurns != null) tags.push(`max turns: ${invocation.maxTurns}`);
+  if (invocation.timeoutSeconds != null) tags.push(`timeout: ${invocation.timeoutSeconds}s`);
   return { modelName: invocation.modelName, tags };
 }
 

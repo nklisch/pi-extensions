@@ -1,9 +1,9 @@
 /**
  * conversation.ts — Render a subagent session's messages as formatted text.
  *
- * Extracted from agent-runner.ts (issue #265) into the session domain, where the
- * other message-extraction helpers (content-items, context) live. Consumed by
- * the get_subagent_result tool's verbose output.
+ * Extracted into the session domain, alongside the other message-extraction
+ * helpers. Kept for read-only transcript/navigation surfaces; parent result
+ * delivery itself remains bounded.
  */
 
 import type { AgentSession } from "@earendil-works/pi-coding-agent";

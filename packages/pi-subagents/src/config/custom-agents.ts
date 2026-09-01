@@ -7,7 +7,7 @@ import { basename, join } from "node:path";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_TOOL_NAMES } from "#src/config/agent-types";
 import { debugLog } from "#src/debug";
-import type { AgentConfig, ThinkingLevel } from "#src/types";
+import type { AgentConfig, ThinkingLevel, SubagentMode } from "#src/types";
 
 /**
  * Scan for custom agent .md files from multiple locations.
@@ -60,6 +60,27 @@ function loadFromDir(
 
     try {
       const { frontmatter: fm, body } = parseFrontmatter(content);
+      if (fm.run_in_background !== undefined || fm.foreground !== undefined) {
+        const path = join(dir, file);
+        const removedFields = [
+          fm.run_in_background !== undefined ? "run_in_background" : undefined,
+          fm.foreground !== undefined ? "foreground" : undefined,
+        ].filter((field): field is string => field !== undefined).join(", ");
+        // Reserve the name as disabled so a removed field cannot silently fall
+        // through to a lower-priority file or an embedded default with a
+        // different delivery mode. The warning gives the owner an actionable
+        // migration path instead of making the refusal look like a missing file.
+        console.warn(`[pi-subagents] Ignoring ${path}: removed delivery field(s) ${removedFields}; use mode: joined|detached.`);
+        agents.set(name, {
+          name,
+          description: `Invalid agent definition: ${removedFields}`,
+          systemPrompt: "",
+          promptMode: "append",
+          enabled: false,
+          source,
+        });
+        continue;
+      }
       agents.set(name, {
         name,
         displayName: str(fm.display_name),
@@ -68,10 +89,11 @@ function loadFromDir(
         model: str(fm.model),
         thinking: str(fm.thinking) as ThinkingLevel | undefined,
         maxTurns: nonNegativeInt(fm.max_turns),
+        timeoutSeconds: positiveInt(fm.timeout_seconds),
         systemPrompt: body.trim(),
         promptMode: fm.prompt_mode === "replace" ? "replace" : "append",
         inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
-        runInBackground: fm.run_in_background != null ? fm.run_in_background === true : undefined,
+        mode: fm.mode === "joined" || fm.mode === "detached" ? fm.mode as SubagentMode : undefined,
         enabled: fm.enabled !== false,  // default true; explicitly false disables
         source,
       });
@@ -91,9 +113,14 @@ function str(val: unknown): string | undefined {
   return typeof val === "string" ? val : undefined;
 }
 
-/** Extract a non-negative integer or undefined. 0 means unlimited for max_turns. */
+/** Extract a non-negative integer; 0 means unlimited for max_turns. */
 function nonNegativeInt(val: unknown): number | undefined {
-  return typeof val === "number" && val >= 0 ? val : undefined;
+  return typeof val === "number" && Number.isInteger(val) && val >= 0 ? val : undefined;
+}
+
+/** Extract a positive integer for an active runtime deadline. */
+function positiveInt(val: unknown): number | undefined {
+  return typeof val === "number" && Number.isInteger(val) && val > 0 ? val : undefined;
 }
 
 /**

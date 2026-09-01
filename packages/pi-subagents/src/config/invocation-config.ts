@@ -1,10 +1,11 @@
-import type { AgentConfig, ThinkingLevel } from "#src/types";
+import type { AgentConfig, SubagentMode, ThinkingLevel } from "#src/types";
 
 interface AgentInvocationParams {
   model?: string;
   thinking?: string;
   max_turns?: number;
-  run_in_background?: boolean;
+  mode?: SubagentMode;
+  timeout_seconds?: number;
   inherit_context?: boolean;
 }
 
@@ -16,15 +17,17 @@ export function resolveAgentInvocationConfig(
   modelFromParams: boolean;
   thinking?: ThinkingLevel;
   maxTurns?: number;
+  mode: SubagentMode;
+  timeoutSeconds?: number;
   inheritContext: boolean;
-  runInBackground: boolean;
 } {
   return {
     modelInput: agentConfig?.model ?? params.model,
     modelFromParams: agentConfig?.model == null && params.model != null,
     thinking: (agentConfig?.thinking ?? params.thinking) as ThinkingLevel | undefined,
     maxTurns: agentConfig?.maxTurns ?? params.max_turns,
+    mode: agentConfig?.mode ?? params.mode ?? "detached",
+    timeoutSeconds: agentConfig?.timeoutSeconds ?? params.timeout_seconds,
     inheritContext: agentConfig?.inheritContext ?? params.inherit_context ?? false,
-    runInBackground: agentConfig?.runInBackground ?? params.run_in_background ?? false,
   };
 }

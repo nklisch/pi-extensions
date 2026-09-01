@@ -3,20 +3,22 @@
  *
  * Splits the unit-testable core of the `/subagents:sessions` command from its TUI
  * wiring (`session-navigator.ts`): which subagents are navigable and how a picked
- * agent's transcript is sourced (live, in this slice).
+ * agent's transcript is sourced (live or a retained file snapshot).
  *
  * The `TranscriptSource` seam decouples *how messages are sourced* (live record
- * here; a file snapshot in a follow-up) from *how they render* — the renderer
+ * or a retained file snapshot) from *how they render* — the renderer
  * (`session-navigator.ts`, which mounts Pi's per-entry components) talks only to
  * this seam. Rendering lives in the SDK/TUI module because the per-entry
- * components require a `TUI`, `cwd`, and markdown theme.
+ * components require a `TUI`, `cwd`, and markdown theme. The query tool uses
+ * the same JSONL adapter so file and live reads cannot drift.
  */
 
-import { buildSessionContext, parseSessionEntries, type SessionEntry, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { AgentConfigLookup } from "#src/config/agent-types";
 import type { SubagentStatus } from "#src/lifecycle/subagent-state";
 import type { AgentSessionEvent, SessionMessage, SubagentType, ThinkingLevel } from "#src/types";
 import { formatDuration, formatModelThinking, getDisplayName } from "#src/ui/display";
+import { parseSessionFileMessages } from "#src/session/query-source";
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -37,14 +39,17 @@ export interface NavigableSubagent {
   readonly agentMessages: readonly SessionMessage[];
   isSessionReady(): boolean;
   subscribeToUpdates(fn: (event: AgentSessionEvent) => void): (() => void) | undefined;
+  /** Notifies consumers when a retained session is released and changes source. */
+  subscribeToRecordUpdates?: (fn: () => void) => () => void;
   getToolDefinition(name: string): ToolDefinition | undefined;
 }
 
 /**
  * A navigable entry plus the label shown in the picker.
  *
- * A `live` entry sources its transcript from the in-memory session; an
- * `evicted`-kind entry is a persisted snapshot for a released live session.
+ * A `live` entry sources its transcript from the in-memory session and can
+ * transition to its retained file; an `evicted`-kind entry is a persisted
+ * snapshot for a released live session.
  */
 export interface RunDisplayMetadata {
   readonly modelLabel: string;
@@ -75,6 +80,12 @@ export interface StreamingState {
   readonly responseText: string;
 }
 
+/** Source state shown when a live record is released or its snapshot cannot load. */
+export type TranscriptSourceAvailability =
+  | { readonly kind: "live"; readonly path?: string }
+  | { readonly kind: "file"; readonly path: string }
+  | { readonly kind: "unavailable"; readonly path?: string; readonly error?: string };
+
 /** Liveness-agnostic transcript source consumed by the renderer. */
 export interface TranscriptSource {
   /** Current message history. */
@@ -85,6 +96,8 @@ export interface TranscriptSource {
   streaming(): StreamingState | undefined;
   /** Resolve a registered tool definition by name, for Pi's tool-execution components. */
   getToolDefinition(name: string): ToolDefinition | undefined;
+  /** Current source state; unavailable retains the last readable messages. */
+  availability?(): TranscriptSourceAvailability;
 }
 
 /**
@@ -126,18 +139,17 @@ export function fileSnapshotSource(
   outputFile: string,
   readFile: (path: string) => string,
 ): TranscriptSource {
-  const entries = parseSessionEntries(readFile(outputFile));
-  const sessionEntries = entries.filter((entry): entry is SessionEntry => entry.type !== "session");
-  const { messages } = buildSessionContext(sessionEntries);
+  const messages = parseSessionFileMessages(readFile(outputFile));
   return {
     getMessages: () => messages,
     subscribe: () => undefined,
     streaming: () => undefined,
     getToolDefinition: () => undefined,
+    availability: () => ({ kind: "file", path: outputFile }),
   };
 }
 
-/** Source a transcript live from an in-memory record (this slice's only source). */
+/** Source a transcript live from an in-memory record. */
 export function liveSource(record: NavigableSubagent): TranscriptSource {
   return {
     getMessages: () => record.agentMessages,
@@ -147,6 +159,105 @@ export function liveSource(record: NavigableSubagent): TranscriptSource {
         ? { activeTools: record.activeTools, responseText: record.responseText }
         : undefined,
     getToolDefinition: (name) => record.getToolDefinition(name),
+    availability: () => ({ kind: "live", ...(record.outputFile ? { path: record.outputFile } : {}) }),
+  };
+}
+
+/**
+ * Keep a live viewer useful across retention release. The source swaps to the
+ * persisted snapshot on the release notification and retains the last live
+ * content when that snapshot cannot be read.
+ */
+export function liveFileSource(
+  record: NavigableSubagent,
+  readFile: (path: string) => string,
+): TranscriptSource {
+  let mode: "live" | "file" | "unavailable" = record.isSessionReady() ? "live" : "unavailable";
+  let messages: readonly SessionMessage[] = record.agentMessages;
+  let error: string | undefined;
+  let fileAttempted = false;
+
+  const swapIfReleased = (): void => {
+    if (record.isSessionReady()) {
+      mode = "live";
+      error = undefined;
+      messages = record.agentMessages;
+      return;
+    }
+    if (fileAttempted || !record.outputFile) {
+      if (!record.outputFile && mode === "live") mode = "unavailable";
+      return;
+    }
+    fileAttempted = true;
+    try {
+      messages = parseSessionFileMessages(readFile(record.outputFile));
+      mode = "file";
+      error = undefined;
+    } catch (cause) {
+      mode = "unavailable";
+      error = cause instanceof Error ? cause.message : String(cause);
+    }
+  };
+
+  const notify = (onChange: () => void): void => {
+    try {
+      // Do not replace the last live snapshot with Subagent's empty post-release
+      // getter before the file adapter succeeds; the degraded path must retain
+      // content that was already visible.
+      if (mode === "live" && record.isSessionReady()) messages = record.agentMessages;
+      swapIfReleased();
+      onChange();
+    } catch (cause) {
+      mode = "unavailable";
+      error = cause instanceof Error ? cause.message : String(cause);
+      onChange();
+    }
+  };
+
+  return {
+    getMessages: () => {
+      try {
+        if (mode === "live") {
+          if (!record.isSessionReady()) swapIfReleased();
+          else messages = record.agentMessages;
+        } else swapIfReleased();
+      } catch (cause) {
+        mode = "unavailable";
+        error = cause instanceof Error ? cause.message : String(cause);
+      }
+      return messages;
+    },
+    subscribe: (onChange) => {
+      const unsubscribers: Array<() => void> = [];
+      try {
+        const unsubscribe = record.subscribeToUpdates(() => notify(onChange));
+        if (unsubscribe) unsubscribers.push(unsubscribe);
+      } catch (cause) {
+        mode = "unavailable";
+        error = cause instanceof Error ? cause.message : String(cause);
+      }
+      if (record.subscribeToRecordUpdates) {
+        try {
+          unsubscribers.push(record.subscribeToRecordUpdates(() => notify(onChange)));
+        } catch (cause) {
+          mode = "unavailable";
+          error = cause instanceof Error ? cause.message : String(cause);
+        }
+      }
+      return unsubscribers.length === 0 ? undefined : () => {
+        for (const unsubscribe of unsubscribers) unsubscribe();
+      };
+    },
+    streaming: () => mode === "live" && record.status === "running"
+      ? { activeTools: record.activeTools, responseText: record.responseText }
+      : undefined,
+    getToolDefinition: (name) => mode === "live" ? record.getToolDefinition(name) : undefined,
+    availability: () => {
+      swapIfReleased();
+      if (mode === "live") return { kind: "live", ...(record.outputFile ? { path: record.outputFile } : {}) };
+      if (mode === "file" && record.outputFile) return { kind: "file", path: record.outputFile };
+      return { kind: "unavailable", ...(record.outputFile ? { path: record.outputFile } : {}), ...(error ? { error } : {}) };
+    },
   };
 }
 

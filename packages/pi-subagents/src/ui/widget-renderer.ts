@@ -7,6 +7,7 @@
 
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "#src/config/agent-types";
+import type { SubagentTerminalReason } from "#src/lifecycle/subagent-state";
 import type { LifetimeUsage } from "#src/lifecycle/usage";
 import { getLifetimeTotal } from "#src/lifecycle/usage";
 import type { SubagentType, ThinkingLevel } from "#src/types";
@@ -29,12 +30,14 @@ export interface WidgetAgent {
 	readonly id: string;
 	readonly type: SubagentType;
 	readonly status: string;
+	readonly terminalReason?: SubagentTerminalReason;
 	readonly description: string;
 	readonly modelLabel: string;
 	readonly thinkingLevel: ThinkingLevel;
 	readonly toolUses: number;
 	readonly startedAt: number;
 	readonly completedAt?: number;
+	readonly activeRuntimeMs: number;
 	readonly error?: string;
 	readonly lifetimeUsage?: Readonly<LifetimeUsage>;
 	readonly compactionCount: number;
@@ -57,27 +60,23 @@ export function renderFinishedLine(
 ): string {
 	const name = getDisplayName(agent.type, registry);
 	const modeLabel = getPromptModeLabel(agent.type, registry);
-	const duration = formatMs((agent.completedAt ?? Date.now()) - agent.startedAt);
+	const duration = formatMs(agent.activeRuntimeMs);
 
 	let icon: string;
 	let statusText: string;
 	if (agent.status === "completed") {
 		icon = theme.fg("success", "✓");
 		statusText = "";
-	} else if (agent.status === "steered") {
-		icon = theme.fg("warning", "✓");
-		statusText = theme.fg("warning", " (turn limit)");
 	} else if (agent.status === "stopped") {
 		icon = theme.fg("dim", "■");
-		statusText = theme.fg("dim", " stopped");
+		statusText = theme.fg("dim", ` stopped${agent.terminalReason ? ` (${agent.terminalReason.replaceAll("_", " ")})` : ""}`);
 	} else if (agent.status === "error") {
 		icon = theme.fg("error", "✗");
 		const errMsg = agent.error ? `: ${agent.error.slice(0, 60)}` : "";
 		statusText = theme.fg("error", ` error${errMsg}`);
 	} else {
-		// aborted
-		icon = theme.fg("error", "✗");
-		statusText = theme.fg("warning", " aborted");
+		icon = theme.fg("dim", "•");
+		statusText = "";
 	}
 
 	const parts: string[] = [formatModelThinking(agent.modelLabel, agent.thinkingLevel)];
@@ -99,7 +98,7 @@ export function renderRunningLines(
 	const name = getDisplayName(agent.type, registry);
 	const modeLabel = getPromptModeLabel(agent.type, registry);
 	const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
-	const elapsed = formatMs(Date.now() - agent.startedAt);
+	const elapsed = formatMs(agent.activeRuntimeMs);
 
 	const tokens = getLifetimeTotal(agent.lifetimeUsage);
 	const tokenText = tokens > 0 ? formatSessionTokens(tokens, agent.contextPercent, theme, agent.compactionCount) : "";

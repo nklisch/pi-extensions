@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.0
+
+### Changed
+
+- Rebundle `@nklisch/pi-plugins` 0.8.0 and `@nklisch/pi-subagents` 18.2.0-nklisch.0 with joined/detached execution, truthful stop controls, bounded session inspection, and searchable live transcripts.
+
+### Breaking changes
+
+- Bundled subagent callers and custom-agent files must migrate `run_in_background: true` to `mode: detached` and `run_in_background: false` to `mode: joined`; indefinite result waiting is removed.
+
 ## v0.2.7
 
 ### Fixed

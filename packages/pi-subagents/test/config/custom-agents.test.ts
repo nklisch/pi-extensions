@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BUILTIN_TOOL_NAMES } from "#src/config/agent-types";
 import { loadCustomAgents } from "#src/config/custom-agents";
 
@@ -47,7 +47,7 @@ thinking: high
 max_turns: 30
 prompt_mode: replace
 inherit_context: true
-run_in_background: true
+mode: detached
 ---
 
 You are a security auditor.`);
@@ -64,7 +64,7 @@ You are a security auditor.`);
     expect(agent.maxTurns).toBe(30);
     expect(agent.promptMode).toBe("replace");
     expect(agent.inheritContext).toBe(true);
-    expect(agent.runInBackground).toBe(true);
+    expect(agent.mode).toBe("detached");
     expect(agent.systemPrompt).toBe("You are a security auditor.");
   });
 
@@ -85,7 +85,7 @@ Just a prompt.`);
     expect(agent.maxTurns).toBeUndefined();
     expect(agent.promptMode).toBe("append");
     expect(agent.inheritContext).toBeUndefined();
-    expect(agent.runInBackground).toBeUndefined();
+    expect(agent.mode).toBeUndefined();
     expect(agent.systemPrompt).toBe("Just a prompt.");
   });
 
@@ -157,6 +157,23 @@ Negative turns.`);
 
     const result = loadCustomAgents(tmpDir);
     expect(result.get("negturns")!.maxTurns).toBeUndefined();
+  });
+
+  it("disables a config that still uses removed delivery fields", () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      writeAgent("legacy", `---
+run_in_background: true
+---
+
+Legacy delivery.`);
+
+      const result = loadCustomAgents(tmpDir);
+      expect(result.get("legacy")).toMatchObject({ enabled: false, source: "project" });
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining("run_in_background"));
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it("handles prompt_mode: append", () => {

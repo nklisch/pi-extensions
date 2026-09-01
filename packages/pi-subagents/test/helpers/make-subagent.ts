@@ -1,7 +1,7 @@
 import type { CreateSubagentSessionParams } from "#src/lifecycle/create-subagent-session";
 import { Subagent, type SubagentExecution } from "#src/lifecycle/subagent";
 import type { SubagentSession } from "#src/lifecycle/subagent-session";
-import { SubagentState, type SubagentStatus } from "#src/lifecycle/subagent-state";
+import { SubagentState, type SubagentStatus, type SubagentTerminalReason } from "#src/lifecycle/subagent-state";
 import type { AgentInvocation, SubagentType } from "#src/types";
 import { createSubagentSessionStub, toSubagentSession } from "#test/helpers/mock-session";
 import { STUB_SNAPSHOT } from "#test/helpers/stub-ctx";
@@ -17,6 +17,7 @@ export function makeStubExecution(overrides: Partial<SubagentExecution> = {}): S
 		snapshot: STUB_SNAPSHOT,
 		prompt: "do something",
 		baseCwd: "",
+		mode: "detached",
 		...overrides,
 	};
 }
@@ -33,6 +34,7 @@ export interface TestSubagentOptions {
 	status?: SubagentStatus;
 	result?: string;
 	error?: string;
+	terminalReason?: SubagentTerminalReason;
 	startedAt?: number;
 	completedAt?: number;
 	/** Set toolUses via incrementToolUses(). */
@@ -52,14 +54,16 @@ export interface TestSubagentOptions {
 	responseText?: string;
 	/** Thread maxTurns into the stub execution. Ignored when `execution` is supplied. */
 	maxTurns?: number;
+	mode?: "joined" | "detached";
 }
 
 export function createTestSubagent(overrides: TestSubagentOptions = {}): Subagent {
-	const { id, type, description, invocation, execution, toolCallId, toolUses, lifetimeUsage, compactionCount, turnCount, activeTools, responseText, maxTurns, ...stateOverrides } =
+	const { id, type, description, invocation, execution, toolCallId, toolUses, lifetimeUsage, compactionCount, turnCount, activeTools, responseText, maxTurns, mode, ...stateOverrides } =
 		overrides;
 	const state = new SubagentState({
 		status: "completed",
 		result: "All done.",
+		terminalReason: "completed",
 		startedAt: 1000,
 		completedAt: 2000,
 		...stateOverrides,
@@ -70,6 +74,7 @@ export function createTestSubagent(overrides: TestSubagentOptions = {}): Subagen
 		description: description ?? "Test task",
 		invocation,
 		execution: execution ?? makeStubExecution({
+			mode: mode ?? "detached",
 			...(toolCallId ? { parentSession: { toolCallId } } : {}),
 			...(maxTurns !== undefined ? { maxTurns } : {}),
 		}),

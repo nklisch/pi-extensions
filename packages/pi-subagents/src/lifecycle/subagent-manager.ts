@@ -1,52 +1,39 @@
-/**
- * subagent-manager.ts - Tracks subagents, background execution, resume support.
- *
- * Background agents are subject to a configurable concurrency limit (default: 4).
- * Excess agents are scheduled on a ConcurrencyLimiter and auto-started as running
- * agents complete. Foreground agents bypass the limiter (they block the parent anyway).
- */
+/** Central parent-only registry for child run admission and lifecycle ownership. */
 
 import { randomUUID } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
 import { debugLog, runDetached, runSafely } from "#src/debug";
-import type { ConcurrencyLimiter } from "#src/lifecycle/concurrency-limiter";
+import type { AdmissionHandle, ConcurrencyLimiter } from "#src/lifecycle/concurrency-limiter";
 import type { CreateSubagentSessionParams } from "#src/lifecycle/create-subagent-session";
-import {
+import type {
   LifecycleInterceptorRegistry,
-  type SubagentExecutionAdmission,
-  type SubagentExecutionOrigin,
-  type SubagentLifecycleInterceptor,
-  type SubagentLifecycleRegistration,
+  SubagentExecutionAdmission,
+  SubagentExecutionOrigin,
+  SubagentLifecycleInterceptor,
+  SubagentLifecycleRegistration,
 } from "#src/lifecycle/lifecycle-interceptor";
+import { LifecycleInterceptorRegistry as InterceptorRegistry } from "#src/lifecycle/lifecycle-interceptor";
 import type { ParentSnapshot } from "#src/lifecycle/parent-snapshot";
 import { Subagent, type SubagentLifecycleObserver } from "#src/lifecycle/subagent";
 import type { SubagentSession } from "#src/lifecycle/subagent-session";
-import { SubagentState, type SubagentStatus } from "#src/lifecycle/subagent-state";
+import { SubagentState, type SubagentStatus, type SubagentStopReason } from "#src/lifecycle/subagent-state";
 import type { WorkspaceProvider } from "#src/lifecycle/workspace";
-
 import type { RunConfig } from "#src/runtime";
-import type { AgentInvocation, CompactionInfo, ParentSessionInfo, SubagentType, ThinkingLevel } from "#src/types";
+import type { AgentInvocation, CompactionInfo, ParentSessionInfo, SubagentMode, SubagentType, ThinkingLevel } from "#src/types";
 
-/** Observer interface for agent lifecycle notifications. */
 export interface SubagentManagerObserver {
   onSubagentStarted(record: Subagent): void;
   onSubagentCompleted(record: Subagent): void;
-  /** Fires when a retained session begins a resumed turn. */
   onSubagentResumedStarted?(record: Subagent): void;
   onSubagentResumed?(record: Subagent): void;
-  /** Fires when clearCompleted removes a terminal record from the parent session. */
   onSubagentCleared?(record: Subagent): void;
   onSubagentCompacted(record: Subagent, info: CompactionInfo): void;
-  /** Fires synchronously after a background agent record is created (before run). */
   onSubagentCreated(record: Subagent): void;
 }
 
 export interface SubagentManagerOptions {
-  /** Assembly factory that produces a born-complete SubagentSession per spawn. */
   createSubagentSession: (params: CreateSubagentSessionParams) => Promise<SubagentSession>;
-  /** Concurrency limiter — schedules background run thunks FIFO against the limit. */
   limiter: ConcurrencyLimiter;
-  /** Base working directory handed to a workspace provider (the parent cwd). */
   baseCwd: string;
   getRunConfig?: () => RunConfig;
   observer?: SubagentManagerObserver;
@@ -58,43 +45,46 @@ export interface AgentSpawnConfig {
   maxTurns?: number;
   inheritContext?: boolean;
   thinkingLevel?: ThinkingLevel;
-  isBackground?: boolean;
-  /**
-   * Skip the maxConcurrent queue check for this spawn - start immediately even
-   * if the configured concurrency limit would otherwise queue it. Useful for
-   * callers (e.g. cross-extension RPC) that must not be deferred by the queue.
-   */
-  bypassQueue?: boolean;
-  /** Resolved invocation snapshot captured for UI display. */
+  mode: SubagentMode;
+  timeoutSeconds?: number;
   invocation?: AgentInvocation;
-  /** Parent abort signal - when aborted, the subagent is also stopped. */
   signal?: AbortSignal;
-  /** Per-subagent lifecycle observer — replaces onSessionCreated callback. */
   observer?: SubagentLifecycleObserver;
-  /** Parent session identity - grouped fields that travel together from the tool boundary. */
   parentSession?: ParentSessionInfo;
-  /** Identity known to a service caller without changing its existing session setup. */
   lifecycleParentSession?: ParentSessionInfo;
-  /** Which supported public entry path created this execution. */
   origin?: SubagentExecutionOrigin;
+  /** Internal hook used by joined tool delivery to stream after record creation. */
+  onCreated?: (record: Subagent) => void;
 }
 
+export type DeliveryOutcome =
+  | { kind: "detached"; agentId: string; runId: number }
+  | { kind: "joined"; record: Subagent };
+
+export type ResumeOutcome = DeliveryOutcome | { kind: "not_found"; agentId: string } | { kind: "wrong_state"; agentId: string; status: SubagentStatus };
+
+export type StopOutcome =
+  | { kind: "stopped"; agentId: string; runId: number; reason: SubagentStopReason; record: Subagent }
+  | { kind: "stop_pending"; agentId: string; runId: number; reason: SubagentStopReason; record: Subagent }
+  | { kind: "already_terminal"; agentId: string; runId: number; record: Subagent }
+  | { kind: "not_found"; agentId: string };
+
+export type ManagerSteerOutcome =
+  | { kind: "not_found"; agentId: string }
+  | ({ kind: "rejected"; status: SubagentStatus; runId: number })
+  | ({ kind: "delivered" | "buffered"; runId: number });
+
 export class SubagentManager {
-  private agents = new Map<string, Subagent>();
-  private cleanupInterval: ReturnType<typeof setInterval>;
+  private readonly agents = new Map<string, Subagent>();
+  private readonly cleanupInterval: ReturnType<typeof setInterval>;
   private readonly observer?: SubagentManagerObserver;
   private readonly createSubagentSession: (params: CreateSubagentSessionParams) => Promise<SubagentSession>;
   private readonly limiter: ConcurrencyLimiter;
   private readonly baseCwd: string;
-  private getRunConfig?: () => RunConfig;
-  private _workspaceProvider?: WorkspaceProvider;
-  private readonly lifecycleInterceptors = new LifecycleInterceptorRegistry();
+  private readonly getRunConfig?: () => RunConfig;
+  private workspace?: WorkspaceProvider;
+  private readonly lifecycleInterceptors: LifecycleInterceptorRegistry = new InterceptorRegistry();
   private disposalPromise?: Promise<void>;
-
-  /** The registered workspace provider, or undefined when none is registered. */
-  get workspaceProvider(): WorkspaceProvider | undefined {
-    return this._workspaceProvider;
-  }
 
   constructor(options: SubagentManagerOptions) {
     this.createSubagentSession = options.createSubagentSession;
@@ -102,283 +92,176 @@ export class SubagentManager {
     this.baseCwd = options.baseCwd;
     this.observer = options.observer;
     this.getRunConfig = options.getRunConfig;
-    // Periodically release heavy terminal sessions according to retention policy.
-    // Timer callbacks sit outside Pi's extension runner, so a malformed setting
-    // or disposal failure must remain diagnostic rather than escape into Node.
-    this.cleanupInterval = setInterval(() => {
-      runDetached("retention cleanup", () => this.cleanup());
-    }, 60_000);
+    this.cleanupInterval = setInterval(() => runDetached("retention cleanup", () => this.cleanup()), 60_000);
     this.cleanupInterval.unref();
   }
 
-  /**
-   * Register the single workspace provider. Throws if one is already
-   * registered (chaining is out of scope — see ADR 0002). Returns a disposer
-   * that clears the slot only if this provider is still the active one.
-   */
+  get workspaceProvider(): WorkspaceProvider | undefined { return this.workspace; }
+
   registerWorkspaceProvider(provider: WorkspaceProvider): () => void {
-    if (this._workspaceProvider) {
-      throw new Error(
-        "A WorkspaceProvider is already registered; only one is supported.",
-      );
-    }
-    this._workspaceProvider = provider;
-    return () => {
-      if (this._workspaceProvider === provider) this._workspaceProvider = undefined;
-    };
+    if (this.workspace) throw new Error("A WorkspaceProvider is already registered; only one is supported.");
+    this.workspace = provider;
+    return () => { if (this.workspace === provider) this.workspace = undefined; };
   }
 
-  /** Register a generative lifecycle provider without exposing manager internals. */
-  registerLifecycleInterceptor(
-    interceptor: SubagentLifecycleInterceptor,
-  ): SubagentLifecycleRegistration {
+  registerLifecycleInterceptor(interceptor: SubagentLifecycleInterceptor): SubagentLifecycleRegistration {
     return this.lifecycleInterceptors.register(interceptor);
   }
 
-  /** Compose a per-agent lifecycle observer from manager and spawn-config concerns. */
   private buildObserver(options: AgentSpawnConfig): SubagentLifecycleObserver {
     return {
-      onStarted: (agent) => runSafely(
-        "onSubagentStarted observer",
-        () => this.observer?.onSubagentStarted(agent),
-      ),
+      onStarted: (record) => runSafely("onSubagentStarted observer", () => this.observer?.onSubagentStarted(record)),
       onSessionCreated: options.observer?.onSessionCreated
-        ? (agent) => runSafely(
-          "onSessionCreated observer",
-          () => options.observer!.onSessionCreated!(agent),
-        )
+        ? (record) => runSafely("onSessionCreated observer", () => options.observer!.onSessionCreated!(record))
         : undefined,
-      onRunFinished: (agent) => {
-        if (options.isBackground) {
-          runSafely("onSubagentCompleted observer", () => this.observer?.onSubagentCompleted(agent));
-        }
-      },
-      onResumedFinished: (agent) => runSafely(
-        "onSubagentResumed observer",
-        () => this.observer?.onSubagentResumed?.(agent),
-      ),
-      onCompacted: (agent, info) => runSafely(
-        "onSubagentCompacted observer",
-        () => this.observer?.onSubagentCompacted(agent, info),
-      ),
+      onRunFinished: (record) => runSafely("onSubagentCompleted observer", () => this.observer?.onSubagentCompleted(record)),
+      onResumedStarted: (record) => runSafely("onSubagentResumedStarted observer", () => this.observer?.onSubagentResumedStarted?.(record)),
+      onResumedFinished: (record) => runSafely("onSubagentResumed observer", () => this.observer?.onSubagentResumed?.(record)),
+      onCompacted: (record, info) => runSafely("onSubagentCompacted observer", () => this.observer?.onSubagentCompacted(record, info)),
     };
   }
 
-  /**
-   * Spawn an agent and return its ID immediately (for background use).
-   * If the concurrency limit is reached, the agent is queued.
-   */
-  spawn(
-    snapshot: ParentSnapshot,
-    type: SubagentType,
-    prompt: string,
-    options: AgentSpawnConfig,
-  ): string {
+  /** Synchronous creation plus shared FIFO admission. */
+  spawn(snapshot: ParentSnapshot, type: SubagentType, prompt: string, options: AgentSpawnConfig): Subagent {
     const id = randomUUID().slice(0, 17);
-    const admission: SubagentExecutionAdmission = options.isBackground && !options.bypassQueue && this.limiter.isSaturated()
-      ? "queued"
-      : "immediate";
+    const admission: SubagentExecutionAdmission = this.limiter.isSaturated() ? "queued" : "immediate";
     const record = new Subagent({
       id,
       type,
       description: options.description,
       invocation: options.invocation,
-      state: new SubagentState({
-        status: options.isBackground ? "queued" : "running",
-        startedAt: Date.now(),
-      }),
+      state: new SubagentState(),
       execution: {
         createSubagentSession: this.createSubagentSession,
         snapshot,
         prompt,
         baseCwd: this.baseCwd,
+        mode: options.mode,
+        timeoutSeconds: options.timeoutSeconds,
         observer: this.buildObserver(options),
         getRunConfig: this.getRunConfig,
-        getWorkspaceProvider: () => this._workspaceProvider,
+        getWorkspaceProvider: () => this.workspace,
         model: options.model,
         maxTurns: options.maxTurns,
         thinkingLevel: options.thinkingLevel,
         parentSession: options.parentSession,
         lifecycleParentSession: options.lifecycleParentSession,
-        signal: options.signal,
         lifecycleInterceptors: this.lifecycleInterceptors,
         executionPath: {
-          phase: "initial",
           origin: options.origin ?? "service",
-          mode: options.isBackground ? "background" : "foreground",
           admission,
         },
       },
     });
     this.agents.set(id, record);
+    runSafely("onSubagentCreated hook", () => options.onCreated?.(record));
+    runSafely("onSubagentCreated observer", () => this.observer?.onSubagentCreated(record));
 
-    if (options.isBackground) {
-      runSafely("onSubagentCreated observer", () => this.observer?.onSubagentCreated(record));
-    }
-
-    if (options.isBackground && !options.bypassQueue) {
-      // Schedule on the limiter — scheduleVia captures the limiter promise
-      // eagerly, so a queued agent is awaitable from spawn; guardedRun guards
-      // against abort-while-queued when the slot frees.
-      record.scheduleVia((thunk) => this.limiter.schedule(thunk));
-      return id;
-    }
-
-    record.start();
-    return id;
-  }
-
-  /**
-   * Spawn an agent and wait for completion (foreground use).
-   * Foreground agents bypass the concurrency queue.
-   */
-  async spawnAndWait(
-    snapshot: ParentSnapshot,
-    type: SubagentType,
-    prompt: string,
-    options: Omit<AgentSpawnConfig, "isBackground">,
-  ): Promise<Subagent> {
-    const id = this.spawn(snapshot, type, prompt, { ...options, isBackground: false });
-    const record = this.agents.get(id)!;
-    await record.promise;
+    // A joined caller is armed before it can enter the queue. Detached callers
+    // deliberately omit the signal so parent tool settlement cannot stop them.
+    if (options.mode === "joined") record.armParentSignal(options.signal);
+    record.scheduleVia((task) => this.limiter.schedule(task));
     return record;
   }
 
-  /**
-   * Resume an existing agent session with a new prompt.
-   * Delegates to Subagent.resume(), which owns the observer subscription lifecycle.
-   */
+  async launch(snapshot: ParentSnapshot, type: SubagentType, prompt: string, options: AgentSpawnConfig): Promise<DeliveryOutcome> {
+    // An already-cancelled detached call is rejected before creating work;
+    // once accepted, detached execution is independent of later cancellation.
+    if (options.signal?.aborted && options.mode === "detached") {
+      throw options.signal.reason instanceof Error ? options.signal.reason : new Error("Detached launch was already cancelled");
+    }
+    const record = this.spawn(snapshot, type, prompt, options);
+    if (options.mode === "detached") return { kind: "detached", agentId: record.id, runId: record.runId };
+    await record.settlement;
+    return { kind: "joined", record };
+  }
+
   async resume(
     id: string,
     prompt: string,
+    mode: SubagentMode,
+    timeoutSeconds: number | undefined,
     signal?: AbortSignal,
-  ): Promise<Subagent | undefined> {
-    const agent = this.agents.get(id);
-    if (!agent?.isSessionReady()) return undefined;
-    const resumed = agent.resume(prompt, signal);
-    try {
-      this.observer?.onSubagentResumedStarted?.(agent);
-    } catch (err) {
-      debugLog("onSubagentResumedStarted observer", err);
+    onReserved?: (record: Subagent) => void,
+  ): Promise<ResumeOutcome> {
+    const record = this.agents.get(id);
+    if (!record) return { kind: "not_found", agentId: id };
+    if (signal?.aborted && mode === "detached") {
+      throw signal.reason instanceof Error ? signal.reason : new Error("Detached resume was already cancelled");
     }
-    await resumed;
-    return agent;
+    const admission: SubagentExecutionAdmission = this.limiter.isSaturated() ? "queued" : "immediate";
+    const result = record.reserveResume(
+      prompt,
+      mode,
+      timeoutSeconds,
+      (task) => this.limiter.schedule(task),
+      mode === "joined" ? signal : undefined,
+      admission,
+    );
+    if (!result.accepted) return { kind: "wrong_state", agentId: id, status: result.status ?? record.status };
+    runSafely("onSubagentResumed reserved hook", () => onReserved?.(record));
+    if (mode === "detached") return { kind: "detached", agentId: id, runId: result.runId };
+    await record.settlement;
+    return { kind: "joined", record };
   }
 
-  getRecord(id: string): Subagent | undefined {
-    return this.agents.get(id);
+  async stop(id: string, settlementTimeoutSeconds = 5, waitSignal?: AbortSignal): Promise<StopOutcome> {
+    const record = this.agents.get(id);
+    if (!record) return { kind: "not_found", agentId: id };
+    const runId = record.runId;
+    if (!record.isActive()) return { kind: "already_terminal", agentId: id, runId, record };
+
+    // The child stop request is deliberately independent of the caller's wait:
+    // aborting the parent tool must not undo cancellation, but it may return the
+    // bounded stop report early when the child is uncooperative.
+    record.requestStop("explicit_stop");
+    const settled = await waitWithTimeout(record.settlement, settlementTimeoutSeconds * 1000, waitSignal);
+    const reason = record.stopReason ?? "explicit_stop";
+    return settled
+      ? { kind: "stopped", agentId: id, runId, reason, record }
+      : { kind: "stop_pending", agentId: id, runId, reason, record };
   }
+
+  async steer(id: string, message: string): Promise<ManagerSteerOutcome> {
+    const record = this.agents.get(id);
+    if (!record) return { kind: "not_found", agentId: id };
+    return record.steer(message);
+  }
+
+  getRecord(id: string): Subagent | undefined { return this.agents.get(id); }
 
   listAgents(): Subagent[] {
-    return [...this.agents.values()].sort(
-      (a, b) => b.startedAt - a.startedAt,
-    );
+    return [...this.agents.values()].sort((a, b) => b.startedAt - a.startedAt);
   }
 
-  abort(id: string): boolean {
-    const record = this.agents.get(id);
-    if (!record) return false;
-
-    // A queued agent has not started; terminate it through the observer funnel.
-    // Its scheduled thunk becomes a no-op when its slot eventually opens.
-    if (record.status === "queued") {
-      record.stopQueued();
-      return true;
-    }
-
-    return record.abort();
-  }
-
-  /** Dispose a record's session and remove it from the map. */
-  private async removeRecord(id: string, record: Subagent): Promise<void> {
-    // Remove first so no caller can acquire a record while its extensions are
-    // shutting down asynchronously.
-    this.agents.delete(id);
-    await record.disposeSession();
-  }
-
-  private async cleanup(): Promise<void> {
-    const now = Date.now();
-    const config = this.getRunConfig?.();
-    const consumedMinutes = config?.consumedSessionRetentionMinutes ?? 10;
-    const unconsumedMinutes = config?.unconsumedSessionRetentionMinutes ?? 720;
-
-    const releases: Promise<void>[] = [];
-    for (const record of this.agents.values()) {
-      if (record.isActive() || !record.isSessionReady()) continue;
-      const anchor = record.consumed
-        ? record.consumedAt ?? record.completedAt
-        : record.completedAt;
-      if (anchor == null) continue;
-      const retentionMinutes = record.consumed ? consumedMinutes : unconsumedMinutes;
-      if (anchor + retentionMinutes * 60_000 > now) continue;
-      // Keep the lightweight terminal record and result for the whole parent
-      // session; only release the heavy in-memory child session.
-      releases.push(record.releaseSession());
-    }
-    await Promise.all(releases);
-  }
-
-  /**
-   * Remove all completed/stopped/errored records immediately.
-   * Called on session start/switch so tasks from a prior session don't persist.
-   */
   async clearCompleted(): Promise<void> {
     const disposals: Promise<void>[] = [];
     for (const [id, record] of this.agents) {
       if (record.isActive()) continue;
-      try {
-        this.observer?.onSubagentCleared?.(record);
-      } catch (err) {
-        debugLog("onSubagentCleared observer", err);
-      }
-      disposals.push(this.removeRecord(id, record));
+      runSafely("onSubagentCleared observer", () => this.observer?.onSubagentCleared?.(record));
+      this.agents.delete(id);
+      disposals.push(record.disposeSession());
     }
     await Promise.all(disposals);
   }
 
-  /** Whether any agents are still running or queued. */
-  // fallow-ignore-next-line unused-class-member
-  hasRunning(): boolean {
-    return [...this.agents.values()].some((record) => record.isActive());
-  }
+  hasRunning(): boolean { return [...this.agents.values()].some((record) => record.isActive()); }
 
-  /** Abort all running and queued agents immediately. */
-  // fallow-ignore-next-line unused-class-member
+  /** Parent interruption is a cancellation request, not an immediate terminal transition. */
   abortAll(): number {
     let count = 0;
     for (const record of this.agents.values()) {
-      if (record.status === "queued") {
-        record.stopQueued();
-        count++;
-      } else if (record.abort()) {
-        count++;
-      }
+      if (record.requestStop("parent_cancelled")) count++;
     }
-    // Drop pending thunks (their promises resolve).
-    this.limiter.clear();
     return count;
   }
 
-  /** Wait for all running and queued agents to complete (including queued ones). */
-  // fallow-ignore-next-line unused-class-member
   async waitForAll(): Promise<void> {
-    // Every spawned agent has a settled-on-completion promise (the limiter starts
-    // queued ones as slots free), so a single allSettled covers the queued case.
-    // The loop only catches agents spawned during the wait.
-    let pending = this.pendingPromises();
-    while (pending.length > 0) {
+    for (;;) {
+      const pending = [...this.agents.values()].filter((record) => record.isActive()).map((record) => record.settlement);
+      if (pending.length === 0) return;
       await Promise.allSettled(pending);
-      pending = this.pendingPromises();
     }
-  }
-
-  /** Promises of all running/queued agents that have one. */
-  private pendingPromises(): Promise<void>[] {
-    return [...this.agents.values()]
-      .filter((record) => record.isActive())
-      .map(r => r.promise)
-      .filter((p): p is Promise<void> => p != null);
   }
 
   dispose(): Promise<void> {
@@ -388,19 +271,61 @@ export class SubagentManager {
 
   private async disposeOnce(): Promise<void> {
     clearInterval(this.cleanupInterval);
-    // Lifecycle callbacks observe the shutdown signal before their registration
-    // disposer runs. Await their finalizers before child extension teardown.
-    try {
-      await this.lifecycleInterceptors.dispose();
-    } catch (error) {
-      debugLog("lifecycle interceptor shutdown", error);
-    }
-
-    // Drop pending thunks and make every record unreachable before awaiting
-    // extension shutdown. No new resume can race teardown from this point.
-    this.limiter.clear();
+    // Abort first so in-flight lifecycle callbacks receive the same cooperative
+    // signal as provider and tool work before their registrations are retired.
+    this.abortAll();
+    const interceptorsDisposed = await waitWithTimeout(this.lifecycleInterceptors.dispose(), 5_000);
+    if (!interceptorsDisposed) debugLog("lifecycle interceptor shutdown timeout", new Error("A lifecycle interceptor did not cooperate before shutdown"));
+    const settled = await waitWithTimeout(this.waitForAll(), 5_000);
+    if (!settled) debugLog("manager shutdown settlement timeout", new Error("One or more subagents did not cooperate before shutdown"));
     const records = [...this.agents.values()];
     this.agents.clear();
     await Promise.all(records.map((record) => record.disposeSession()));
+  }
+
+  private async cleanup(): Promise<void> {
+    const now = Date.now();
+    const config = this.getRunConfig?.();
+    const consumedRetentionMinutes = config?.consumedSessionRetentionMinutes ?? 10;
+    const unconsumedRetentionMinutes = config?.unconsumedSessionRetentionMinutes ?? 720;
+    const releases: Promise<void>[] = [];
+    for (const record of this.agents.values()) {
+      if (record.isActive() || !record.isSessionReady() || record.completedAt == null) continue;
+      // Consumption changes the retention clock: once a result has actually
+      // been delivered, retain it for the shorter consumed window and anchor
+      // that window at delivery. Unconsumed sessions retain the existing
+      // longer grace period from completion so a parent can still resume them.
+      const retentionMinutes = record.consumed ? consumedRetentionMinutes : unconsumedRetentionMinutes;
+      const anchor = record.consumed ? (record.consumedAt ?? record.completedAt) : record.completedAt;
+      if (anchor + retentionMinutes * 60_000 > now) continue;
+      releases.push(record.releaseSession());
+    }
+    await Promise.all(releases);
+  }
+}
+
+async function waitWithTimeout(promise: Promise<void>, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+  if (timeoutMs <= 0 || signal?.aborted) return false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let removeAbort: (() => void) | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+  const callerAbort = signal
+    ? new Promise<false>((resolve) => {
+      const onAbort = (): void => resolve(false);
+      signal.addEventListener("abort", onAbort, { once: true });
+      removeAbort = () => signal.removeEventListener("abort", onAbort);
+    })
+    : undefined;
+  try {
+    return await Promise.race([
+      promise.then(() => true as const),
+      timeout,
+      ...(callerAbort ? [callerAbort] : []),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    removeAbort?.();
   }
 }

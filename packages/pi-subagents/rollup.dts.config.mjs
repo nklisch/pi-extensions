@@ -8,14 +8,14 @@ const external = [/^@earendil-works\//, "@sinclair/typebox"];
 const plugin = dts({ tsconfig: "./tsconfig.json" });
 
 export default [
-  // . entry: cross-extension service contract (spawn/abort/workspace seam)
+  // . entry: cross-extension service contract (launch/stop/workspace seam)
   {
     input: "src/service/service.ts",
     output: { file: "dist/public.d.ts", format: "es" },
     external,
     plugins: [plugin],
   },
-  // ./settings entry: generic layered config loader for @gotgenes/pi-* extensions
+  // ./settings entry: generic layered config loader for @nklisch/pi-* extensions
   {
     input: "src/layered-settings.ts",
     output: { file: "dist/settings.d.ts", format: "es" },

@@ -51,16 +51,14 @@ describe("createChildLifecyclePublisher", () => {
     publisher.completed({
       sessionDir: "/sessions/child-abc",
       agentName: "Explore",
-      aborted: false,
-      steered: true,
+      terminalReason: "turn_limit_graceful",
     });
 
     expect(emit).toHaveBeenCalledOnce();
     expect(emit).toHaveBeenCalledWith(SUBAGENT_CHILD_COMPLETED, {
       sessionDir: "/sessions/child-abc",
       agentName: "Explore",
-      aborted: false,
-      steered: true,
+      terminalReason: "turn_limit_graceful",
     });
   });
 

@@ -4,8 +4,12 @@
  *
  * Tools:
  *   Agent             — LLM-callable: spawn a sub-agent
- *   get_subagent_result  — LLM-callable: check background agent status/result
- *   steer_subagent       — LLM-callable: send a steering message to a running agent
+ *   get_subagent_result  — LLM-callable: inspect bounded subagent status/result
+ *   resume_subagent      — LLM-callable: resume a retained settled session
+ *   stop_subagent         — LLM-callable: request cooperative cancellation
+ *   list_subagents        — LLM-callable: inspect fleet state
+ *   steer_subagent        — LLM-callable: send a steering message to a running agent
+ *   query_subagent_session — LLM-callable: search a bounded child transcript
  *
  * Commands:
  */
@@ -41,7 +45,11 @@ import { deriveSubagentSessionDir } from "#src/session/session-dir";
 import { SettingsManager } from "#src/settings";
 import { AgentTool } from "#src/tools/agent-tool";
 import { GetResultTool } from "#src/tools/get-result-tool";
+import { ListTool } from "#src/tools/list-tool";
+import { QuerySessionTool } from "#src/tools/query-session-tool";
+import { ResumeTool } from "#src/tools/resume-tool";
 import { SteerTool } from "#src/tools/steer-tool";
+import { StopTool } from "#src/tools/stop-tool";
 import { AgentWidget } from "#src/ui/agent-widget";
 import { SessionNavigatorHandler } from "#src/ui/session-navigator";
 import { SubagentsSettingsHandler } from "#src/ui/subagents-settings";
@@ -105,7 +113,7 @@ export default function (pi: ExtensionAPI) {
     lifecycle: createChildLifecyclePublisher((channel, data) => pi.events.emit(channel, data)),
   };
 
-  // ConcurrencyLimiter: schedules background run thunks FIFO against the limit.
+  // ConcurrencyLimiter: schedules run thunks FIFO against the limit.
   // It knows nothing about agents or the manager — dependency direction is strictly manager → limiter.
   const limiter = new ConcurrencyLimiter(() => settings.maxConcurrent);
 
@@ -118,7 +126,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Typed service published via Symbol.for() for cross-extension access.
-  // Consumers: const { getSubagentsService } = await import("@gotgenes/pi-subagents");
+  // Consumers: const { getSubagentsService } = await import("@nklisch/pi-subagents");
   const service = new SubagentsServiceAdapter(manager, resolveModel, runtime, registry, settings);
   publishSubagentsService(service);
 
@@ -151,13 +159,14 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool(new AgentTool(manager, runtime, settings, registry, getAgentDir()).toToolDefinition());
 
-  // ---- get_subagent_result tool ----
+  // ---- parent-only lifecycle control tools ----
 
+  pi.registerTool(new ResumeTool(manager).toToolDefinition());
+  pi.registerTool(new StopTool(manager).toToolDefinition());
+  pi.registerTool(new ListTool(manager).toToolDefinition());
   pi.registerTool(new GetResultTool(manager, registry).toToolDefinition());
-
-  // ---- steer_subagent tool ----
-
-  pi.registerTool(new SteerTool(manager, pi.events).toToolDefinition());
+  pi.registerTool(new SteerTool({ steer: (id, message) => manager.steer(id, message) }, pi.events).toToolDefinition());
+  pi.registerTool(new QuerySessionTool(manager, (path) => readFileSync(path, "utf8")).toToolDefinition());
 
   // ---- /subagents:settings command ----
 

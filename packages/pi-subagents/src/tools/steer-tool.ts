@@ -1,117 +1,33 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { formatLifetimeTokens, textResult } from "#src/tools/helpers";
-import type { SteerOutcome, Subagent } from "#src/types";
-import { formatDuration, formatModelThinking } from "#src/ui/display";
+import type { ManagerSteerOutcome } from "#src/lifecycle/subagent-manager";
+import { textResult } from "#src/tools/helpers";
 
-// ---- Deps interfaces ----
-
-export interface SteerToolManager {
-	getRecord(id: string): Subagent | undefined;
-}
-
-export interface SteerToolEvents {
-	emit(name: string, data: unknown): void;
-}
-
-// ---- Class ----
+export interface SteerToolManager { steer(id: string, message: string): Promise<ManagerSteerOutcome>; }
+export interface SteerToolEvents { emit(name: string, data: unknown): void; }
 
 export class SteerTool {
-	constructor(
-		private readonly manager: SteerToolManager,
-		private readonly events: SteerToolEvents,
-	) {}
+  constructor(private readonly manager: SteerToolManager, private readonly events: SteerToolEvents) {}
 
-	async execute(
-		_toolCallId: string,
-		params: { agent_id: string; message: string },
-		_signal: AbortSignal,
-		_onUpdate: unknown,
-		_ctx: unknown,
-	) {
-		const record = this.manager.getRecord(params.agent_id);
-		if (!record) {
-			return textResult(
-				`Agent not found: "${params.agent_id}". It may have been cleaned up.`,
-			);
-		}
+  async execute(_toolCallId: string, params: { agent_id: string; message: string }, _signal: AbortSignal, _onUpdate: unknown, _ctx: unknown) {
+    const outcome = await this.manager.steer(params.agent_id, params.message);
+    if (outcome.kind === "not_found") return textResult(`Agent not found: "${outcome.agentId}". It may have been cleaned up.`, outcome);
+    if (outcome.kind === "rejected") return textResult(`Agent "${params.agent_id}" cannot be steered (status: ${outcome.status}).`, { ...outcome, agentId: params.agent_id });
+    this.events.emit("subagents:steered", { id: params.agent_id, runId: outcome.runId, outcome: outcome.kind, message: params.message });
+    return textResult(`Steering message ${outcome.kind} for agent ${params.agent_id}.\nRun ID: ${outcome.runId}.`, { ...outcome, agentId: params.agent_id });
+  }
 
-		let outcome: SteerOutcome;
-		try {
-			outcome = await record.steer(params.message);
-		} catch (err) {
-			return textResult(
-				`Failed to steer agent: ${err instanceof Error ? err.message : String(err)}\n`
-					+ this.renderRunIdentity(record),
-			);
-		}
-
-		switch (outcome.kind) {
-			case "rejected":
-				return textResult(
-					`Agent "${params.agent_id}" is not running (status: ${outcome.status}). Cannot steer a non-running agent.\n`
-						+ this.renderRunIdentity(record),
-				);
-			case "buffered":
-				this.events.emit("subagents:steered", { id: record.id, message: params.message });
-				return textResult(
-					`Steering message queued for agent ${record.id}. It will be delivered once the session initializes.\n`
-						+ this.renderRunIdentity(record),
-				);
-			case "delivered":
-				this.events.emit("subagents:steered", { id: record.id, message: params.message });
-				return this.renderDelivered(record);
-		}
-	}
-
-	/** Render the success message with live state for a delivered steer. */
-	private renderDelivered(record: Subagent) {
-		const tokens = formatLifetimeTokens(record);
-		const contextPercent = record.getContextPercent();
-		const stateParts: string[] = [formatModelThinking(record.modelLabel, record.effectiveThinkingLevel), formatDuration(record.startedAt, record.completedAt)];
-		if (tokens) stateParts.push(tokens);
-		stateParts.push(`${record.toolUses} tool ${record.toolUses === 1 ? "use" : "uses"}`);
-		if (contextPercent !== null)
-			stateParts.push(`context ${Math.round(contextPercent)}% full`);
-		if (record.compactionCount)
-			stateParts.push(
-				`${record.compactionCount} compaction${record.compactionCount === 1 ? "" : "s"}`,
-			);
-		return textResult(
-			`Steering message sent to agent ${record.id}. The agent will process it after its current tool execution.\n` +
-				`Current state: ${stateParts.join(" · ")}`,
-		);
-	}
-
-	private renderRunIdentity(record: Subagent): string {
-		return `Model: ${formatModelThinking(record.modelLabel, record.effectiveThinkingLevel)}\nRuntime: ${formatDuration(record.startedAt, record.completedAt)}`;
-	}
-
-	toToolDefinition() {
-		return defineTool({
-			name: "steer_subagent" as const,
-			label: "Steer Agent",
-			promptSnippet:
-				"steer_subagent: Send a mid-run message to redirect a running background agent.",
-			description:
-				"Send a steering message to a running agent. The message will interrupt the agent after its current tool execution " +
-				"and be injected into its conversation, allowing you to redirect its work mid-run. Only works on running agents.",
-			parameters: Type.Object({
-				agent_id: Type.String({
-					description: "The agent ID to steer (must be currently running).",
-				}),
-				message: Type.String({
-					description:
-						"The steering message to send. This will appear as a user message in the agent's conversation.",
-				}),
-			}),
-			execute: (
-				toolCallId: string,
-				params: { agent_id: string; message: string },
-				signal: AbortSignal,
-				onUpdate: unknown,
-				ctx: unknown,
-			) => this.execute(toolCallId, params, signal, onUpdate, ctx),
-		});
-	}
+  toToolDefinition() {
+    return defineTool({
+      name: "steer_subagent" as const,
+      label: "Steer Subagent",
+      promptSnippet: "steer_subagent: Send a message to a running subagent.",
+      description: "Send a steering message to a running subagent. The structured outcome distinguishes delivered, buffered, rejected, and not-found cases.",
+      parameters: Type.Object({
+        agent_id: Type.String({ description: "The running subagent ID." }),
+        message: Type.String({ description: "The message to add to the subagent's conversation." }),
+      }),
+      execute: (toolCallId: string, params: { agent_id: string; message: string }, signal: AbortSignal, onUpdate: unknown, ctx: unknown) => this.execute(toolCallId, params, signal, onUpdate, ctx),
+    });
+  }
 }
