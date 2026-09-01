@@ -38,3 +38,11 @@ This is an intentional clean break. Tool calls and custom-agent frontmatter must
 - Repository `npm run check` passed after synchronized versioning.
 - Fresh GLM-5.3 implementation review found no unresolved material issue after byte/line bounding and operator-navigation coverage corrections.
 - The accepted transcript-search walkthrough and captured states are retained under `.mockups/screens/feature-subagent-session-query/`.
+
+## Publication receipts
+
+Trusted-publishing workflow [run 33519539952](https://github.com/nklisch/pi-extensions/actions/runs/33519539952) succeeded from commit `678465d9717051b39b3de58a952f4d81305f7c85`.
+
+- `@nklisch/pi-subagents@18.2.0-nklisch.0` — `sha512-tvOf+YEgzNLPRhQxdG1kKz4Cl//9JNatWUeADa1sTaRt7zowz9WsztVYj7AncTdiaYIGe9TLWfuVpl8PLI4khA==`
+- `@nklisch/pi-plugins@0.8.0` — `sha512-t59oHKfWjzh9M99JQqF1pEmm0dVP1gt3sCkHtXZFgMahHQrTvCCX9ne/fEMQUeDLAT/EOAEUosRfPK+kHOqIwA==`
+- `@nklisch/pi-enhanced@0.3.0` — `sha512-PRlrgyQCJj0xOJFGNNA9+AbfCQ7K3Y53U/R9u4NolMeCbUgNNptlSPrd2iZEE8YjU4ypGonsY8yQVVAmfZYOpg==`
