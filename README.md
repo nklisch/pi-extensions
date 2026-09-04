@@ -14,6 +14,7 @@ The publishing home for Nathan Klisch's Pi extensions. Every public package in t
 | [`@nklisch/pi-subagents`](packages/pi-subagents) | Maintained pi-subagents fork with ordered lifecycle interception (bundled by pi-plugins). |
 | [`@nklisch/pi-clearance`](packages/pi-clearance) | Configurable auto-reviewer for parsed, structural command policy (tree-sitter native core). |
 | [`@nklisch/pi-conveniences`](packages/pi-conveniences) | Small drop-in quality-of-life conveniences (`/exit`, `.agents/AGENTS.md` context, context-window footer, subagent model listing). |
+| [`@nklisch/pi-astral-pocket`](packages/pi-astral-pocket) | Persistent note pocket and astra-session recall, active only for gpt-6-astra. |
 | [`@nklisch/pi-fff-compat`](packages/pi-fff-compat) | Fast FFF-backed file search through Pi-native find/grep semantics (no fuzzy fallback). |
 | [`@nklisch/pi-enhanced`](packages/pi-enhanced) | Meta package: the full harness in one install — all first-party packages plus a curated third-party set. |
 
