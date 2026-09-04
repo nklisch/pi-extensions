@@ -25,6 +25,7 @@ install commands, or versions to coordinate.
 | pi-background-tasks | Background jobs with polling, status, cancellation, and wakeups. |
 | pi-model-modes | System-prompt adaptation per model and mode. |
 | pi-conveniences | `/exit`, `.agents/AGENTS.md` context loading, context-window footer, subagent model listing. |
+| pi-astral-pocket | Persistent note pocket and past-session recall, active only for gpt-6-astra. |
 | pi-fff-compat | FFF-indexed file search through Pi-native find/grep semantics (no fuzzy fallback). |
 
 (`@nklisch/pi-zai-research` remains published separately if you prefer its

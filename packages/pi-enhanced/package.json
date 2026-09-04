@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-enhanced",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Pi, enhanced — one install for nklisch's full harness: policy-gated command review, plugin marketplace, subagents, background tasks, research tools, search, model modes, and a curated UX set.",
   "author": {
     "name": "nklisch"
@@ -29,6 +29,7 @@
   "pi": {
     "extensions": [
       "./node_modules/@nklisch/pi-conveniences/extensions",
+      "./node_modules/@nklisch/pi-astral-pocket/src/index.ts",
       "./node_modules/@nklisch/pi-fff-compat/extensions/fff-compat-search.ts",
       "./node_modules/@nklisch/pi-model-modes/extensions/index.ts",
       "./node_modules/@nklisch/pi-background-tasks/extensions/background-tasks.ts",
@@ -66,6 +67,7 @@
     "@juicesharp/rpiv-todo": "^2.1.0",
     "@mozilla/readability": "^0.6.0",
     "@narumitw/pi-usage": "^0.28.0",
+    "@nklisch/pi-astral-pocket": "^0",
     "@nklisch/pi-background-tasks": "^0",
     "@nklisch/pi-clearance": "^0",
     "@nklisch/pi-conveniences": "^0",
@@ -93,6 +95,7 @@
     "@juicesharp/rpiv-ask-user-question",
     "@juicesharp/rpiv-todo",
     "@narumitw/pi-usage",
+    "@nklisch/pi-astral-pocket",
     "@nklisch/pi-background-tasks",
     "@nklisch/pi-clearance",
     "@nklisch/pi-conveniences",
