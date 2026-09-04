@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import contextWindowFooterExtension from "./context-window-footer";
 
 function load(overrides: Record<string, unknown> = {}) {
@@ -101,6 +102,43 @@ describe("context-window footer", () => {
     } finally {
       console.error = priorConsoleError;
     }
+  });
+
+  test("renders Codex usage before context and compacts it at narrower widths", async () => {
+    let footerFactory: ((tui: unknown, theme: unknown, data: unknown) => { render(width: number): string[] }) | undefined;
+    const { handlers } = load({ getThinkingLevel: () => "high" });
+    const sessionStart = handlers.get("session_start") as (event: unknown, ctx: unknown) => Promise<void>;
+    await sessionStart({}, {
+      cwd: process.cwd(),
+      hasUI: true,
+      model: { id: "test-model", contextWindow: 1000 },
+      getContextUsage: () => ({ percent: 10, contextWindow: 1000 }),
+      ui: { setFooter: (factory: typeof footerFactory) => { if (factory) footerFactory = factory; }, notify: () => {} },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const component = footerFactory!(
+      { requestRender: () => {} },
+      { fg: (_name: string, text: string) => text },
+      {
+        onBranchChange: () => () => {},
+        getGitBranch: () => "main",
+        getExtensionStatuses: () => new Map([
+          ["mode", "mode default"],
+          ["codex-pool", "codex work · 5h 82% · 7d 64%"],
+        ]),
+      },
+    );
+    const full = component.render(220)[0];
+    expect(full.indexOf("codex work")).toBeLessThan(full.indexOf("ctx"));
+    expect(full).toContain("codex work · 5h 82% · 7d 64%");
+    const medium = component.render(150)[0];
+    expect(medium).toContain("codex work");
+    expect(medium).toContain("ctx");
+    const compact = component.render(80)[0];
+    expect(compact).toContain("codex work 82%/64%");
+    expect(compact).toContain("ctx");
+    const tooNarrow = component.render(20)[0];
+    expect(visibleWidth(tooNarrow)).toBeLessThanOrEqual(20);
   });
 
   test("contains a failure in the timer's diagnostic channel", async () => {

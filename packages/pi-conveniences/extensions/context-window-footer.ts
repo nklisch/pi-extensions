@@ -10,7 +10,7 @@ const BAR_SEGMENTS = 8;
 const FOOTER_REAPPLY_DELAYS_MS = [0, 50, 250, 1000] as const;
 const CATPPUCCIN_STATUS_ID = "catppuccin-tui";
 const MODE_STATUS_IDS = new Set(["mode", "pi-model-modes"]);
-const CODEX_STATUS_ID = "codex-usage";
+const CODEX_STATUS_ID = "codex-pool";
 const SHOULD_DISABLE_CATPPUCCIN_PACKAGE_FOOTER =
   process.env.PI_CONVENIENCES_DISABLE_CATPPUCCIN_FOOTER !== "0";
 
@@ -227,9 +227,8 @@ function formatFooterLine(width: number, left: string, right: string): string {
 }
 
 function statusPriority(key: string): number {
-  if (key === CODEX_STATUS_ID) return 0;
-  if (MODE_STATUS_IDS.has(key)) return 1;
-  return 2;
+  if (MODE_STATUS_IDS.has(key)) return 0;
+  return 1;
 }
 
 function formatStatusValue(key: string, rawValue: string): string | undefined {
@@ -244,6 +243,7 @@ function formatExtensionStatuses(
   maxItems = 2,
 ): string | undefined {
   const values = [...statuses.entries()]
+    .filter(([key]) => key !== CODEX_STATUS_ID)
     .sort(([left], [right]) => statusPriority(left) - statusPriority(right) || left.localeCompare(right))
     .map(([key, value]) => formatStatusValue(key, value))
     .filter((value): value is string => value !== undefined)
@@ -256,6 +256,12 @@ function formatExtensionStatuses(
 function formatExtensionStatusByKey(statuses: ReadonlyMap<string, string>, key: string): string | undefined {
   const value = statuses.get(key);
   return value === undefined ? undefined : formatStatusValue(key, value);
+}
+
+function formatCompactCodexStatus(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const match = /^codex (.+) · 5h (\S+) · 7d (\S+)$/.exec(value);
+  return match ? `codex ${match[1]} ${match[2]}/${match[3]}` : value;
 }
 
 function installFooter(ctx: ExtensionContext, pi: ExtensionAPI): void {
@@ -271,16 +277,17 @@ function installFooter(ctx: ExtensionContext, pi: ExtensionAPI): void {
         try {
           if (width <= 0) return [""];
 
-          const model = formatModelName(ctx.model?.id);
-        const modelLabel = formatModelLabel(theme, model, pi.getThinkingLevel());
-        const branch = footerData.getGitBranch();
-        const branchLabel = branch ? `git ${branch}` : "no git";
-        const folderLabel = formatFolderLabel(theme, ctx.cwd);
-        const snapshot = getContextSnapshot(ctx);
-        const extensionStatuses = footerData.getExtensionStatuses();
-        const statuses = formatExtensionStatuses(theme, extensionStatuses);
-        const primaryStatus = formatExtensionStatuses(theme, extensionStatuses, 1);
-        const codexStatus = formatExtensionStatusByKey(extensionStatuses, CODEX_STATUS_ID);
+        const model = formatModelName(ctx.model?.id);
+          const modelLabel = formatModelLabel(theme, model, pi.getThinkingLevel());
+          const branch = footerData.getGitBranch();
+          const branchLabel = branch ? `git ${branch}` : "no git";
+          const folderLabel = formatFolderLabel(theme, ctx.cwd);
+          const snapshot = getContextSnapshot(ctx);
+          const extensionStatuses = footerData.getExtensionStatuses();
+          const otherStatuses = formatExtensionStatuses(theme, extensionStatuses);
+          const primaryOtherStatus = formatExtensionStatuses(theme, extensionStatuses, 1);
+          const codexStatus = formatExtensionStatusByKey(extensionStatuses, CODEX_STATUS_ID);
+          const codexCompact = formatCompactCodexStatus(codexStatus);
 
         const leftFullSegments = [theme.fg("accent", "◆"), modelLabel];
         if (folderLabel) leftFullSegments.push(theme.fg("dim", "•"), folderLabel);
@@ -290,21 +297,23 @@ function installFooter(ctx: ExtensionContext, pi: ExtensionAPI): void {
         );
         const leftFull = leftFullSegments.join(" ");
 
-        const rightFull = [formatContextFull(theme, snapshot), statuses]
+        const rightFull = [otherStatuses, codexStatus, formatContextFull(theme, snapshot)]
           .filter(Boolean)
           .join(` ${theme.fg("dim", "•")} `);
         if (footerFits(width, leftFull, rightFull)) {
           return [formatFooterLine(width, leftFull, rightFull)];
         }
 
-        const rightMediumWithStatus = [formatContextMedium(theme, snapshot), statuses]
+        const rightMediumWithStatus = [otherStatuses, codexStatus, formatContextMedium(theme, snapshot)]
           .filter(Boolean)
           .join(` ${theme.fg("dim", "•")} `);
         if (footerFits(width, leftFull, rightMediumWithStatus)) {
           return [formatFooterLine(width, leftFull, rightMediumWithStatus)];
         }
 
-        const rightMedium = formatContextMedium(theme, snapshot);
+        const rightMedium = [codexStatus, formatContextMedium(theme, snapshot)]
+          .filter(Boolean)
+          .join(` ${theme.fg("dim", "•")} `);
         if (footerFits(width, leftFull, rightMedium)) {
           return [formatFooterLine(width, leftFull, rightMedium)];
         }
@@ -317,15 +326,22 @@ function installFooter(ctx: ExtensionContext, pi: ExtensionAPI): void {
         );
         const leftCompact = leftCompactSegments.join(" ");
         const rightCompact = formatContextCompact(theme, snapshot);
-        const rightCompactWithPrimaryStatus = [rightCompact, primaryStatus]
+        const rightCompactWithStatuses = [primaryOtherStatus, codexCompact, rightCompact]
           .filter(Boolean)
           .join(` ${theme.fg("dim", "•")} `);
-        if (footerFits(width, leftCompact, rightCompactWithPrimaryStatus)) {
-          return [formatFooterLine(width, leftCompact, rightCompactWithPrimaryStatus)];
+        if (footerFits(width, leftCompact, rightCompactWithStatuses)) {
+          return [formatFooterLine(width, leftCompact, rightCompactWithStatuses)];
         }
 
-        if (codexStatus && footerFits(width, leftCompact, codexStatus)) {
-          return [formatFooterLine(width, leftCompact, codexStatus)];
+        const rightCompactWithCodex = [codexCompact, rightCompact]
+          .filter(Boolean)
+          .join(` ${theme.fg("dim", "•")} `);
+        if (footerFits(width, leftCompact, rightCompactWithCodex)) {
+          return [formatFooterLine(width, leftCompact, rightCompactWithCodex)];
+        }
+
+        if (codexCompact && footerFits(width, leftCompact, codexCompact)) {
+          return [formatFooterLine(width, leftCompact, codexCompact)];
         }
 
         if (footerFits(width, leftCompact, rightCompact)) {
