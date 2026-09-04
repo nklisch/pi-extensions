@@ -486,13 +486,15 @@ describe("commands, status, and lifecycle", () => {
     const commands = new Map<string, { handler: (args: string, ctx: never) => Promise<void> }>();
     const notifications: string[] = [];
     try {
+      const events = new Map<string, (event: never, ctx: never) => Promise<void>>();
       const pi = {
         registerProvider: () => {},
         unregisterProvider: () => {},
         registerCommand: (name: string, definition: { handler: (args: string, ctx: never) => Promise<void> }) => commands.set(name, definition),
-        on: () => {},
+        on: (name: string, handler: (event: never, ctx: never) => Promise<void>) => events.set(name, handler),
       };
       await codexPool(pi as never);
+      await events.get("session_start")!({} as never, { modelRegistry: { getProvider: () => native(() => createAssistantMessageEventStream()) }, ui: { setStatus: () => {} } } as never);
       expect([...commands.keys()]).toEqual(["codex-pool"]);
       await commands.get("codex-pool")!.handler("threshold 20 30", { hasUI: true, ui: { notify: (text: string) => notifications.push(text) } } as never);
       expect(notifications).toContain("Codex thresholds set to 20% / 30%");
@@ -501,6 +503,20 @@ describe("commands, status, and lifecycle", () => {
       if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = previous;
     }
+  });
+
+  test("remains loadable when Pi has no native Codex provider", async () => {
+    const commands = new Map<string, { handler: (args: string, ctx: never) => Promise<void> }>();
+    const events = new Map<string, (event: never, ctx: never) => Promise<void>>();
+    const notifications: string[] = [];
+    await codexPool({
+      registerCommand: (name: string, definition: { handler: (args: string, ctx: never) => Promise<void> }) => commands.set(name, definition),
+      on: (name: string, handler: (event: never, ctx: never) => Promise<void>) => events.set(name, handler),
+    } as never);
+
+    await events.get("session_start")!({} as never, { modelRegistry: { getProvider: () => undefined } } as never);
+    await commands.get("codex-pool")!.handler("status", { hasUI: true, ui: { notify: (text: string) => notifications.push(text) } } as never);
+    expect(notifications).toContain("OpenAI Codex is unavailable in this Pi installation. Update Pi to a version that includes the openai-codex provider.");
   });
 
   test("publishes bounded status text with unknown windows", () => {

@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-codex-pool",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "description": "Route OpenAI Codex requests across multiple OAuth accounts by remaining quota.",
   "type": "module",

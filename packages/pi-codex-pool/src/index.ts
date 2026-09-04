@@ -1,10 +1,9 @@
 import { type AuthEvent, type AuthInteraction, type OAuthCredential } from "@earendil-works/pi-ai";
-import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
-import { getAgentDir, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { join } from "node:path";
 import { PoolStore, defaultPoolState } from "./storage.ts";
 import { POOL_SENTINEL, PoolRuntime, statusText } from "./runtime.ts";
-import { MAX_LABEL_LENGTH, type AccountRecord } from "./types.ts";
+import { MAX_LABEL_LENGTH, type AccountRecord, type NativeCodexProvider } from "./types.ts";
 
 const STATE_FILE_NAME = "codex-pool.json";
 const COMMAND = "codex-pool";
@@ -101,6 +100,10 @@ function registerProvider(pi: ExtensionAPI, runtime: PoolRuntime): void {
   if (runtime.hasAccounts()) pi.registerProvider(runtime.provider());
 }
 
+function nativeCodexProvider(ctx: ExtensionContext): NativeCodexProvider | undefined {
+  return ctx.modelRegistry.getProvider("openai-codex") as NativeCodexProvider | undefined;
+}
+
 async function handleCommand(args: string, ctx: ExtensionCommandContext, pi: ExtensionAPI, runtime: PoolRuntime): Promise<void> {
   const parts = args.trim().split(/\s+/u).filter(Boolean);
   const action = (parts.shift() ?? "status").toLowerCase();
@@ -171,24 +174,41 @@ async function handleCommand(args: string, ctx: ExtensionCommandContext, pi: Ext
 }
 
 export default async function codexPool(pi: ExtensionAPI): Promise<void> {
-  const native = openaiCodexProvider();
-  const runtime = new PoolRuntime(new PoolStore(join(getAgentDir(), STATE_FILE_NAME)), native);
-  await runtime.load();
-  registerProvider(pi, runtime);
+  let runtime: PoolRuntime | undefined;
+
+  const requireRuntime = (): PoolRuntime => {
+    if (!runtime) {
+      throw new Error("OpenAI Codex is unavailable in this Pi installation. Update Pi to a version that includes the openai-codex provider.");
+    }
+    return runtime;
+  };
 
   pi.registerCommand(COMMAND, {
     description: "Manage OpenAI Codex OAuth accounts and quota routing",
-    handler: async (args, ctx) => handleCommand(args, ctx, pi, runtime),
+    handler: async (args, ctx) => {
+      try {
+        await handleCommand(args, ctx, pi, requireRuntime());
+      } catch (error) {
+        say(ctx, message(error), "error");
+      }
+    },
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    // Resolve the built-in provider through Pi instead of importing its private
+    // module path: standalone packages cannot resolve Pi's nested dependencies.
+    const native = nativeCodexProvider(ctx);
+    if (!native) return;
+    runtime = new PoolRuntime(new PoolStore(join(getAgentDir(), STATE_FILE_NAME)), native);
+    await runtime.load();
+    registerProvider(pi, runtime);
     runtime.startSession(ctx);
   });
   pi.on("agent_settled", async (_event, ctx) => {
-    await runtime.refreshActive(ctx.signal);
+    await runtime?.refreshActive(ctx.signal);
   });
   pi.on("session_shutdown", async () => {
-    runtime.stopSession();
+    runtime?.stopSession();
   });
 }
 
