@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.21.0-nklisch.3] - Prepared
+
+### Fixed
+
+- Preserve distinct structured MCP facts alongside native content in successful and failed model-visible results.
+- Keep combined output bounded and recoverable, including adapter guidance. Comparison faults and deep JSON no longer silently suppress facts.
+- Keep canonical results local to each script call. Large line counts no longer turn successful dispatch into `call_failed`.
+
 ## [2.21.0-nklisch.2] - 2026-08-26
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-plugins",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "private": false,
   "description": "A small filesystem-first marketplace and plugin host for Pi.",
   "license": "MIT",
@@ -62,7 +62,7 @@
     "@nklisch/pi-subagents"
   ],
   "dependencies": {
-    "@nklisch/pi-mcp-adapter": "2.21.0-nklisch.2",
+    "@nklisch/pi-mcp-adapter": "2.21.0-nklisch.3",
     "@nklisch/pi-subagents": "18.2.0-nklisch.1",
     "jiti": "2.7.0"
   },

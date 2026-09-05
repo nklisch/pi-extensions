@@ -10,7 +10,7 @@ The package lives in the `nklisch/pi-extensions` monorepo under `packages/pi-mcp
 - Release commit and tag: `1dbdef96f674410ac37067de70f10a3de3d48d98` (`v2.20.1`)
 - Reviewed post-release fixes integrated through: `08fe82be1d55036d3960c4bb3fa77ed8707f2bca`
 - Common ancestry used for three-way integration: `82724dccc13a49310530898f922bafff12b7f3fe` (`v2.11.0`)
-- npm package: `@nklisch/pi-mcp-adapter`, published through `2.21.0-nklisch.1`
+- npm package: `@nklisch/pi-mcp-adapter`, published through `2.21.0-nklisch.2` (trusted workflow `33024148610`, commit `d9052df46e8aae1c2a0a842e0d61ed5ef3ddbcb3`)
 - Security reports: the private GitHub security-advisory channel for the maintained package
 - License: MIT
 
@@ -65,7 +65,7 @@ npm pack --dry-run --workspace @nklisch/pi-mcp-adapter
 npm run check
 ```
 
-The visualizer build produces ignored fixtures required by the package suite. Then install the exact local tarball into an isolated consumer and run Plugin Host's adapter-neutral MCP contract through the packed `@nklisch/pi-mcp-adapter/programmatic` export.
+The visualizer build produces ignored fixtures required by the package suite. Then qualify the exact local tarball in an isolated consumer, including the `@nklisch/pi-mcp-adapter/programmatic` export. Qualify the current Plugin Host's `configOverlay` composition and compiled entrypoints as well. The historical `test:host-conformance` script requires a removed Plugin Host contract and is not a current release gate.
 
 Required evidence includes:
 
@@ -86,14 +86,14 @@ Required evidence includes:
 - package exports that deny unsupported deep imports;
 - native dependency installation in the packed-consumer environment;
 - the MIT license and attributed vendored assets in the tarball; and
-- unchanged downstream Plugin Host ordering, isolation, and lifecycle conformance.
+- unchanged downstream Plugin Host overlay composition and bundled subagent behavior.
 
 ## Publication checklist
 
 Publication is an operator action through the monorepo's trusted-publishing workflow. Never infer publication receipts from a local build.
 
-1. Choose a final immutable version with `npm version --workspace @nklisch/pi-mcp-adapter --no-git-tag-version`.
-2. Update `pi-plugins`' exact sibling dependency, receipt, tests, and foundation version in the same delivery boundary.
+1. Check registry availability and choose a final immutable version. Update the adapter manifest and both consumers' exact adapter pins before any install. `npm version --workspace` runs an install and can otherwise select an old nested registry copy.
+2. Bump `pi-plugins` and `pi-enhanced` for the changed dependency and bundle. Refresh the lock metadata together. Keep unchanged subagent versions intact. The current Plugin Host has no runtime sibling receipt or provenance-sync test. Record publication evidence in the release summary, not a new runtime receipt.
 3. Rerun all qualification against the exact release commit.
 4. Dispatch the **Publish Pi extension** workflow for `pi-mcp-adapter`.
 5. Record together:
@@ -105,7 +105,7 @@ Publication is an operator action through the monorepo's trusted-publishing work
    - included `LICENSE` digest;
    - Node and Pi versions used for qualification; and
    - test command receipts.
-6. Reinstall the exact npm version in a fresh directory and rerun package exports plus downstream conformance against the registry bytes.
+6. Reinstall the exact npm version in a fresh directory and rerun package exports plus current downstream composition checks against the registry bytes. If npm omits `gitHead`, record its absence and verify the exact source commit through the workflow and provenance attestation. Do not invent a registry field.
 
 Only the final registry-byte qualification can unblock a production consumer. A local tarball, commit, tag, or successful dry run is not a published package.
 

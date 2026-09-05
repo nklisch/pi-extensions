@@ -1,3 +1,9 @@
+## v0.8.3 — Prepared
+
+### Fixed
+
+- Select `@nklisch/pi-mcp-adapter` 2.21.0-nklisch.3 for structured model-visible MCP results. The bundled subagents remain 18.2.0-nklisch.1.
+
 ## v0.8.2 — 2026-09-04
 
 ### Fixed

@@ -10,7 +10,7 @@ The package provides the complete MCP client layer: standard-I/O and HTTP transp
 - The `./programmatic` export provides source-qualified registration, inspection, replacement, removal, launch values, cancellation, and runtime leases.
 - Programmatic servers are identified by their exact source revision. Display names never determine process, tool, cache, status, or cleanup ownership.
 - Agent discovery stays compact. The model receives a bounded inventory of known tool names, loads exact schemas on demand, and receives schema guidance after tool validation failures.
-- `pi-plugins` is the primary programmatic consumer. It admits the exact sibling package through receipt and behavioral qualification before plugin-owned MCP sources can activate.
+- `pi-plugins` consumes the exact sibling package through the standalone factory's `configOverlay` option. Plugin declarations augment normal file discovery. Release qualification covers this composition and the separate `./programmatic` export.
 
 ## Design priorities
 

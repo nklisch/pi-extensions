@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.3 — Prepared
+
+### Fixed
+
+- Bundle `@nklisch/pi-plugins` 0.8.3 and select `@nklisch/pi-mcp-adapter` 2.21.0-nklisch.3 so installed MCP calls retain structured facts in model-visible results.
+- Keep all other bundled workspace versions unchanged from 0.4.2.
+
 ## v0.4.1 — 2026-09-04
 
 ### Added
