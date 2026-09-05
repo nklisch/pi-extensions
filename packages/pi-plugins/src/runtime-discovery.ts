@@ -11,6 +11,7 @@ import type {
   SupportedHookEvent,
 } from "./types.js";
 import { SUPPORTED_HOOK_EVENTS } from "./types.js";
+import { readPluginMetadata } from "./plugin-metadata.js";
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -161,6 +162,7 @@ async function discoverPlugin(root: string, marketplace: string, name: string, d
     data,
     enabled: !disabled,
     autoUpdate,
+    ...await readPluginMetadata(root),
     ...(receipt === undefined ? {} : { receipt }),
   });
   if (disabled) return Object.freeze({ info, skillPaths: [], skillNames: [], hooks: [], diagnostics: Object.freeze(diagnostics) });

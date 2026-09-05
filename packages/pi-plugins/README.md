@@ -15,7 +15,9 @@ Run `/plugins` with no arguments to open the keyboard-first manager. It provides
 Installed, Discover, Marketplaces, and Issues views; search and plugin details;
 and explicit multi-select batches. `Ctrl+F` focuses search, Space selects rows,
 `a` selects all filtered rows, Enter opens details, `r` checks marketplaces,
-and the footer shows the contextual action keys.
+and the footer shows the contextual action keys. A theme-native frame separates
+the manager from the transcript; Page Up/Down scrolls long views while arrow-key
+navigation keeps the selected row visible.
 
 The manager opens from local files. Marketplace checks run asynchronously with
 bounded concurrency and timeouts, remain cancellable, and never hide the
@@ -49,10 +51,13 @@ The `.auto-update` marker is both the selection and the standing authorization
 to replace that plugin's executable content.
 
 Before plugin activation, Pi refreshes each affected marketplace once with a
-bounded timeout. A marked plugin updates only when the catalog declares a
-version different from its installed receipt. Missing versions, offline
-sources, and item failures leave the installed copy unchanged and do not block
-startup.
+bounded timeout. A marked plugin updates only when the candidate bundle version
+differs from its installed version. Native manifests supply versions even when
+the marketplace omits them; catalog entries and installed receipts are fallbacks,
+not replacements for a bundle’s own version. Remote candidates are checked with
+bounded acquisition and installed from that same copy when needed. Missing
+versions, offline sources, and item failures leave the installed copy unchanged
+and do not block startup.
 
 `/plugins update-marked` is the explicit escape path. It refreshes affected
 marketplaces, force-updates every marked plugin—including unversioned entries—
@@ -74,7 +79,8 @@ The host stores no database or lifecycle ledger. Its durable layout is:
 A plugin directory is installed; `.disabled` means disabled. The receipt is
 descriptive only. `.check-on-open` stores the manager's optional refresh
 preference; cursor, selection, progress, results, and errors are never stored.
-Refresh and install/update stage a sibling directory and rename it into place.
+Refresh and install/update stage a sibling directory and rename it into place,
+restoring the prior copy if the final rename fails.
 Persistent plugin data is not replaced by an update and is retained by removal
 unless `--delete-data` is supplied.
 

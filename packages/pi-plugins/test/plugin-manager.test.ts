@@ -1,4 +1,4 @@
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
 import type { KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { PluginManager, type PluginManagerResult } from "../src/pi/plugin-manager.js";
@@ -95,7 +95,7 @@ function managerHost(infos: readonly InstalledPluginInfo[]): PluginHost {
   } as PluginHost;
 }
 
-function createManager(host: PluginHost, done = vi.fn<(result: PluginManagerResult) => void>()): PluginManager {
+function createManager(host: PluginHost, done = vi.fn<(result: PluginManagerResult) => void>(), rows = 40): PluginManager {
   const theme = {
     fg: (_color: string, text: string) => text,
     bg: (_color: string, text: string) => text,
@@ -103,7 +103,7 @@ function createManager(host: PluginHost, done = vi.fn<(result: PluginManagerResu
   } as unknown as Theme;
   const manager = new PluginManager({
     host,
-    tui: { requestRender: vi.fn() } as never,
+    tui: { requestRender: vi.fn(), terminal: { rows } } as never,
     theme,
     keybindings: { matches: () => false } as unknown as KeybindingsManager,
     done,
@@ -122,6 +122,123 @@ async function waitForText(manager: PluginManager, text: string, width = 100): P
 }
 
 describe("plugin manager component", () => {
+  it("shows the installed bundle version instead of an absent or stale receipt", async () => {
+    const info = { ...installed("alpha"), version: "2.0.0", description: "Installed bundle description" };
+    const host = managerHost([info]);
+    host.browseMarketplace = vi.fn(async () => ({ ...catalog(["alpha"]), plugins: [{ ...catalog(["alpha"]).plugins[0]!, version: "3.0.0" }] }));
+    const manager = createManager(host);
+    try {
+      const text = await waitForText(manager, "alpha · market · 2.0.0");
+      expect(text).toContain("3.0.0 available");
+      expect(text).toContain("Installed bundle description");
+      expect(text).not.toContain("version unavailable");
+      manager.handleInput("\r");
+      expect(manager.render(100).join("\n")).toContain("2.0.0 → 3.0.0");
+    } finally { manager.dispose(); }
+  });
+
+  it("frames the manager and keeps navigation visible in a short terminal", async () => {
+    const infos = Array.from({ length: 30 }, (_, i) => installed(`plugin-${i}`));
+    const manager = createManager(managerHost(infos), undefined, 18);
+    try {
+      await waitForText(manager, "plugin-0 · market");
+      for (let i = 0; i < 29; i++) manager.handleInput("\u001b[B");
+      const lines = manager.render(80);
+      expect(lines[0]).toMatch(/^╭─ Plugins /u);
+      expect(lines.at(-1)).toMatch(/^╰─+╯$/u);
+      expect(lines.every((line) => visibleWidth(line) === 80)).toBe(true);
+      expect(lines.length).toBeLessThanOrEqual(17);
+      expect(lines.join("\n")).toContain("› ○ plugin-29");
+      expect(lines.join("\n")).toContain("PgUp/PgDn");
+      manager.handleInput("\u001b[5~");
+      expect(manager.render(80).join("\n")).not.toContain("› ○ plugin-29");
+      manager.handleInput("\u001b[A");
+      expect(manager.render(80).join("\n")).toContain("› ○ plugin-28");
+    } finally { manager.dispose(); }
+  });
+
+  it("keeps the active tab named on narrow terminals and clips safely at tiny widths", async () => {
+    const manager = createManager(managerHost([]));
+    try {
+      await waitForText(manager, "Installed plugins");
+      for (let i = 0; i < 3; i++) manager.handleInput("\u001b[C");
+      expect(manager.render(28)[1]).toContain("Issues");
+      for (const width of [0, 1, 2, 3, 4, 28, 80]) {
+        expect(manager.render(width).every((line) => visibleWidth(line) <= width)).toBe(true);
+      }
+    } finally { manager.dispose(); }
+  });
+
+  it("shows an aggregated plugin diagnostic only once", async () => {
+    const info = installed("alpha");
+    const host = managerHost([info]);
+    const diagnostic = { scope: "hooks", message: "broken hook declaration" };
+    const snapshot = runtime([info]);
+    host.scanRuntime = vi.fn(async () => ({ ...snapshot, plugins: [{ ...snapshot.plugins[0]!, diagnostics: [diagnostic] }], diagnostics: [diagnostic] }));
+    const manager = createManager(host);
+    try {
+      await waitForText(manager, "alpha · market");
+      for (let i = 0; i < 3; i++) manager.handleInput("\u001b[C");
+      const text = await waitForText(manager, "broken hook declaration");
+      expect(text.match(/broken hook declaration/gu)).toHaveLength(1);
+      expect(text).toContain("Issues (1)");
+    } finally { manager.dispose(); }
+  });
+
+  it("does not claim catalog-less automatic updates require force when the bundle has a version", async () => {
+    const host = managerHost([{ ...installed("alpha"), version: "2.0.0" }]);
+    host.browseMarketplace = vi.fn(async () => ({ ...catalog(["alpha"]), plugins: [{ name: "alpha", source: { kind: "git", url: "https://example.test/alpha.git" }, raw: {} }] }));
+    const manager = createManager(host);
+    try {
+      await waitForText(manager, "alpha · market");
+      for (let i = 0; i < 3; i++) manager.handleInput("\u001b[C");
+      const text = await waitForText(manager, "No current plugin issues.");
+      expect(text).not.toContain("force update");
+    } finally { manager.dispose(); }
+  });
+
+  it("keeps confirmation effects and controls ahead of long selections", async () => {
+    const manager = createManager(managerHost(Array.from({ length: 30 }, (_, i) => installed(`plugin-${i}`))), undefined, 18);
+    try {
+      await waitForText(manager, "plugin-0 · market");
+      manager.handleInput("a");
+      manager.handleInput("u");
+      const text = manager.render(80).join("\n");
+      expect(text).toContain("Executable content");
+      expect(text).toContain("Update 30 plugins");
+      expect(text).toContain("Back to selection");
+      expect(text).toContain("PgUp/PgDn");
+    } finally { manager.dispose(); }
+  });
+
+  it("retains unexpected grouped check failures in Issues", async () => {
+    const host = managerHost([installed("alpha")]);
+    host.refreshMarketplaces = vi.fn(async () => { throw new Error("unexpected fixture failure"); });
+    const manager = createManager(host);
+    try {
+      await waitForText(manager, "alpha · market");
+      manager.handleInput("r");
+      await waitForText(manager, "1 check failed");
+      for (let i = 0; i < 3; i++) manager.handleInput("\u001b[C");
+      expect(await waitForText(manager, "Issues (1)")).toContain("unexpected fixture failure");
+    } finally { manager.dispose(); }
+  });
+
+  it("retains failed marketplace checks in Issues rather than claiming a successful check", async () => {
+    const host = managerHost([installed("alpha")]);
+    const failure = { marketplace: "market", ok: false, diagnostics: [], error: "offline fixture" } as const;
+    host.refreshMarketplaces = vi.fn(async (_names, options = {}) => { options.onResult?.(failure); return [failure]; });
+    const manager = createManager(host);
+    try {
+      await waitForText(manager, "alpha · market");
+      manager.handleInput("r");
+      await waitForText(manager, "1 check failed");
+      for (let i = 0; i < 3; i++) manager.handleInput("\u001b[C");
+      const text = await waitForText(manager, "offline fixture");
+      expect(text).not.toContain("checked this session");
+    } finally { manager.dispose(); }
+  });
+
   it("opens from local data and renders installed component details responsively", async () => {
     const info = installed("alpha");
     const host = managerHost([info]);
@@ -211,6 +328,7 @@ describe("plugin manager component", () => {
       manager.handleInput("\r");
       const dialog = await waitForText(manager, "Add marketplace");
       expect(dialog).toContain("owner/repository, Git URL, or local path");
+      expect(dialog).toContain(CURSOR_MARKER);
       expect(manager.render(100).join("\n")).toContain("enter submit · esc cancel");
 
       manager.handleInput("nklisch/jamsesh");

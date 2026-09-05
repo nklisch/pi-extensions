@@ -134,6 +134,16 @@ export function mergeMarketplaceCatalogs(documents: readonly ParsedDocumentLike[
           scope: `${document.path}:${plugin.name}`,
           message: `duplicate plugin declaration conflicts with ${first.name}; using the first declaration`,
         });
+      } else {
+        // Native catalogs often split presentation metadata. Keep precedence
+        // for declared values, but do not discard a sibling's only version.
+        const version = previous.version ?? plugin.version;
+        const description = previous.description ?? plugin.description;
+        plugins.set(plugin.name, Object.freeze({
+          ...previous,
+          ...(version === undefined ? {} : { version }),
+          ...(description === undefined ? {} : { description }),
+        }));
       }
     }
   }

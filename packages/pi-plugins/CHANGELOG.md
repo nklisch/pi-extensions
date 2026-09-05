@@ -1,3 +1,11 @@
+## Unreleased
+
+### Fixed
+
+- Read installed and local catalog versions from native manifests, recover missing/stale receipt versions without rewriting user state, and detect manifest-only marked updates (including remote sources).
+- Frame the manager with native theme colors, bound long views to terminal height, keep selection visible, and preserve failed checks and unique diagnostics in Issues.
+- Preserve the prior plugin or checkout if staged publication fails, and propagate cancellation into plugin-source acquisition.
+
 ## v0.8.1
 
 ### Fixed

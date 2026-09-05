@@ -45,6 +45,9 @@ export interface InstalledPluginInfo {
   readonly data: string;
   readonly enabled: boolean;
   readonly autoUpdate: boolean;
+  /** Metadata declared by this installed bundle; the older receipt is kept separately. */
+  readonly version?: string;
+  readonly description?: string;
   readonly receipt?: Readonly<Record<string, unknown>>;
 }
 
@@ -149,7 +152,7 @@ export interface PluginBatchResult {
 }
 
 export interface MarkedPluginUpdateOptions extends RefreshMarketplaceOptions {
-  /** The explicit command forces updates even when catalog versions are absent. */
+  /** The explicit command forces updates even when bundle and catalog versions are absent. */
   readonly force?: boolean;
   readonly onItem?: (result: MarkedPluginUpdateResult) => void;
 }

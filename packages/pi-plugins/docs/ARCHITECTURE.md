@@ -4,7 +4,8 @@ This package is a filesystem adapter with a transient manager, not a lifecycle
 database. The implementation has four boundaries:
 
 1. `src/catalog.ts` reads the supported marketplace catalogs and merges valid
-   declarations.
+   declarations. `src/plugin-metadata.ts` shares optional native manifest
+   metadata reading between catalog, installed-bundle, and runtime projections.
 2. `src/host.ts` owns the filesystem contract, bounded marketplace refresh,
    direct mutations, sequential batches, and marked updates.
 3. `src/runtime-discovery.ts`, `src/hooks.ts`, and `src/mcp.ts` turn one
@@ -39,7 +40,9 @@ authority, and the manager does not persist cursors, selections, progress,
 results, errors, or history.
 
 Updates and refreshes materialize to temporary siblings and rename only after
-copying and bundle-safety checks succeed. Installed plugin data remains outside
+copying and bundle-safety checks succeed. The previous directory is retained
+only during replacement so a failed final rename can restore it; this is not a
+persistent rollback store. Installed plugin data remains outside
 the reproducible bundle and survives update. Old lifecycle state is not
 migrated.
 
@@ -61,8 +64,10 @@ Failures remain local diagnostics rather than host-wide state.
 Before runtime discovery, the extension inspects installed `.auto-update`
 markers. If none exist, startup performs no marketplace work. Otherwise it
 refreshes each affected marketplace once with bounded network acquisition and
-updates only marked plugins whose declared catalog version differs from the
-installed receipt. Unversioned entries remain manual. A source or item failure
+updates only marked plugins whose candidate manifest version (or catalog
+fallback) differs from the installed bundle version (or receipt fallback).
+Remote candidates are acquired once per check, compared, and installed from
+that same acquisition when needed. Truly unversioned entries remain manual. A source or item failure
 preserves the installed copy and never prevents activation.
 
 The extension then scans enabled directories once and registers their runtime
@@ -77,7 +82,9 @@ success.
 files. Installed, Discover, Marketplaces, and Issues are projections over the
 host and current catalogs. An optional check-on-open preference starts a
 cancellable, bounded refresh after the first local render. Checks update the
-projection incrementally while navigation remains available.
+projection incrementally while navigation remains available. The native-themed
+frame and height-bounded body keep the manager visually separate and keyboard
+selection visible. Failed checks remain session-local Issues, not durable state.
 
 Selections use stable `plugin@marketplace` identities and exist only for that
 manager session. Confirmed batches resolve those identities against current

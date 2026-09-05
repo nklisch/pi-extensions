@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile, lstat } from "node:fs/promises";
 import { promisify } from "node:util";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { mergeMarketplaceCatalogs, readMarketplaceCatalog, type MarketplaceCatalogRead } from "./catalog.js";
 import {
   assertNoSymlinks,
@@ -13,6 +13,7 @@ import {
 } from "./paths.js";
 import { buildMcpConfig } from "./mcp.js";
 import { scanInstalledPlugins } from "./runtime-discovery.js";
+import { installedPluginVersion, readPluginMetadata } from "./plugin-metadata.js";
 import type {
   AddMarketplaceOptions,
   CatalogPlugin,
@@ -187,7 +188,18 @@ async function validateCatalogPaths(catalog: MarketplaceCatalog, checkout: strin
 async function catalogForCheckout(checkout: string): Promise<MarketplaceCatalogRead> {
   const result = await readMarketplaceCatalog(checkout);
   await validateCatalogPaths(result.catalog, checkout);
-  return result;
+  const plugins = await Promise.all(result.catalog.plugins.map(async (entry) => {
+    if (entry.source.kind !== "local") return entry;
+    try {
+      const root = await resolveContainedExistingPath(checkout, entry.source.path, `${entry.name} source`);
+      const metadata = await readPluginMetadata(root);
+      return Object.freeze({ ...entry, ...metadata, ...(entry.description === undefined ? {} : { description: entry.description }) });
+    } catch {
+      // Missing local bundles remain visible; installation reports the source error.
+      return entry;
+    }
+  }));
+  return Object.freeze({ ...result, catalog: Object.freeze({ ...result.catalog, plugins: Object.freeze(plugins) }) });
 }
 
 function marketplaceInfo(paths: PluginHostPaths, name: string, source: MarketplaceSource): MarketplaceInfo {
@@ -201,8 +213,34 @@ function marketplaceInfo(paths: PluginHostPaths, name: string, source: Marketpla
 }
 
 async function replaceDirectory(staged: string, target: string): Promise<void> {
-  await removeOwnedTree(target);
-  await rename(staged, target);
+  // Deleting the live copy before rename loses a working install if publication
+  // fails. Retain it only for this replacement, not as a persistent rollback store.
+  const holding = await mkdtemp(join(dirname(target), ".replacing-"));
+  const previous = join(holding, "previous");
+  let movedPrevious = false;
+  let retainPrevious = false;
+  try {
+    try {
+      await rename(target, previous);
+      movedPrevious = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    try {
+      await rename(staged, target);
+    } catch (error) {
+      if (movedPrevious) {
+        try { await rename(previous, target); }
+        catch (restoreError) {
+          retainPrevious = true;
+          throw new AggregateError([error, restoreError], `Replacement failed; previous copy retained at ${previous}`);
+        }
+      }
+      throw error;
+    }
+  } finally {
+    if (!retainPrevious) await removeOwnedTree(holding);
+  }
 }
 
 async function readReceipt(root: string): Promise<Readonly<Record<string, unknown>> | undefined> {
@@ -259,7 +297,8 @@ async function installedInfo(paths: PluginHostPaths, marketplace: string, plugin
   const disabled = await hasRegularMarker(root, ".disabled");
   const autoUpdate = await hasRegularMarker(root, ".auto-update");
   const receipt = await readReceipt(root);
-  return Object.freeze({ marketplace: market, name, root, data, enabled: !disabled, autoUpdate, ...(receipt === undefined ? {} : { receipt }) });
+  const metadata = await readPluginMetadata(root);
+  return Object.freeze({ marketplace: market, name, root, data, enabled: !disabled, autoUpdate, ...metadata, ...(receipt === undefined ? {} : { receipt }) });
 }
 
 function pluginPath(paths: PluginHostPaths, marketplace: string, plugin: string): string {
@@ -276,7 +315,7 @@ async function findCatalogPlugin(paths: PluginHostPaths, marketplace: string, pl
   return { info, catalog: result.catalog, entry };
 }
 
-async function resolvePluginSource(paths: PluginHostPaths, info: MarketplaceInfo, entry: CatalogPlugin): Promise<{ root: string; cleanup(): Promise<void> }> {
+async function resolvePluginSource(paths: PluginHostPaths, info: MarketplaceInfo, entry: CatalogPlugin, options: RefreshMarketplaceOptions = {}): Promise<{ root: string; cleanup(): Promise<void> }> {
   if (entry.source.kind === "local") {
     const root = await resolveContainedExistingPath(info.checkout, entry.source.path, `${entry.name} source`);
     const stat = await lstat(root);
@@ -287,7 +326,7 @@ async function resolvePluginSource(paths: PluginHostPaths, info: MarketplaceInfo
   const sourceStage = await mkdtemp(join(paths.plugins, ".plugin-source-"));
   try {
     const source: MarketplaceSource = { kind: "git", value: entry.source.url, ...(entry.source.ref === undefined ? {} : { ref: entry.source.ref }) };
-    await materializeMarketplace(source, sourceStage);
+    await materializeMarketplace(source, sourceStage, options);
     const root = entry.source.path === undefined
       ? sourceStage
       : await resolveContainedExistingPath(sourceStage, entry.source.path, `${entry.name} Git source`);
@@ -324,19 +363,19 @@ async function copyPluginBundle(
       await cp(join(source, item.name), join(stage, item.name), { recursive: true, dereference: false, force: true });
     }
     await makeOwnerWritable(stage);
+    const metadata = await readPluginMetadata(stage);
     await writeFile(join(stage, ".pi-plugin.json"), `${JSON.stringify({
       marketplace: market,
       plugin: name,
-      description: entry.description,
-      version: entry.version,
+      description: entry.description ?? metadata.description,
+      version: metadata.version ?? entry.version,
       source: entry.source,
     }, null, 2)}\n`, "utf8");
     if (preserveDisabled) await writeFile(join(stage, ".disabled"), "", "utf8");
     if (preserveAutoUpdate) await writeFile(join(stage, ".auto-update"), "", "utf8");
     await assertNoSymlinks(stage);
     const target = pluginPath(paths, market, name);
-    await removeOwnedTree(target);
-    await rename(stage, target);
+    await replaceDirectory(stage, target);
     await mkdir(join(paths.data, market, name), { recursive: true });
     return installedInfo(paths, market, name);
   } catch (error) {
@@ -400,8 +439,7 @@ export function createPluginHost(agentDir: string): PluginHost {
       const result = await catalogForCheckout(checkout);
       if (result.catalog.name !== name) throw new Error(`refreshed marketplace declares ${result.catalog.name}, expected ${name}`);
       throwIfAborted(options.signal);
-      await removeOwnedTree(join(root, "checkout"));
-      await rename(checkout, join(root, "checkout"));
+      await replaceDirectory(checkout, join(root, "checkout"));
       return marketplaceInfo(paths, name, source);
     } finally {
       await rm(stageRoot, { recursive: true, force: true });
@@ -491,8 +529,9 @@ export function createPluginHost(agentDir: string): PluginHost {
     if (update && options.refresh !== false) {
       await refreshMarketplace(marketplace, options);
     }
+    throwIfAborted(options.signal);
     const { info, entry } = await findCatalogPlugin(paths, marketplace, plugin);
-    const source = await resolvePluginSource(paths, info, entry);
+    const source = await resolvePluginSource(paths, info, entry, options);
     try {
       return await copyPluginBundle(paths, source.root, info.name, entry.name, entry, preserveDisabled, preserveAutoUpdate);
     } finally {
@@ -589,7 +628,7 @@ export function createPluginHost(agentDir: string): PluginHost {
           throw new Error(`marketplace refresh failed: ${refresh?.error ?? "unknown error"}`);
         }
         let info: InstalledPluginInfo | undefined;
-        if (action === "install") info = await mutatePlugin(marketplace, plugin, false);
+        if (action === "install") info = await mutatePlugin(marketplace, plugin, false, options);
         if (action === "update") {
           const updateOptions: PluginUpdateOptions = {
             refresh: false,
@@ -640,19 +679,26 @@ export function createPluginHost(agentDir: string): PluginHost {
         }
         const entry = refresh.catalog.plugins.find((candidate) => candidate.name === installed.name);
         if (entry === undefined) throw new Error(`plugin is not in marketplace catalog: ${installed.name}@${installed.marketplace}`);
-        const installedVersion = typeof installed.receipt?.version === "string" ? installed.receipt.version : undefined;
-        if (!force && entry.version === undefined) {
-          result = Object.freeze({ identity, ok: true, updated: false, skipped: true, reason: "catalog version is not declared" });
-        } else if (!force && installedVersion === entry.version) {
-          result = Object.freeze({ identity, ok: true, updated: false, skipped: true, reason: "already at declared catalog version" });
-        } else {
-          const updateOptions: PluginUpdateOptions = {
-            refresh: false,
-            ...(options.signal === undefined ? {} : { signal: options.signal }),
-            ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-          };
-          const info = await mutatePlugin(installed.marketplace, installed.name, true, updateOptions);
-          result = Object.freeze({ identity, ok: true, updated: true, skipped: false, info });
+        const installedVersion = installedPluginVersion(installed);
+        const marketInfo = refresh.info ?? marketplaceInfo(paths, installed.marketplace, await readSource(join(paths.marketplaces, installed.marketplace)));
+        // Remote entries may omit or lag the bundle version too. Resolve the
+        // candidate once and copy that same source only if an update is needed.
+        const source = await resolvePluginSource(paths, marketInfo, entry, options);
+        try {
+          const metadata = await readPluginMetadata(source.root);
+          const availableVersion = metadata.version ?? entry.version;
+          if (!force && availableVersion === undefined) {
+            result = Object.freeze({ identity, ok: true, updated: false, skipped: true, reason: "bundle and catalog do not declare a version" });
+          } else if (!force && installedVersion === availableVersion) {
+            result = Object.freeze({ identity, ok: true, updated: false, skipped: true, reason: "already at declared version" });
+          } else {
+            throwIfAborted(options.signal);
+            const current = await installedInfo(paths, installed.marketplace, installed.name);
+            const info = await copyPluginBundle(paths, source.root, installed.marketplace, installed.name, entry, !current.enabled, current.autoUpdate);
+            result = Object.freeze({ identity, ok: true, updated: true, skipped: false, info });
+          }
+        } finally {
+          await source.cleanup();
         }
       } catch (error) {
         result = Object.freeze({ identity, ok: false, updated: false, skipped: false, error: errorMessage(error) });

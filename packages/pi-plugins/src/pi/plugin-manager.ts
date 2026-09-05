@@ -2,6 +2,8 @@ import type { ExtensionCommandContext, KeybindingsManager, Theme } from "@earend
 import { Input, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { Component, Focusable, TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_REFRESH_TIMEOUT_MS } from "../host.js";
+import { installedPluginVersion } from "../plugin-metadata.js";
+import { framePluginManager, padManagerLine } from "./plugin-manager-layout.js";
 import type {
   CatalogPlugin,
   InstalledPluginInfo,
@@ -93,11 +95,6 @@ function catalogEntry(catalog: MarketplaceCatalog | undefined, name: string): Ca
   return catalog?.plugins.find((item) => item.name === name);
 }
 
-function receiptVersion(plugin: InstalledPluginInfo | undefined): string | undefined {
-  const value = plugin?.receipt?.version;
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
 function identityOf(plugin: InstalledPluginInfo): string {
   return pluginIdentity(plugin.name, plugin.marketplace);
 }
@@ -146,6 +143,8 @@ export class PluginManager implements Component, Focusable {
   private checking = false;
   private updatesChecked = false;
   private checkedMarketplaces = 0;
+  private checkTotal = 0;
+  private checkErrors = new Map<string, string>();
   private checkingMarketplaces = new Set<string>();
   private checkController: AbortController | undefined;
   private checkPromise: Promise<readonly MarketplaceRefreshResult[]> | undefined;
@@ -162,6 +161,10 @@ export class PluginManager implements Component, Focusable {
   private batchItemActive = false;
   private destroyed = false;
   private completed = false;
+  private bodyScroll = 0;
+  private bodyFocusLine = 0;
+  private bodyHeight = 20;
+  private followFocus = true;
 
   constructor(options: PluginManagerOptions) {
     this.host = options.host;
@@ -190,28 +193,50 @@ export class PluginManager implements Component, Focusable {
   }
 
   render(width: number): string[] {
-    const renderWidth = Math.max(1, width);
-    const lines: string[] = [];
-    lines.push(this.renderTabs(renderWidth));
-    lines.push(this.theme.fg("border", "─".repeat(renderWidth)));
+    const renderWidth = Math.max(1, width < 4 ? width : width - 4);
+    // Reserve shell, tabs, help/status and Pi's own footer. Keep the selected
+    // row reachable rather than letting long catalogs push it off screen.
+    const terminalRows = this.tui.terminal?.rows ?? 40;
+    this.bodyHeight = Math.max(1, terminalRows - 9);
+    this.bodyFocusLine = 0;
+    let body: string[];
+    if (this.dialog !== undefined) body = this.renderDialog(renderWidth);
+    else if (this.view === "detail") body = this.renderDetail(renderWidth);
+    else if (this.view === "confirm") body = this.renderConfirmation(renderWidth);
+    else if (this.view === "batch") body = this.renderBatch(renderWidth);
+    else if (this.tab === "installed") body = this.renderInstalled(renderWidth);
+    else if (this.tab === "discover") body = this.renderDiscover(renderWidth);
+    else if (this.tab === "marketplaces") body = this.renderMarketplaces(renderWidth);
+    else body = this.renderIssues(renderWidth);
 
-    if (this.dialog !== undefined) lines.push(...this.renderDialog(renderWidth));
-    else if (this.view === "detail") lines.push(...this.renderDetail(renderWidth));
-    else if (this.view === "confirm") lines.push(...this.renderConfirmation(renderWidth));
-    else if (this.view === "batch") lines.push(...this.renderBatch(renderWidth));
-    else if (this.tab === "installed") lines.push(...this.renderInstalled(renderWidth));
-    else if (this.tab === "discover") lines.push(...this.renderDiscover(renderWidth));
-    else if (this.tab === "marketplaces") lines.push(...this.renderMarketplaces(renderWidth));
-    else lines.push(...this.renderIssues(renderWidth));
-
-    lines.push("");
-    lines.push(this.renderFooter(renderWidth));
-    if (this.toast !== undefined) lines.push(this.theme.fg("accent", truncateToWidth(` ${this.toast}`, renderWidth, "")));
-    return lines.map((line) => truncateToWidth(line, renderWidth, ""));
+    if (this.searchFocused) this.bodyFocusLine = 1;
+    if (this.followFocus) {
+      if (this.bodyFocusLine < this.bodyScroll) this.bodyScroll = this.bodyFocusLine;
+      if (this.bodyFocusLine >= this.bodyScroll + this.bodyHeight) this.bodyScroll = this.bodyFocusLine - this.bodyHeight + 1;
+    }
+    this.bodyScroll = Math.max(0, Math.min(this.bodyScroll, body.length - this.bodyHeight));
+    const hiddenBelow = Math.max(0, body.length - this.bodyScroll - this.bodyHeight);
+    const scrollHint = body.length > this.bodyHeight ? `↑ ${this.bodyScroll} above · ↓ ${hiddenBelow} below · PgUp/PgDn scroll` : "";
+    const lines = [
+      this.renderTabs(renderWidth),
+      this.theme.fg("borderMuted", "─".repeat(renderWidth)),
+      ...body.slice(this.bodyScroll, this.bodyScroll + this.bodyHeight),
+      this.theme.fg("muted", scrollHint),
+      this.renderFooter(renderWidth),
+    ];
+    if (this.toast !== undefined) lines.push(this.theme.fg("accent", this.toast));
+    return framePluginManager(lines, width, this.theme);
   }
 
   handleInput(data: string): void {
     if (this.destroyed) return;
+    if (!this.searchFocused && this.dialog?.kind !== "input" && (matchesKey(data, Key.pageUp) || matchesKey(data, Key.pageDown))) {
+      this.bodyScroll += (matchesKey(data, Key.pageUp) ? -1 : 1) * this.bodyHeight;
+      this.followFocus = false;
+      this.requestRender();
+      return;
+    }
+    this.followFocus = true;
     if (this.dialog !== undefined) {
       this.handleDialogInput(data);
       return;
@@ -272,6 +297,7 @@ export class PluginManager implements Component, Focusable {
 
   invalidate(): void {
     this.searchInput.invalidate();
+    this.dialogInput.invalidate();
   }
 
   dispose(): void {
@@ -301,16 +327,18 @@ export class PluginManager implements Component, Focusable {
       return tab === this.tab ? this.theme.bg("selectedBg", this.theme.fg("text", text)) : this.theme.fg("muted", text);
     }).join(" ");
     const status = this.statusText(width);
-    if (width < 80) return truncateToWidth(rendered, width, "");
+    if (visibleWidth(rendered) > width) return this.theme.fg("accent", truncateToWidth(`‹ ${labels[this.tab]} ›  ${TAB_ORDER.indexOf(this.tab) + 1}/4`, width, "…"));
+    if (width < 80) return rendered;
     const gap = Math.max(1, width - visibleWidth(rendered) - visibleWidth(status));
     return truncateToWidth(rendered + " ".repeat(gap) + status, width, "");
   }
 
   private statusText(width: number): string {
     if (width < 80) return "";
-    if (this.checking) return this.theme.fg("accent", `◌ Checking ${this.checkedMarketplaces}/${this.checkingMarketplaces.size} marketplaces · manager remains available`);
+    if (this.checking) return this.theme.fg("accent", `◌ Checking ${this.checkedMarketplaces}/${this.checkTotal} marketplaces · manager remains available`);
     if (this.reloadNeeded) return this.theme.fg("warning", "● Reload needed");
-    if (this.updatesChecked) return this.theme.fg("muted", "Local data · updates checked just now");
+    if (this.checkErrors.size > 0) return this.theme.fg("warning", `Local data · ${this.checkErrors.size} check${this.checkErrors.size === 1 ? "" : "s"} failed`);
+    if (this.updatesChecked) return this.theme.fg("muted", "Local data · checked this session");
     return this.theme.fg("muted", "Local data · updates not checked");
   }
 
@@ -336,6 +364,7 @@ export class PluginManager implements Component, Focusable {
     const lines = [this.heading("Manage marketplaces")];
     const rows = pluginManagerMarketplaceRows(this.marketplaces, this.checkOnOpen);
     for (const [index, row] of rows.entries()) {
+      if (this.marketplaceCursor === index) this.bodyFocusLine = lines.length;
       if (row.kind === "marketplace") {
         const marketplace = row.marketplace;
         const status = this.marketplaceStatus(marketplace.name);
@@ -364,6 +393,7 @@ export class PluginManager implements Component, Focusable {
       const issue = this.issues[index]!;
       const selected = index === this.cursor;
       const color = issue.severity === "error" ? "error" : "warning";
+      if (selected) this.bodyFocusLine = lines.length;
       lines.push(this.renderCursorLine(selected, this.theme.fg(color, `${issue.severity === "error" ? "×" : "△"} ${issue.title}`)));
       lines.push(this.indent(this.theme.fg("muted", issue.message), width));
     }
@@ -382,8 +412,8 @@ export class PluginManager implements Component, Focusable {
       this.theme.fg("accent", `${this.tab === "discover" ? "Discover" : "Installed"} / Plugin details`),
       this.heading(`${row.name} @ ${row.marketplace}`),
       this.fact("Version", row.availableVersion === undefined
-        ? receiptVersion(installed) ?? row.version ?? "not declared"
-        : `${receiptVersion(installed) ?? "unversioned"} → ${row.availableVersion}`),
+        ? installedPluginVersion(installed) ?? row.version ?? "unavailable"
+        : `${installedPluginVersion(installed) ?? "version unavailable"} → ${row.availableVersion}`),
       this.fact("Status", installed === undefined ? "not installed" : this.statusLabel(installed, entry)),
       this.fact("Source", entry?.source.kind === "local"
         ? entry.source.path
@@ -408,7 +438,7 @@ export class PluginManager implements Component, Focusable {
       lines.push("");
       const marker = installed.autoUpdate ? this.theme.fg("success", "[on]") : this.theme.fg("muted", "[off]");
       lines.push(`${marker} ${this.theme.bold("Update automatically on Pi startup")}`);
-      lines.push(this.indent(this.theme.fg("muted", "Enabling grants standing authorization to replace executable plugin content when its declared catalog version changes."), width));
+      lines.push(this.indent(this.theme.fg("muted", "Enabling grants standing authorization to replace executable plugin content when its declared release version changes."), width));
       lines.push("");
     }
     lines.push(this.theme.fg("accent", "Actions"));
@@ -416,6 +446,7 @@ export class PluginManager implements Component, Focusable {
     for (let index = 0; index < actions.length; index++) {
       const action = actions[index]!;
       const text = action.label;
+      if (index === this.detailActionCursor) this.bodyFocusLine = lines.length;
       lines.push(this.renderCursorLine(index === this.detailActionCursor, action.destructive ? this.theme.fg("error", text) : index === 0 ? this.theme.fg("accent", text) : this.theme.fg("text", text)));
     }
     return lines;
@@ -428,6 +459,7 @@ export class PluginManager implements Component, Focusable {
       lines.push("");
       for (const line of wrapText(dialog.message, Math.max(8, width - 4))) lines.push(this.indent(line, width));
       lines.push("");
+      this.bodyFocusLine = lines.length + this.dialogCursor;
       lines.push(this.renderCursorLine(this.dialogCursor === 0, dialog.destructive
         ? this.theme.fg("error", dialog.actionLabel)
         : this.theme.fg("accent", dialog.actionLabel)));
@@ -435,13 +467,12 @@ export class PluginManager implements Component, Focusable {
     } else {
       lines.push("");
       this.dialogInput.focused = this._focused;
-      const text = this.dialogInput.getValue().length === 0
-        ? this.theme.fg("muted", `› ${dialog.placeholder}`)
-        : `› ${this.dialogInput.render(Math.max(1, width - 4))[0] ?? ""}`;
-      lines.push(this.indent(this.theme.fg("border", "[") + text + this.theme.fg("border", "]"), width));
+      if (this.dialogInput.getValue().length === 0) lines.push(this.indent(this.theme.fg("muted", dialog.placeholder), width));
+      this.bodyFocusLine = lines.length;
+      // Render the actual input even when empty so Pi can locate its IME cursor.
+      const input = this.dialogInput.render(Math.max(1, width - 4))[0] ?? "";
+      lines.push(this.indent(this.theme.fg("border", "[") + input + this.theme.fg("border", "]"), width));
     }
-    lines.push("");
-    lines.push(this.theme.fg("dim", dialog.kind === "input" ? "enter submit · esc cancel" : "↑↓ or y/n · enter run · esc cancel"));
     return lines.map((line) => truncateToWidth(line, width, ""));
   }
 
@@ -535,7 +566,6 @@ export class PluginManager implements Component, Focusable {
       this.heading(`${actionVerb(batch.action)} ${rows.length} plugin${rows.length === 1 ? "" : "s"}?`),
       this.theme.fg("text", `This batch affects ${rows.length} selected plugin${rows.length === 1 ? "" : "s"}.`),
     ];
-    for (const row of rows) lines.push(this.indent(`• ${row.name} @ ${row.marketplace} · ${row.version ?? "unversioned"}`, width));
     lines.push("");
     if (executable) {
       lines.push(this.theme.bg("toolPendingBg", this.theme.fg("warning", " Executable content")));
@@ -548,8 +578,12 @@ export class PluginManager implements Component, Focusable {
       lines.push(this.indent(this.theme.fg("muted", "Each item runs sequentially and Pi reloads once when the manager closes."), width));
     }
     lines.push("");
+    this.bodyFocusLine = lines.length + this.detailActionCursor;
     lines.push(this.renderCursorLine(this.detailActionCursor === 0, this.theme.fg("accent", `${actionVerb(batch.action)} ${rows.length} plugin${rows.length === 1 ? "" : "s"}`)));
     lines.push(this.renderCursorLine(this.detailActionCursor === 1, this.theme.fg("text", "Back to selection")));
+    // Keep the effect and confirmation controls ahead of potentially long lists.
+    lines.push("", this.heading("Selected plugins"));
+    for (const row of rows) lines.push(this.indent(`• ${row.name} @ ${row.marketplace} · ${row.version ?? "version unavailable"}`, width));
     return lines;
   }
 
@@ -569,6 +603,7 @@ export class PluginManager implements Component, Focusable {
       const result = this.batchResults[index];
       const prefix = result === undefined ? this.theme.fg("dim", "○") : result.ok ? this.theme.fg("success", "✓") : this.theme.fg("error", "×");
       const note = result === undefined ? (this.batchRunning && index === this.batchResults.length ? "working…" : "waiting") : result.ok ? "complete" : result.error ?? "failed";
+      if (this.batchRunning && index === this.batchResults.length) this.bodyFocusLine = lines.length;
       lines.push(this.indent(`${prefix} ${identity.plugin} @ ${identity.marketplace}  ${this.theme.fg("muted", note)}`, width));
     }
     if (!this.batchRunning) {
@@ -576,6 +611,7 @@ export class PluginManager implements Component, Focusable {
       lines.push(this.theme.bg("toolPendingBg", this.theme.fg("text", ` ${succeeded} succeeded · ${failed} failed${this.batchCancelledAfterCurrent ? " · cancelled before next item" : ""}`)));
       if (succeeded > 0) lines.push(this.theme.fg("warning", "Reload will run once when this manager closes."));
       lines.push("");
+      this.bodyFocusLine = lines.length + this.detailActionCursor;
       lines.push(this.renderCursorLine(this.detailActionCursor === 0, this.theme.fg("accent", "View installed plugins")));
       lines.push(this.renderCursorLine(this.detailActionCursor === 1, this.theme.fg("text", "Close manager")));
     } else {
@@ -590,12 +626,13 @@ export class PluginManager implements Component, Focusable {
     for (const [index, row] of rows.entries()) {
       const status = this.rowStatus(row);
       const selected = this.selected.has(row.id);
-      const main = `${selected ? "◉" : "○"} ${row.name} · ${row.marketplace} · ${row.version ?? "unversioned"}`;
+      const main = `${selected ? "◉" : "○"} ${row.name} · ${row.marketplace} · ${row.version ?? "version unavailable"}`;
       const suffix = row.installed && this.tab === "discover" ? ` · ${this.theme.fg("success", "installed")}` : status;
       const title = this.theme.fg("accent", main);
       const cursor = index === this.cursor ? this.theme.fg("accent", "›") : " ";
       const content = `${cursor} ${title}${suffix.length > 0 ? `  ${suffix}` : ""}`;
-      lines.push(this.theme.bg(index === this.cursor ? "selectedBg" : "toolPendingBg", truncateToWidth(content, width, "")));
+      if (index === this.cursor) this.bodyFocusLine = lines.length + 2;
+      lines.push(this.theme.bg(index === this.cursor ? "selectedBg" : "toolPendingBg", padManagerLine(content, width)));
       lines.push(this.indent(this.theme.fg("muted", row.description ?? "No description declared."), width));
     }
     return lines;
@@ -612,11 +649,13 @@ export class PluginManager implements Component, Focusable {
 
   private renderFooter(width: number): string {
     let footer: string;
-    if (this.view === "detail" || this.view === "confirm") footer = "↑↓ navigate · Enter run · Esc back";
+    if (this.dialog !== undefined) footer = this.dialog.kind === "input" ? "enter submit · esc cancel" : "↑↓ or y/n · enter run · esc cancel";
+    else if (this.searchFocused) footer = "Type to search · Enter or Esc return to list";
+    else if (this.view === "detail" || this.view === "confirm") footer = "↑↓ navigate · Enter run · Esc back";
     else if (this.view === "batch") footer = this.batchRunning ? "Esc stop after current · manager stays open" : "Enter view installed · Esc close";
     else if (this.checking) footer = "Esc cancel checks · navigation remains available";
     else footer = "Ctrl+←/→ tabs · Ctrl+F search · ↑↓ navigate · Space select · a all · Enter details · r check · Esc close";
-    if (width < 80) {
+    if (width < 80 && this.dialog === undefined && !this.searchFocused) {
       const compact = this.checking ? "◌ checking · Esc cancel" : this.reloadNeeded ? "● reload needed" : "";
       footer = compact.length > 0 ? compact : footer;
     }
@@ -632,7 +671,7 @@ export class PluginManager implements Component, Focusable {
   }
 
   private indent(text: string, width: number): string {
-    return truncateToWidth(`  ${text}`, width, "");
+    return truncateToWidth(`  ${text}`, width, "…");
   }
 
   private renderCursorLine(cursor: boolean, text: string): string {
@@ -825,7 +864,7 @@ export class PluginManager implements Component, Focusable {
       if (!installed.autoUpdate) {
         const approved = await this.promptConfirm(
           "Enable automatic plugin updates",
-          "This grants standing authorization to replace executable hooks and MCP servers when Pi startup sees a declared catalog version change. Enable it?",
+          "This grants standing authorization to replace executable hooks and MCP servers when Pi startup sees a declared release version change. Enable it?",
           { actionLabel: "Enable" },
         );
         if (!approved) return;
@@ -880,6 +919,8 @@ export class PluginManager implements Component, Focusable {
     }
     if (explicit === undefined) this.selected = new Set(identities.map(identityToString));
     this.batch = Object.freeze({ action, identities: Object.freeze(identities.map((identity) => Object.freeze({ ...identity }))) });
+    this.bodyScroll = 0;
+    this.followFocus = false;
     this.detailActionCursor = 0;
     this.view = "confirm";
     this.requestRender();
@@ -949,6 +990,8 @@ export class PluginManager implements Component, Focusable {
   }
 
   private openDetail(id: string): void {
+    this.bodyScroll = 0;
+    this.followFocus = false;
     this.detailId = id;
     this.detailActionCursor = 0;
     this.runtime = undefined;
@@ -964,6 +1007,7 @@ export class PluginManager implements Component, Focusable {
   }
 
   private setTab(tab: PluginManagerTab): void {
+    this.bodyScroll = 0;
     this.tab = tab;
     this.view = "list";
     this.detailId = undefined;
@@ -1069,13 +1113,13 @@ export class PluginManager implements Component, Focusable {
   private installedRows(): readonly PluginManagerRow[] {
     return this.installed.map((plugin) => {
       const entry = catalogEntry(this.catalogs.get(plugin.marketplace), plugin.name);
-      const installedVersion = receiptVersion(plugin);
+      const installedVersion = installedPluginVersion(plugin);
       const availableVersion = entry?.version !== undefined && entry.version !== installedVersion ? entry.version : undefined;
       return {
         id: identityOf(plugin),
         name: plugin.name,
         marketplace: plugin.marketplace,
-        description: typeof entry?.description === "string" ? entry.description : undefined,
+        description: plugin.description ?? (typeof plugin.receipt?.description === "string" ? plugin.receipt.description : entry?.description),
         version: installedVersion,
         availableVersion,
         installed: true,
@@ -1100,7 +1144,7 @@ export class PluginManager implements Component, Focusable {
           marketplace: marketplace.name,
           description: entry.description,
           version: entry.version,
-          availableVersion: installed !== undefined && entry.version !== receiptVersion(installed) ? entry.version : undefined,
+          availableVersion: installed !== undefined && entry.version !== installedPluginVersion(installed) ? entry.version : undefined,
           installed: installed !== undefined,
           enabled: installed?.enabled,
           autoUpdate: installed?.autoUpdate,
@@ -1125,7 +1169,7 @@ export class PluginManager implements Component, Focusable {
 
   private statusLabel(installed: InstalledPluginInfo, entry: CatalogPlugin | undefined): string {
     if (!installed.enabled) return "disabled";
-    if (entry?.version !== undefined && entry.version !== receiptVersion(installed)) return "update available";
+    if (entry?.version !== undefined && entry.version !== installedPluginVersion(installed)) return "update available";
     return "enabled";
   }
 
@@ -1143,6 +1187,7 @@ export class PluginManager implements Component, Focusable {
 
   private marketplaceStatus(name: string): string {
     if (this.checkingMarketplaces.has(name)) return this.theme.fg("accent", "checking…");
+    if (this.checkErrors.has(name)) return this.theme.fg("warning", "check failed · cached catalog");
     const catalog = this.catalogs.get(name);
     return catalog === undefined ? this.theme.fg("warning", "catalog unavailable") : this.theme.fg("muted", "local checkout ready");
   }
@@ -1185,12 +1230,17 @@ export class PluginManager implements Component, Focusable {
     this.checkController = controller;
     this.checking = true;
     this.checkedMarketplaces = 0;
+    this.checkTotal = new Set(names).size;
+    this.updatesChecked = false;
     this.checkingMarketplaces = new Set(names);
     this.localEpoch++;
     this.requestRender();
     const onResult = (result: MarketplaceRefreshResult): void => {
       if (this.destroyed || run !== this.checkRun) return;
       this.checkedMarketplaces++;
+      this.checkingMarketplaces.delete(result.marketplace);
+      if (result.ok) this.checkErrors.delete(result.marketplace);
+      else this.checkErrors.set(result.marketplace, result.error ?? "marketplace check failed");
       if (result.ok && result.catalog !== undefined) {
         const cursorId = this.currentCursorId();
         this.catalogs.set(result.marketplace, result.catalog);
@@ -1212,7 +1262,10 @@ export class PluginManager implements Component, Focusable {
         if (failures.length > 0) this.showToast(`${failures.length} marketplace check${failures.length === 1 ? "" : "s"} failed`, "warning");
         return results;
       } catch (error) {
-        if (!this.destroyed && run === this.checkRun) this.showToast(`Marketplace check failed: ${errorMessage(error)}`, "warning");
+        if (!this.destroyed && run === this.checkRun) {
+          for (const name of this.checkingMarketplaces) this.checkErrors.set(name, errorMessage(error));
+          this.showToast(`Marketplace check failed: ${errorMessage(error)}`, "warning");
+        }
         return [];
       } finally {
         if (this.destroyed || run !== this.checkRun) return [];
@@ -1251,6 +1304,9 @@ export class PluginManager implements Component, Focusable {
     const marketplaceNames = new Set(marketplaces.map((marketplace) => marketplace.name));
     for (const name of this.catalogs.keys()) {
       if (!marketplaceNames.has(name)) this.catalogs.delete(name);
+    }
+    for (const name of this.checkErrors.keys()) {
+      if (!marketplaceNames.has(name)) this.checkErrors.delete(name);
     }
     this.restoreCursor(cursorId);
     this.requestRender();
@@ -1309,16 +1365,23 @@ export class PluginManager implements Component, Focusable {
         });
       }
     }
+    // Runtime diagnostics also aggregate each plugin's diagnostics. Display
+    // each once with its plugin identity, rather than duplicating the warning.
+    const pluginDiagnostics = new Set(runtime.plugins.flatMap((plugin) => plugin.diagnostics));
     for (const diagnostic of runtime.diagnostics) {
+      if (pluginDiagnostics.has(diagnostic)) continue;
       issues.push({ id: `runtime:${diagnostic.scope}`, title: diagnostic.scope, message: diagnostic.message, severity: "error" });
     }
     for (const plugin of this.installed) {
       const entry = catalogEntry(this.catalogs.get(plugin.marketplace), plugin.name);
       if (entry === undefined && this.catalogs.has(plugin.marketplace)) {
         issues.push({ id: `${identityOf(plugin)}:catalog`, title: identityOf(plugin), message: "Installed bundle is not declared in the current marketplace catalog; the installed copy remains available.", severity: "error", pluginId: identityOf(plugin) });
-      } else if (plugin.autoUpdate && entry?.version === undefined) {
-        issues.push({ id: `${identityOf(plugin)}:version`, title: identityOf(plugin), message: "Automatic updates are marked, but this catalog does not declare a version. Use /plugins update-marked for an explicit force update.", severity: "warning", pluginId: identityOf(plugin) });
+      } else if (plugin.autoUpdate && entry !== undefined && entry.version === undefined && installedPluginVersion(plugin) === undefined) {
+        issues.push({ id: `${identityOf(plugin)}:version`, title: identityOf(plugin), message: "No release version is available locally. Marked checks also inspect source manifests; /plugins update-marked forces replacement when no version is declared.", severity: "warning", pluginId: identityOf(plugin) });
       }
+    }
+    for (const [marketplace, message] of this.checkErrors) {
+      issues.push({ id: `${marketplace}:check`, title: marketplace, message, severity: "warning" });
     }
     for (const [marketplace, catalog] of this.catalogs) {
       for (const diagnostic of catalog.diagnostics ?? []) issues.push({ id: `${marketplace}:${diagnostic.scope}`, title: marketplace, message: diagnostic.message, severity: "warning" });

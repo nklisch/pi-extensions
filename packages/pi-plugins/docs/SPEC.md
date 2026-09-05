@@ -57,20 +57,39 @@ Git-subdirectory declarations.
 Relative catalog paths cannot be absolute, contain traversal, or cross the
 checkout through a symlink. Plugin installation resolves the selected entry and
 copies the complete bundle to a temporary sibling before renaming it into
-`<marketplace>/<plugin>`. Any symlink in the source bundle rejects the
+`<marketplace>/<plugin>`. A failed final rename restores the prior copy; if
+restoration itself fails, the error names the retained copy for recovery. Any symlink in the source bundle rejects the
 operation because it could expose arbitrary host files.
 
 Grouped refresh deduplicates marketplace names, uses bounded concurrency and a
 per-source timeout, accepts cancellation, and reports each marketplace
 independently. Failure does not remove the prior checkout.
 
+## Release metadata
+
+Versions are read from `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`,
+then `plugin.json`, using the first nonempty version. Installed bundles fall
+back to their descriptive receipt when no manifest declares one; reading an
+older receipt does not rewrite it or substitute a newer catalog version.
+Malformed or missing optional release metadata does not hide a plugin.
+
+Local catalog entries inherit bundle metadata, with bundle versions taking
+precedence over stale catalog versions. Explicit catalog descriptions remain
+preferred for discovery. Equivalent entries across native catalogs retain the
+first declared value and fill missing metadata from siblings. Browsing uses
+local files only: remote source versions remain limited to advertised catalog
+metadata until the source is acquired for installation or a marked update check.
+
 ## Runtime
 
 Before activation, the extension checks installed `.auto-update` markers. With
 no marked plugins, it performs no marketplace refresh. With marked plugins, it
 refreshes each affected marketplace once and replaces an installed bundle only
-when the catalog declares a different version. An unversioned entry is skipped.
-Refresh and item failures preserve installed copies and do not block discovery.
+when the candidate bundle declares a different version, falling back to its
+catalog version. Remote candidates are acquired with bounded timeout and
+cancellation; the inspected candidate is the copy installed. A candidate with
+no declared version is skipped unless the update was explicitly forced. Refresh
+and item failures preserve installed copies and do not block discovery.
 
 After that pass, enabled plugin directories are scanned directly. Skills are
 discovered from directories beneath `skills/` containing `SKILL.md`, plus a
@@ -109,12 +128,17 @@ duplicate plugin server name is qualified with a provider-safe
 `/plugins` with no arguments requires Pi terminal UI mode and opens Installed,
 Discover, Marketplaces, and Issues tabs. The first render depends only on local
 files. Search, cursor, detail, selection, progress, mixed results, diagnostics,
-and the pending-reload flag live only in the component.
+and the pending-reload flag live only in the component. A theme-native frame
+separates it from the surrounding transcript. The body is height-bounded,
+selection follows keyboard navigation, and Page Up/Down scrolls long views.
+Narrow tab bars keep the active tab named.
 
 Marketplace checks run asynchronously, use the grouped bounded refresh seam,
 and can be cancelled without closing the manager. The optional check-on-open
 setting defaults off and persists as `.check-on-open`. Narrow layouts keep
-checking and reload status visible in the footer.
+checking and reload status visible in the footer. Failed checks remain visible
+in Issues for the manager session and are not presented as successful refreshes.
+Aggregated runtime diagnostics appear once, with their plugin identity.
 
 `Ctrl+F` focuses search. Space selects stable `plugin@marketplace` identities.
 `a` selects all filtered rows. Contextual keys start install, update, enable,

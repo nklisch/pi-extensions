@@ -1,4 +1,5 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -53,6 +54,112 @@ afterEach(async () => {
 });
 
 describe("filesystem-first plugin core", () => {
+  it.each([".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "plugin.json"])("reads installed and available versions from %s without catalog duplication", async (manifestPath) => {
+    const agentDir = await tempDir();
+    const repository = await tempDir();
+    await multiPluginRepository(repository, { demo: undefined });
+    const manifest = join(repository, "plugins/demo", manifestPath);
+    await mkdir(join(manifest, ".."), { recursive: true });
+    await writeFile(manifest, JSON.stringify({ name: "demo", version: "1.2.3" }));
+    const host = createPluginHost(agentDir);
+    await host.addMarketplace(repository);
+    expect((await host.browseMarketplace("fixture-marketplace")).plugins[0]?.version).toBe("1.2.3");
+    const installed = await host.installPlugin("fixture-marketplace", "demo");
+    expect(installed.version).toBe("1.2.3");
+    expect(installed.receipt?.version).toBe("1.2.3");
+
+    // An existing install may have a missing or stale receipt. Reading the
+    // bundle recovers its version without rewriting user files or borrowing latest.
+    await writeFile(join(installed.root, ".pi-plugin.json"), "{}");
+    expect((await host.listInstalled())[0]?.version).toBe("1.2.3");
+    expect(await readFile(join(installed.root, ".pi-plugin.json"), "utf8")).toBe("{}");
+    await writeFile(join(installed.root, ".pi-plugin.json"), JSON.stringify({ version: "0.1.0" }));
+    await writeFile(manifest, JSON.stringify({ name: "demo", version: "2.0.0" }));
+    await host.refreshMarketplace("fixture-marketplace");
+    expect((await host.listInstalled())[0]?.version).toBe("1.2.3");
+    expect((await host.scanRuntime()).plugins[0]?.info.version).toBe("1.2.3");
+    expect((await host.browseMarketplace("fixture-marketplace")).plugins[0]?.version).toBe("2.0.0");
+    await host.setAutoUpdate("fixture-marketplace", "demo", true);
+    expect((await host.updateMarkedPlugins()).results[0]?.updated).toBe(true);
+    expect((await host.listInstalled())[0]?.version).toBe("2.0.0");
+    expect((await host.updateMarkedPlugins()).results[0]?.skipped).toBe(true);
+  });
+
+  it("checks manifest-only remote plugin releases and installs the inspected candidate", async () => {
+    const agentDir = await tempDir();
+    const marketplace = await tempDir();
+    const remote = await tempDir();
+    await pluginRepository(remote, { "plugin.json": JSON.stringify({ version: "1.0.0" }) });
+    const git = (...args: string[]): void => { execFileSync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", ...args], { cwd: remote, stdio: "pipe" }); };
+    git("init"); git("add", "."); git("commit", "--no-gpg-sign", "-m", "Initial fixture");
+    await mkdir(join(marketplace, ".agents/plugins"), { recursive: true });
+    await writeFile(join(marketplace, ".agents/plugins/marketplace.json"), JSON.stringify({ name: "fixture-marketplace", plugins: [{ name: "demo", source: { source: "git-subdir", url: remote, path: "plugins/demo" } }] }));
+    const host = createPluginHost(agentDir);
+    await host.addMarketplace(marketplace);
+    expect((await host.browseMarketplace("fixture-marketplace")).plugins[0]?.version).toBeUndefined();
+    expect((await host.installPlugin("fixture-marketplace", "demo")).version).toBe("1.0.0");
+    await host.setAutoUpdate("fixture-marketplace", "demo", true);
+    await writeFile(join(remote, "plugins/demo/plugin.json"), JSON.stringify({ version: "2.0.0" }));
+    git("add", "."); git("commit", "--no-gpg-sign", "-m", "Second fixture release");
+    expect((await host.updateMarkedPlugins()).results[0]?.updated).toBe(true);
+    expect((await host.listInstalled())[0]?.version).toBe("2.0.0");
+    expect((await host.updateMarkedPlugins()).results[0]?.skipped).toBe(true);
+  });
+
+  it("does not mutate an installed bundle when an update is already cancelled", async () => {
+    const agentDir = await tempDir();
+    const repository = await tempDir();
+    await pluginRepository(repository, { "payload.txt": "original" });
+    const host = createPluginHost(agentDir);
+    await host.addMarketplace(repository);
+    const installed = await host.installPlugin("fixture-marketplace", "demo");
+    await writeFile(join(repository, "plugins/demo/payload.txt"), "replacement");
+    await host.refreshMarketplace("fixture-marketplace");
+    const controller = new AbortController();
+    controller.abort("cancel fixture");
+    await expect(host.updatePlugin("fixture-marketplace", "demo", { refresh: false, signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(await readFile(join(installed.root, "payload.txt"), "utf8")).toBe("original");
+  });
+
+  it("uses bundle versions over stale catalog versions without repeatedly updating", async () => {
+    const agentDir = await tempDir();
+    const repository = await tempDir();
+    await pluginRepository(repository, { "plugin.json": JSON.stringify({ version: "0.5.2" }) });
+    const host = createPluginHost(agentDir);
+    await host.addMarketplace(repository);
+    expect((await host.browseMarketplace("fixture-marketplace")).plugins[0]?.version).toBe("0.5.2");
+    await host.installPlugin("fixture-marketplace", "demo");
+    await host.setAutoUpdate("fixture-marketplace", "demo", true);
+    expect((await host.updateMarkedPlugins()).results[0]?.skipped).toBe(true);
+  });
+
+  it("ignores malformed optional metadata and uses the next native manifest", async () => {
+    const agentDir = await tempDir();
+    const repository = await tempDir();
+    await pluginRepository(repository, {
+      ".claude-plugin/plugin.json": "not JSON",
+      ".codex-plugin/plugin.json": JSON.stringify({ version: " 2.0.0 ", description: "Bundle description" }),
+      "plugin.json": JSON.stringify({ version: "3.0.0" }),
+    });
+    const host = createPluginHost(agentDir);
+    await host.addMarketplace(repository);
+    expect((await host.browseMarketplace("fixture-marketplace")).plugins[0]).toMatchObject({ version: "2.0.0", description: "Demo" });
+    await host.installPlugin("fixture-marketplace", "demo");
+    expect((await host.listInstalled())[0]).toMatchObject({ version: "2.0.0", description: "Bundle description" });
+  });
+
+  it("does not follow escaping manifest links for browse metadata", async () => {
+    const agentDir = await tempDir();
+    const repository = await tempDir();
+    const outside = await tempDir();
+    await multiPluginRepository(repository, { demo: undefined });
+    await writeFile(join(outside, "manifest.json"), JSON.stringify({ version: "secret-outside-value" }));
+    await symlink(join(outside, "manifest.json"), join(repository, "plugins/demo/plugin.json"));
+    const host = createPluginHost(agentDir);
+    await host.addMarketplace(repository);
+    expect((await host.browseMarketplace("fixture-marketplace")).plugins[0]?.version).toBeUndefined();
+  });
+
   it("rejects traversal and preserves real containment boundaries", () => {
     expect(assertSafeRelativePath("./plugins/demo/")).toBe("plugins/demo");
     expect(() => assertSafeRelativePath("../outside")).toThrow();
@@ -60,6 +167,15 @@ describe("filesystem-first plugin core", () => {
     expect(isPathContained("/tmp/checkout", "/tmp/checkout/plugins/demo")).toBe(true);
     expect(isPathContained("/tmp/checkout", "/tmp/checkout-escape")).toBe(false);
     expect(resolveContainedPath("/tmp/checkout", "./plugins/demo")).toBe("/tmp/checkout/plugins/demo");
+  });
+
+  it("keeps missing metadata from an equivalent native catalog declaration", () => {
+    const source = { kind: "git" as const, url: "https://example.test/plugin.git" };
+    const merged = mergeMarketplaceCatalogs([
+      { name: "market", path: "codex", plugins: [{ name: "demo", source, raw: {} }] },
+      { name: "market", path: "claude", plugins: [{ name: "demo", source, version: "2.0.0", description: "Demo", raw: {} }] },
+    ]);
+    expect(merged.catalog.plugins[0]).toMatchObject({ version: "2.0.0", description: "Demo" });
   });
 
   it("merges permissive local and string catalog entries", () => {
