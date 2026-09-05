@@ -1,21 +1,28 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+
+export const DEFAULT_DISTILLER_MODEL = "openai-codex/gpt-6-astra";
+export const DEFAULT_DISTILLER_REASONING: ModelThinkingLevel = "minimal";
+export const REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
 export interface DistillerConfig {
-  /** Master switch for the startup-pass distiller. */
+  /** Master switch for activation-time and explicit distillation. */
   enabled: boolean;
-  /** "provider/modelId" override; null walks the cheap-model preference list. */
-  model: string | null;
+  /** Exact provider/modelId selection. No provider fallback is performed. */
+  model: string;
+  /** Requested Pi reasoning level; the model may map it to another effective effort. */
+  reasoning: ModelThinkingLevel;
   /** Sessions younger than this are still in progress; leave them alone. */
   minIdleHours: number;
-  /** Bound on LLM extraction calls per activation pass (Codex parity: 16). */
+  /** Bound on extraction calls per pass. */
   maxSessionsPerPass: number;
-  /** Sessions older than this are not worth distilling (Codex parity: 30). */
+  /** Sessions older than this are not automatically distilled. */
   maxSessionAgeDays: number;
 }
 
 export interface PocketConfig {
-  /** Master switch for the whole pocket, toggled by /pocket on|off. */
   enabled: boolean;
   distiller: DistillerConfig;
 }
@@ -24,21 +31,13 @@ export const DEFAULT_CONFIG: PocketConfig = {
   enabled: true,
   distiller: {
     enabled: true,
-    model: null,
+    model: DEFAULT_DISTILLER_MODEL,
+    reasoning: DEFAULT_DISTILLER_REASONING,
     minIdleHours: 6,
     maxSessionsPerPass: 16,
     maxSessionAgeDays: 30,
   },
 };
-
-/** Cheap-model preference order when config.distiller.model is null. The first
- * entry resolvable in the user's model registry wins; if none resolve, the
- * distiller degrades to "mechanical floor only" rather than failing. */
-export const DISTILLER_MODEL_PREFERENCE: readonly string[] = [
-  "zai/glm-5.3-flash",
-  "openrouter/deepseek-v4-flash-latest",
-  "ollama-cloud/glm-5.3-flash",
-];
 
 export function configPath(root: string): string {
   return join(root, "config.json");
@@ -49,9 +48,17 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
   return Math.min(max, Math.max(min, n));
 }
 
-/** Load config, tolerating a missing or corrupt file by falling back to
- * defaults. The pocket is a convenience feature: a broken config must never
- * block extension load, so every read failure degrades to defaults. */
+export function isReasoningLevel(value: unknown): value is ModelThinkingLevel {
+  return typeof value === "string" && (REASONING_LEVELS as readonly string[]).includes(value);
+}
+
+export function isModelSpec(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const slash = value.indexOf("/");
+  return slash > 0 && slash < value.length - 1;
+}
+
+/** A malformed configuration degrades to defaults so note access remains usable. */
 export function loadConfig(root: string): PocketConfig {
   let raw: Record<string, unknown> = {};
   try {
@@ -59,12 +66,16 @@ export function loadConfig(root: string): PocketConfig {
   } catch {
     return structuredClone(DEFAULT_CONFIG);
   }
-  const d = (raw.distiller ?? {}) as Record<string, unknown>;
+  const d = typeof raw.distiller === "object" && raw.distiller !== null
+    ? raw.distiller as Record<string, unknown>
+    : {};
   return {
     enabled: typeof raw.enabled === "boolean" ? raw.enabled : DEFAULT_CONFIG.enabled,
     distiller: {
       enabled: typeof d.enabled === "boolean" ? d.enabled : DEFAULT_CONFIG.distiller.enabled,
-      model: typeof d.model === "string" && d.model.includes("/") ? d.model : null,
+      // Legacy null meant "choose a cheap fallback". It now resets to the explicit Astra default.
+      model: isModelSpec(d.model) ? d.model : DEFAULT_DISTILLER_MODEL,
+      reasoning: isReasoningLevel(d.reasoning) ? d.reasoning : DEFAULT_DISTILLER_REASONING,
       minIdleHours: clampNumber(d.minIdleHours, DEFAULT_CONFIG.distiller.minIdleHours, 1, 48),
       maxSessionsPerPass: clampNumber(d.maxSessionsPerPass, DEFAULT_CONFIG.distiller.maxSessionsPerPass, 1, 128),
       maxSessionAgeDays: clampNumber(d.maxSessionAgeDays, DEFAULT_CONFIG.distiller.maxSessionAgeDays, 0, 90),
@@ -72,7 +83,13 @@ export function loadConfig(root: string): PocketConfig {
   };
 }
 
+function atomicWrite(path: string, contents: string): void {
+  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(temporary, contents, "utf8");
+  renameSync(temporary, path);
+}
+
 export function saveConfig(root: string, config: PocketConfig): void {
   mkdirSync(root, { recursive: true });
-  writeFileSync(configPath(root), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  atomicWrite(configPath(root), `${JSON.stringify(config, null, 2)}\n`);
 }

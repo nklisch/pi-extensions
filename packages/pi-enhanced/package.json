@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-enhanced",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Pi, enhanced — one install for nklisch's full harness: policy-gated command review, plugin marketplace, subagents, background tasks, research tools, search, model modes, and a curated UX set.",
   "author": {
     "name": "nklisch"
