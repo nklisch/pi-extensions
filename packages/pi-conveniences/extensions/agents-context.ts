@@ -38,16 +38,15 @@ export const RELATIVE_PATH = ".agents/AGENTS.md";
 /** The exact opening tag emitted — also the idempotency sentinel. */
 export const OPEN_TAG = `<project_instructions path="${RELATIVE_PATH}">`;
 
-type SystemPromptOptions = { cwd?: string };
 type BeforeAgentStartEvent = {
   systemPrompt?: string;
-  systemPromptOptions?: SystemPromptOptions;
 };
 type PiApi = {
   on?: (
     event: "before_agent_start",
     handler: (
       event: BeforeAgentStartEvent,
+      ctx?: { cwd?: string },
     ) => { systemPrompt: string } | undefined | void,
   ) => void;
 };
@@ -80,10 +79,9 @@ function readAgentsContext(cwd: string): string | null {
 }
 
 export default function agentsContextExtension(pi: PiApi): void {
-  pi.on?.("before_agent_start", (event) => {
-    const content = readAgentsContext(
-      event?.systemPromptOptions?.cwd ?? process.cwd(),
-    );
+  pi.on?.("before_agent_start", (event, ctx) => {
+    // Pi supplies the active workspace on the event context, not the event.
+    const content = readAgentsContext(ctx?.cwd ?? process.cwd());
     if (!content) return;
     const base = event?.systemPrompt ?? "";
     // Idempotency / double-registration guard. The prompt is rebuilt from base

@@ -76,7 +76,12 @@ export default function extension(pi: ExtensionAPI): void {
     reload(ctx);
   });
 
+  pi.on("session_shutdown", async () => {
+    state = createState();
+  });
+
   pi.on("message_end", async (event, ctx) => {
+    const operationState = state;
     const message = event.message;
 
     if (message.role === "user" || message.role === "toolResult") {
@@ -118,6 +123,10 @@ export default function extension(pi: ExtensionAPI): void {
           return { index, result };
         }),
       );
+
+      // A provider can finish after cancellation or session replacement. Never
+      // return its old message or stash its originals in the replacement session.
+      if (state !== operationState || ctx.signal?.aborted) return;
 
       const succeeded = new Map<number, string>();
       let firstError: string | undefined;

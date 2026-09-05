@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,21 +6,20 @@ import agentsContextExtension, { OPEN_TAG } from "./agents-context";
 
 type HandlerEvent = {
   systemPrompt?: string;
-  systemPromptOptions?: { cwd?: string };
 };
 type HandlerRet = { systemPrompt: string } | undefined | void;
 
 /** Build a fake pi that captures the before_agent_start handler, like nates-toolkit.test. */
 function load() {
-  let handler: ((e: HandlerEvent) => HandlerRet) | null = null;
+  let handler: ((e: HandlerEvent, ctx?: { cwd?: string }) => HandlerRet) | null = null;
   const pi = {
-    on: (event: string, h: (e: HandlerEvent) => HandlerRet) => {
+    on: (event: string, h: (e: HandlerEvent, ctx?: { cwd?: string }) => HandlerRet) => {
       if (event === "before_agent_start") handler = h;
     },
   };
   agentsContextExtension(pi);
   return {
-    fire: (e: HandlerEvent) => (handler ? handler(e) : undefined),
+    fire: (e: HandlerEvent, ctx?: { cwd?: string }) => handler?.(e, ctx) || undefined,
     hasHandler: () => handler !== null,
   };
 }
@@ -48,7 +47,7 @@ describe("agents-context extension", () => {
     dir = freshDir();
     try {
       const { fire } = load();
-      expect(fire({ systemPrompt: "BASE", systemPromptOptions: { cwd: dir } })).toBeUndefined();
+      expect(fire({ systemPrompt: "BASE" }, { cwd: dir })).toBeUndefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -60,7 +59,7 @@ describe("agents-context extension", () => {
       mkdirSync(join(dir, ".agents"), { recursive: true });
       writeFileSync(join(dir, ".agents", "AGENTS.md"), "# House rules\n- be kind");
       const { fire } = load();
-      const res = fire({ systemPrompt: "BASE", systemPromptOptions: { cwd: dir } });
+      const res = fire({ systemPrompt: "BASE" }, { cwd: dir });
       expect(res).toBeDefined();
       const sp = (res as { systemPrompt: string }).systemPrompt;
       expect(sp.startsWith("BASE")).toBe(true);
@@ -82,7 +81,7 @@ describe("agents-context extension", () => {
       writeFileSync(join(dir, ".agents", "AGENTS.md"), "rules");
       const { fire } = load();
       const baseWithTag = `BASE\n\n${OPEN_TAG}\nrules\n</project_instructions>`;
-      expect(fire({ systemPrompt: baseWithTag, systemPromptOptions: { cwd: dir } })).toBeUndefined();
+      expect(fire({ systemPrompt: baseWithTag }, { cwd: dir })).toBeUndefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -94,7 +93,7 @@ describe("agents-context extension", () => {
       mkdirSync(join(dir, ".agents"), { recursive: true });
       writeFileSync(join(dir, ".agents", "AGENTS.md"), "   \n  \t ");
       const { fire } = load();
-      expect(fire({ systemPrompt: "BASE", systemPromptOptions: { cwd: dir } })).toBeUndefined();
+      expect(fire({ systemPrompt: "BASE" }, { cwd: dir })).toBeUndefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -107,7 +106,7 @@ describe("agents-context extension", () => {
       const file = join(dir, ".agents", "AGENTS.md");
       writeFileSync(file, "version-1");
       const { fire } = load();
-      const r1 = fire({ systemPrompt: "B", systemPromptOptions: { cwd: dir } }) as {
+      const r1 = fire({ systemPrompt: "B" }, { cwd: dir }) as {
         systemPrompt: string;
       };
       expect(r1.systemPrompt).toContain("version-1");
@@ -118,7 +117,7 @@ describe("agents-context extension", () => {
       const later = Date.now() / 1000 + 5;
       utimesSync(file, later, later);
 
-      const r2 = fire({ systemPrompt: "B", systemPromptOptions: { cwd: dir } }) as {
+      const r2 = fire({ systemPrompt: "B" }, { cwd: dir }) as {
         systemPrompt: string;
       };
       expect(r2.systemPrompt).toContain("version-2");
@@ -128,13 +127,35 @@ describe("agents-context extension", () => {
     }
   });
 
-  test("falls back to process.cwd() when the event omits cwd", () => {
-    // We can't easily control process.cwd(), so assert the handler does not
-    // throw and returns either undefined (no .agents/AGENTS.md in the real
-    // process cwd) or a string (if one happens to exist). The contract under
-    // test: it never throws when systemPromptOptions is absent.
-    const { fire } = load();
-    const res = fire({ systemPrompt: "BASE" });
-    expect(res === undefined || typeof (res as { systemPrompt?: string }).systemPrompt === "string").toBe(true);
+  test("uses the active context when switching workspaces", () => {
+    const first = freshDir();
+    const second = freshDir();
+    try {
+      for (const [path, rules] of [[first, "first workspace"], [second, "second workspace"]] as const) {
+        mkdirSync(join(path, ".agents"));
+        writeFileSync(join(path, ".agents/AGENTS.md"), rules);
+      }
+      const { fire } = load();
+      expect(fire({ systemPrompt: "BASE" }, { cwd: first })?.systemPrompt).toContain("first workspace");
+      const next = fire({ systemPrompt: "BASE" }, { cwd: second })?.systemPrompt;
+      expect(next).toContain("second workspace");
+      expect(next).not.toContain("first workspace");
+    } finally {
+      rmSync(first, { recursive: true, force: true });
+      rmSync(second, { recursive: true, force: true });
+    }
+  });
+
+  test("falls back to process.cwd() when the context omits cwd", () => {
+    dir = freshDir();
+    const cwd = spyOn(process, "cwd").mockReturnValue(dir);
+    try {
+      mkdirSync(join(dir, ".agents"));
+      writeFileSync(join(dir, ".agents/AGENTS.md"), "fallback rules");
+      expect(load().fire({ systemPrompt: "BASE" })?.systemPrompt).toContain("fallback rules");
+    } finally {
+      cwd.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

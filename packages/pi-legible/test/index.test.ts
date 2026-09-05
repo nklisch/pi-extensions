@@ -6,7 +6,17 @@ vi.mock("../src/rewrite.js", () => ({
   rewriteText: vi.fn(async () => ({ ok: true, text: "REWRITTEN" })),
 }));
 
+vi.mock("../src/config.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/config.js")>(),
+  loadConfig: vi.fn(() => ({ enabled: true, model: undefined, contextDepth: 6, includeToolCalls: true })),
+}));
+vi.mock("../src/rules.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/rules.js")>(),
+  loadRules: vi.fn(() => ({ text: "Fixture rules", source: undefined })),
+}));
+
 import extension from "../src/index.js";
+import { rewriteText } from "../src/rewrite.js";
 
 type Handler = (...args: any[]) => Promise<unknown>;
 
@@ -23,6 +33,31 @@ function makeExtension(): Map<string, Handler> {
 }
 
 describe("pi-legible event integration", () => {
+  it.each(["replacement", "shutdown", "abort"])("discards late rewrites after %s without leaking originals", async (boundary) => {
+    const handlers = makeExtension();
+    const controller = new AbortController();
+    const ctx = {
+      cwd: "/tmp/pi-legible-fixture",
+      isProjectTrusted: () => false,
+      modelRegistry: {},
+      signal: controller.signal,
+      ui: { setStatus: vi.fn(), notify: vi.fn() },
+    };
+    let finish!: (result: Awaited<ReturnType<typeof rewriteText>>) => void;
+    vi.mocked(rewriteText).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const message = { role: "assistant", timestamp: 42, stopReason: "stop", content: [{ type: "text", text: "OLD ORIGINAL" }] };
+    const pending = handlers.get("message_end")!({ message }, ctx);
+    if (boundary === "replacement") await handlers.get("session_start")!({}, ctx);
+    else if (boundary === "shutdown") await handlers.get("session_shutdown")!({}, ctx);
+    else controller.abort();
+    finish({ ok: true, text: "LATE REWRITE" });
+    expect(await pending).toBeUndefined();
+    const nextMessage = { ...message, content: [{ type: "text", text: "NEW SESSION TEXT" }] };
+    await handlers.get("context")!({ messages: [nextMessage] }, ctx);
+    expect(nextMessage.content[0]!.text).toBe("NEW SESSION TEXT");
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
+  });
+
   it("keeps a successful rewrite when stale status cleanup throws", async () => {
     const handlers = makeExtension();
     const statuses: (string | undefined)[] = [];

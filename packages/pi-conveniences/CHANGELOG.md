@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Load extra project instructions from Pi’s active event context instead of a nonexistent event field, so workspace changes use the correct `.agents/AGENTS.md`.
+
 ## v0.1.2 — 2026-08-23
 
 ### Fixed

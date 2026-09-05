@@ -33,6 +33,8 @@ pi install npm:@nklisch/pi-legible
 - A configured rewriter model that cannot be resolved (typo, expired auth)
   fails safe — originals are shown — rather than silently billing rewrites
   to the session model.
+- Results that arrive after cancellation, session replacement, shutdown, or a
+  configuration reload are discarded rather than applied to the current session.
 - Latency: one extra model call per assistant text block (blocks in a
   message are rewritten concurrently). Pick a fast model — see below.
 
