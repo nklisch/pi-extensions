@@ -5,7 +5,6 @@ packages:
   - "@nklisch/pi-plugins@0.8.2"
   - "@nklisch/pi-conveniences@0.1.3"
   - "@nklisch/pi-legible@0.1.2"
-  - "@nklisch/pi-astral-pocket@0.1.0"
   - "@nklisch/pi-enhanced@0.4.1"
 items:
   - plugin-manager-versions-and-layout
@@ -41,16 +40,17 @@ nonexistent event field. Late prose rewrites are discarded after cancellation,
 session replacement, shutdown, or configuration reload, without leaking
 originals or returning an obsolete message.
 
-## Pi Astral Pocket 0.1.0 and Pi Enhanced 0.4.1
+## Pi Enhanced 0.4.1
 
-The first note-pocket release provides persistent notes and recall for
+The bundled note-pocket extension provides persistent notes and recall for
 `openai-codex/gpt-6-astra`, bounded activation-time distillation, and explicit
 pocket controls. It is inactive for other models. Session recall can expose
 past tool output; keep summarized recall unless exact excerpts are needed.
 
 Pi Enhanced includes the note-pocket extension and rebundles the corrected
 plugin manager and workspace-context loader. Pi Legible remains a standalone
-optional install. Unrelated in-progress Ollama work is excluded.
+optional install. Standalone publication of `pi-astral-pocket` 0.1.0 is deferred;
+its bundled inclusion is unchanged. Unrelated in-progress Ollama work is excluded.
 
 ## Verification
 
@@ -61,5 +61,5 @@ precedence, missing/stale receipts, remote updates, cancellation, replacement
 failures, terminal sizing, confirmations, diagnostics, and session isolation.
 
 The versioned release also passed `npm run check`, including bundle and tarball
-inspection. Publication is pending trusted-publisher setup for the new
-note-pocket package and the manual GitHub Actions release workflow.
+inspection. Publication of the four existing packages is pending their manual
+GitHub Actions release workflows; the new standalone package is excluded.
