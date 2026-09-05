@@ -153,9 +153,10 @@ export async function guardMcpOutput(
     const affixesPresent = prefix !== "" || suffix !== "";
     const resultSpillPath = boundedResult?.spillPath;
     const reuseResultSpill = !affixesPresent && resultSpillPath !== undefined;
-    const longestLineBytes = composedOutput.length === 0
-      ? 0
-      : Math.max(...composedOutput.split("\n").map(byteLength));
+    const longestLineBytes = composedOutput.split("\n").reduce(
+      (longest, line) => Math.max(longest, byteLength(line)),
+      0,
+    );
     const recovery = reuseResultSpill
       ? { kind: "mcp-result" as const, path: resultSpillPath }
       : await saveArtifact("output", composedOutput).then((saved) => ({
@@ -301,7 +302,7 @@ function formatTruncationNotice(
   if (recovery.path) {
     const longestLineBytes = options.longestLineBytes ?? 0;
     if (longestLineBytes > PAGEABLE_LINE_LIMIT_BYTES) {
-      return `${base} Full text saved to: ${recovery.path} — use grep to inspect; the longest line (~${formatSize(longestLineBytes)}) exceeds read's per-line limit.]`;
+      return `${base} Full text saved to: ${recovery.path} — extract bounded matches with grep -o or slice the text with local Node tools; the longest line (~${formatSize(longestLineBytes)}) exceeds read's per-line limit.]`;
     }
     return `${base} Full text saved to: ${recovery.path} — use read with offset/limit or grep to inspect.]`;
   }
@@ -336,9 +337,9 @@ async function summarizeMcpResult(
   raw: string,
   rawBytes: number,
 ): Promise<{ value: McpResultSummary; spillPath?: string; spillWriteError?: string }> {
-  // Spill readable JSON so recovery tools can address the artifact line by
-  // line. Serialization stays whole-result (never a new guaranteed memory
-  // bound); the compact measurement above remains the details-budget metric.
+  // Indent JSON structure for inspection; long string values still require
+  // JSON-aware extraction rather than line paging. Serialization stays whole-
+  // result; the compact measurement above remains the details-budget metric.
   let spillText: string;
   try {
     spillText = JSON.stringify(result, null, 2) ?? raw;

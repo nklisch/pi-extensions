@@ -1,6 +1,6 @@
-import { chmod, mkdtemp, readFile, rmdir } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, rmdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { guardMcpOutput, resolveMcpOutputGuardOptions, type McpResultSummary } from "../mcp-output-guard.ts";
 
@@ -15,6 +15,26 @@ describe("guardMcpOutput", () => {
     expect(guarded.content).toEqual([{ type: "text", text: "small result" }]);
     expect(guarded.outputGuard).toBeUndefined();
     expect(guarded.mcpResult).toBe(rawMcpResult);
+  });
+
+  it("bounds a high line count and preserves complete recovery", async () => {
+    const text = "x\n".repeat(150_000);
+    let path: string | undefined;
+    try {
+      const guarded = await guardMcpOutput([{ type: "text", text }]);
+      path = guarded.outputGuard?.fullOutputPath;
+      expect(guarded.outputGuard).toMatchObject({
+        truncated: true,
+        originalBytes: 300_000,
+        originalLines: 150_001,
+      });
+      expect(guarded.outputGuard!.returnedBytes).toBeLessThanOrEqual(50 * 1024);
+      expect(guarded.outputGuard!.returnedLines).toBeLessThanOrEqual(2000);
+      expect(path).toBeTypeOf("string");
+      expect(await readFile(path!, "utf8")).toBe(text);
+    } finally {
+      if (path) await rm(dirname(path), { recursive: true, force: true });
+    }
   });
 
   it("merges prefixes and suffixes into small text output", async () => {
@@ -75,7 +95,7 @@ describe("guardMcpOutput", () => {
     expect(JSON.stringify(summary)).not.toContain("line-19");
 
     // The shared spill holds the complete result — every canonical fact — as
-    // readable JSON that line-based recovery tools can address.
+    // indented JSON whose values remain available through JSON-aware extraction.
     const saved = await readFile(summary.fullResultPath!, "utf8");
     expect(JSON.parse(saved)).toEqual(rawMcpResult);
     expect(saved).toContain("\n");
@@ -130,7 +150,8 @@ describe("guardMcpOutput", () => {
 
     const returnedText = guarded.content[0].type === "text" ? guarded.content[0].text : "";
     expect(guarded.outputGuard?.fullOutputPath).toBeTruthy();
-    expect(returnedText).toContain("use grep to inspect");
+    expect(returnedText).toContain("extract bounded matches with grep -o");
+    expect(returnedText).toContain("slice the text with local Node tools");
     expect(returnedText).toContain("exceeds read's per-line limit");
     expect(returnedText).not.toContain("use read with offset/limit");
   });

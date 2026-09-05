@@ -104,10 +104,10 @@ function textIsSameJsonValue(text: string, value: unknown): boolean {
   try {
     return jsonValuesEqual(parsed, value);
   } catch {
-    // A comparison that could not complete is not an established inequality:
-    // appending on a failed comparison risks duplicating a giant value, while
-    // transport values are plain JSON, so this is defensive only.
-    return true;
+    // Deduplication requires proven equality. If comparison fails, preserve
+    // the structured facts through the normal serialization path; that path
+    // reports presentation unavailability if serialization also fails.
+    return false;
   }
 }
 

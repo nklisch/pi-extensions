@@ -1,3 +1,5 @@
+import { readFile, rm } from "node:fs/promises";
+import { dirname } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
 import { toolErrorOverride } from "../error-signal.ts";
@@ -219,6 +221,28 @@ describe("structuredContent fallback — proxy executeCall", () => {
     expect(textOf(result)).not.toContain("(empty result)");
   });
 
+  it("keeps successful dispatch successful for a high line count", async () => {
+    const { executeCall } = await import("../proxy-modes.ts");
+    const text = "x\n".repeat(150_000);
+    const state = makeState({ isError: false, content: [{ type: "text", text }] }, "many-lines");
+    // Keep details inline here so this exercises composed-text recovery.
+    state.config.settings.outputGuard = { detailsMaxBytes: 1024 * 1024 };
+    let path: string | undefined;
+    try {
+      const result = await executeCall(state, "demo_many-lines", {}, "demo");
+      path = (result.details.outputGuard as { fullOutputPath?: string } | undefined)?.fullOutputPath;
+      expect(state.manager.getConnection().client.callTool).toHaveBeenCalledTimes(1);
+      expect(result.details.error).toBeUndefined();
+      expect(result.details.mcpResult).toMatchObject({ isError: false });
+      expect(Buffer.byteLength(textOf(result))).toBeLessThanOrEqual(50 * 1024);
+      expect(textOf(result).split("\n").length).toBeLessThanOrEqual(2000);
+      expect(path).toBeTypeOf("string");
+      expect(await readFile(path!, "utf8")).toBe(text);
+    } finally {
+      if (path) await rm(dirname(path), { recursive: true, force: true });
+    }
+  });
+
   it("delivers structured facts from successful results that also carry summary text", async () => {
     const { executeCall } = await import("../proxy-modes.ts");
     const structured = { range_handle: "r-42", observation: "fixture-page-observation" };
@@ -369,8 +393,8 @@ describe("provider message delivery via convertToLlm — pi-coding-agent 0.82.0"
  * Offline provider request construction with the actual pinned provider
  * implementation: pi-ai 0.82.0's anthropic-messages API provider. The request
  * payload is captured through the provider's own onPayload seam before
- * dispatch; dispatch itself is stopped with an already-aborted signal and a
- * dead loopback baseUrl (127.0.0.1:9), so no network request is made and only
+ * dispatch; onPayload aborts the controller before request dispatch. A dead
+ * loopback baseUrl (127.0.0.1:9) is configured; no network request is made and only
  * a fixture API key is present. Installed 0.85.1 Pi, native Claude/Codex
  * clients, Rust MCP servers, and live providers are NOT qualified by this.
  */

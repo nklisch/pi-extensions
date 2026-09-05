@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { resolveMcpResultContent } from "../tool-registrar.ts";
 
 describe("resolveMcpResultContent", () => {
@@ -124,6 +124,25 @@ describe("resolveMcpResultContent", () => {
     expect(blocks).toEqual([
       { type: "text", text: "prose context" },
       { type: "text", text: JSON.stringify(structured) },
+    ]);
+  });
+
+  it("preserves structured facts when comparison cannot complete", () => {
+    const keys = vi.spyOn(Object, "keys").mockImplementation(() => {
+      throw new Error("comparison fault");
+    });
+    let blocks: ReturnType<typeof resolveMcpResultContent>;
+    try {
+      blocks = resolveMcpResultContent({
+        content: [{ type: "text", text: '{"fact":false}' }],
+        structuredContent: { fact: true },
+      });
+    } finally {
+      keys.mockRestore();
+    }
+    expect(blocks).toEqual([
+      { type: "text", text: '{"fact":false}' },
+      { type: "text", text: '[Structured content]\n{\n  "fact": true\n}' },
     ]);
   });
 
