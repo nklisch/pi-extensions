@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-conveniences",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Small drop-in quality-of-life conveniences for Pi — /exit, .agents/AGENTS.md context loading, context-window footer, and subagent model listing.",
   "author": {
     "name": "nklisch"

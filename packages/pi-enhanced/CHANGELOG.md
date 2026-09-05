@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.1 — 2026-09-04
+
+### Added
+
+- Include `@nklisch/pi-astral-pocket` 0.1.0, the Astra-only persistent note and recall extension.
+
+### Fixed
+
+- Rebundle `@nklisch/pi-plugins` 0.8.2 and `@nklisch/pi-conveniences` 0.1.3 with accurate plugin versions, a framed manager, safer updates, and workspace-correct project instructions.
+
 ## v0.3.1
 
 ### Fixed

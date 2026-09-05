@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-plugins",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "private": false,
   "description": "A small filesystem-first marketplace and plugin host for Pi.",
   "license": "MIT",
