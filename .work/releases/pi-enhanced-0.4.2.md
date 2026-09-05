@@ -43,4 +43,10 @@ The loaded Workbench validator still reports three pre-existing issues: the old 
 
 ## Publication
 
-Prepared for the repository's trusted GitHub Actions publishing workflow. Standalone Astral Pocket publication remains deferred: the package has no registry release, and local account access is unavailable for its first-publication setup. The Pi Enhanced bundle is the delivery path.
+Pi Enhanced 0.4.2 was published through [trusted workflow 33957529024](https://github.com/nklisch/pi-extensions/actions/runs/33957529024) from commit `7f7a0f345039204f5cbd40946c559e7d9541de6f`. npm reports it as `latest` with a provenance attestation.
+
+A clean temporary install with Pi 0.82.0 loaded the published extension and confirmed bundled Pocket 0.2.0, Astra/minimal defaults, scoped tools, the recall limit, and shutdown registration. Lifecycle install scripts were disabled. The temporary installation was removed, and the user's installed packages were not changed.
+
+An unconstrained temporary install selected Pi 0.85.0 and installed successfully, but the extension import probe failed on that host's missing `@earendil-works/pi-server` dependency. This release does not claim verification on Pi 0.85.0.
+
+Standalone Astral Pocket publication remains deferred: the package has no registry release, and local account access is unavailable for its first-publication setup. The Pi Enhanced bundle is the delivery path.
