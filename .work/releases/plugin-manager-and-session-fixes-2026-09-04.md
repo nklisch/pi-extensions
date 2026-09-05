@@ -61,5 +61,19 @@ precedence, missing/stale receipts, remote updates, cancellation, replacement
 failures, terminal sizing, confirmations, diagnostics, and session isolation.
 
 The versioned release also passed `npm run check`, including bundle and tarball
-inspection. Publication of the four existing packages is pending their manual
-GitHub Actions release workflows; the new standalone package is excluded.
+inspection. Each package's publishing workflow repeated the repository gate.
+
+## Publication
+
+All four packages were published successfully through trusted GitHub Actions
+publishing. npm reports each version as `latest`, with provenance attestations.
+Standalone `pi-astral-pocket` 0.1.0 remains unpublished. A clean temporary npm
+install of Pi Enhanced 0.4.1 with lifecycle scripts disabled succeeded and
+confirmed bundled Pi Plugins 0.8.2, Pi Conveniences 0.1.3, and Pi Astral Pocket
+0.1.0. The temporary installation was removed; the user's installed Pi packages
+were not changed.
+
+- Pi Plugins 0.8.2: [workflow 33934749134](https://github.com/nklisch/pi-extensions/actions/runs/33934749134).
+- Pi Conveniences 0.1.3: [workflow 33936386411](https://github.com/nklisch/pi-extensions/actions/runs/33936386411).
+- Pi Legible 0.1.2: [workflow 33936870931](https://github.com/nklisch/pi-extensions/actions/runs/33936870931).
+- Pi Enhanced 0.4.1: [workflow 33937285863](https://github.com/nklisch/pi-extensions/actions/runs/33937285863).
