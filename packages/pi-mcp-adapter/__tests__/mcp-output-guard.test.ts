@@ -1,4 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rmdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { guardMcpOutput, resolveMcpOutputGuardOptions, type McpResultSummary } from "../mcp-output-guard.ts";
 
@@ -41,38 +43,80 @@ describe("guardMcpOutput", () => {
     expect(withImage.content).toEqual([{ type: "text", text: "Error: Tool execution failed" }, image]);
   });
 
-  it("truncates large text output and saves the full output to a file", async () => {
+  it("reuses the full MCP-result spill for recovery when both text and details overflow", async () => {
     const text = Array.from({ length: 20 }, (_, i) => `line-${i} ${"x".repeat(40)}`).join("\n");
+    const rawMcpResult = { content: [{ type: "text", text }], isError: false, structuredContent: { rows: [text] } };
     const guarded = await guardMcpOutput(
       [{ type: "text", text }],
-      {
-        maxBytes: 300,
-        maxLines: 8,
-        detailsMaxBytes: 200,
-        rawMcpResult: { content: [{ type: "text", text }], isError: false, structuredContent: { rows: [text] } },
-      },
+      { maxBytes: 300, maxLines: 8, detailsMaxBytes: 200, rawMcpResult },
     );
 
     expect(guarded.outputGuard).toMatchObject({
       truncated: true,
       originalLines: 20,
     });
-    expect(guarded.outputGuard?.fullOutputPath).toBeTruthy();
+    // No second text spill: the complete result spill is the recovery artifact.
+    expect(guarded.outputGuard?.fullOutputPath).toBeUndefined();
     expect(guarded.content).toHaveLength(1);
     expect(guarded.content[0]).toMatchObject({ type: "text" });
     const returnedText = guarded.content[0].type === "text" ? guarded.content[0].text : "";
     expect(returnedText).toContain("MCP text output truncated");
-    expect(returnedText).toContain("Full text saved to:");
+    expect(returnedText).toContain("Full MCP result (JSON) saved to:");
     expect(returnedText).not.toContain("line-19");
-
-    const saved = await readFile(guarded.outputGuard!.fullOutputPath!, "utf8");
-    expect(saved).toBe(text);
 
     const summary = guarded.mcpResult as McpResultSummary;
     expect(summary).toMatchObject({ omitted: true, isError: false, contentBlocks: 1 });
     expect(summary.fullResultPath).toBeTruthy();
     expect(summary.structuredContent).toMatchObject({ omitted: true });
     expect(JSON.stringify(summary)).not.toContain("line-19");
+
+    // The shared spill holds the complete result — every canonical fact — as
+    // readable JSON that line-based recovery tools can address.
+    const saved = await readFile(summary.fullResultPath!, "utf8");
+    expect(JSON.parse(saved)).toEqual(rawMcpResult);
+    expect(saved).toContain("\n");
+    expect(returnedText).toContain(summary.fullResultPath!);
+  });
+
+  it("keeps the full-text spill as recovery when no raw result is provided", async () => {
+    const text = Array.from({ length: 50 }, (_, i) => `row-${i}`).join("\n");
+    const guarded = await guardMcpOutput([{ type: "text", text }], { maxBytes: 250, maxLines: 5 });
+
+    expect(guarded.outputGuard).toMatchObject({ truncated: true });
+    expect(guarded.outputGuard?.fullOutputPath).toBeTruthy();
+    expect(guarded.mcpResult).toBeUndefined();
+    const returnedText = guarded.content[0].type === "text" ? guarded.content[0].text : "";
+    expect(returnedText).toContain("Full text saved to:");
+    const saved = await readFile(guarded.outputGuard!.fullOutputPath!, "utf8");
+    expect(saved).toBe(text);
+  });
+
+  it("falls back to the text spill when the result spill write fails", async () => {
+    // A read-only TMPDIR makes mkdtemp fail; the guard must still deliver an
+    // explicit recovery-unavailable notice instead of a silent loss.
+    const lockedDir = await mkdtemp(join(tmpdir(), "pi-mcp-guard-locked-"));
+    await chmod(lockedDir, 0o500);
+    const previousTmp = process.env.TMPDIR;
+    process.env.TMPDIR = lockedDir;
+    try {
+      const text = Array.from({ length: 30 }, (_, i) => `line-${i}`).join("\n");
+      const guarded = await guardMcpOutput(
+        [{ type: "text", text }],
+        { maxBytes: 200, maxLines: 5, detailsMaxBytes: 100, rawMcpResult: { content: [{ type: "text", text }] } },
+      );
+
+      const returnedText = guarded.content[0].type === "text" ? guarded.content[0].text : "";
+      expect(returnedText).toContain("Full output could not be saved:");
+      expect(guarded.outputGuard?.fullOutputPath).toBeUndefined();
+      expect((guarded.mcpResult as McpResultSummary).fullResultPath).toBeUndefined();
+      expect((guarded.mcpResult as McpResultSummary).resultWriteError).toBeTruthy();
+      expect(guarded.outputGuard?.writeError).toBeTruthy();
+    } finally {
+      if (previousTmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmp;
+      await chmod(lockedDir, 0o700);
+      await rmdir(lockedDir);
+    }
   });
 
   it("summarizes details.mcpResult only when it exceeds detailsMaxBytes", async () => {
@@ -85,7 +129,7 @@ describe("guardMcpOutput", () => {
     expect((summarized.mcpResult as McpResultSummary).fullResultPath).toBeTruthy();
   });
 
-  it("spills the oversized raw result as compact JSON and reports its compact byte size", async () => {
+  it("spills the oversized raw result as readable JSON and reports the compact byte size", async () => {
     const rawMcpResult = { content: [{ type: "text", text: "ok" }], isError: false, structuredContent: { rows: "z".repeat(500) } };
     const guarded = await guardMcpOutput([{ type: "text", text: "ok" }], { detailsMaxBytes: 50, rawMcpResult });
 
@@ -93,11 +137,37 @@ describe("guardMcpOutput", () => {
     expect(summary.omitted).toBe(true);
     expect(summary.fullResultPath).toBeTruthy();
 
-    const compact = JSON.stringify(rawMcpResult);
     const saved = await readFile(summary.fullResultPath!, "utf8");
-    expect(saved).toBe(compact);
-    expect(saved).not.toContain("\n");
-    expect(summary.rawResultBytes).toBe(Buffer.byteLength(compact, "utf8"));
+    expect(JSON.parse(saved)).toEqual(rawMcpResult);
+    expect(saved).toContain("\n");
+    expect(summary.rawResultBytes).toBe(Buffer.byteLength(JSON.stringify(rawMcpResult), "utf8"));
+  });
+
+  it("reports honest final accounting when a tiny details budget is smaller than the notice", async () => {
+    const text = "y".repeat(4000);
+    const guarded = await guardMcpOutput(
+      [{ type: "text", text }],
+      { maxBytes: 500, maxLines: 2000, detailsMaxBytes: 10, rawMcpResult: { content: [{ type: "text", text }] } },
+    );
+
+    // The recovery notice itself can exceed a tiny configured budget; the
+    // guard reports the bytes it actually returned rather than claiming a
+    // stricter ceiling than it enforces.
+    expect(guarded.outputGuard).toMatchObject({ truncated: true });
+    const returnedText = guarded.content[0].type === "text" ? guarded.content[0].text : "";
+    expect(guarded.outputGuard!.returnedBytes).toBe(Buffer.byteLength(returnedText, "utf8"));
+    expect(returnedText).toContain("Full MCP result (JSON) saved to:");
+  });
+
+  it("truncates multibyte text on a byte boundary without introducing replacement characters", async () => {
+    // Each line is 8 bytes of 4-byte characters; the byte budget lands mid-character.
+    const line = "\u{1F600}\u{1F600}".repeat(500);
+    const guarded = await guardMcpOutput([{ type: "text", text: line }], { maxBytes: 1003, maxLines: 2000 });
+
+    expect(guarded.outputGuard).toMatchObject({ truncated: true });
+    const returnedText = guarded.content[0].type === "text" ? guarded.content[0].text : "";
+    expect(returnedText).not.toContain("\uFFFD");
+    expect(Buffer.byteLength(returnedText, "utf8")).toBeLessThanOrEqual(1003 + Buffer.byteLength("\n\n[MCP text output truncated", "utf8") + 400);
   });
 
   it("passes image blocks through untouched, even large ones", async () => {

@@ -227,11 +227,14 @@ describe("programmatic adapter construction", () => {
     const image = big.content.find((block) => block.type === "image");
     expect(text?.text).toContain("capture ok");
     expect(text?.text).toContain("[MCP text output truncated");
-    expect(text?.text).toContain("Full text saved to:");
+    // Both text and details overflow, so the shared full-result spill is the
+    // single recovery artifact — no duplicate text spill is written.
+    expect(text?.text).toContain("Full MCP result (JSON) saved to:");
     expect(text?.text?.length).toBeLessThan(60 * 1024);
     expect(image?.data).toBe("a".repeat(5000));
     expect(image?.mimeType).toBe("image/png");
     expect(big.details.outputGuard?.truncated).toBe(true);
+    expect(big.details.outputGuard?.fullOutputPath).toBeUndefined();
     // The raw result exceeds the details budget, so it is summarized with a
     // spill path instead of dumped into the session.
     expect(big.details.mcpResult?.omitted).toBe(true);
@@ -248,15 +251,46 @@ describe("programmatic adapter construction", () => {
     expect(small.content).toEqual([{ type: "text", text: "ok" }]);
     expect(small.details.mcpResult).toEqual({ content: [{ type: "text", text: "ok" }] });
 
-    // Tool failures surface as an Error-prefixed result, not raw JSON.
+    // Structured facts ride along with summary text and stay inside the
+    // details budget as the raw result.
+    managerSpies.connect.mockResolvedValue({
+      status: "connected",
+      tools: [{ name: "status" }],
+      resources: [],
+      client: {
+        callTool: vi.fn().mockResolvedValue({
+          content: [{ type: "text", text: "connected" }],
+          structuredContent: { session_id: "s-1", tool_count: 3 },
+        }),
+      },
+    });
+    const withStructured = await tool.execute("c2b", { action: "call", server: "native", tool: "status", args: "{}" }, signal);
+    const structuredText = withStructured.content.map((block: { text?: string }) => block.text ?? "").join("\n");
+    expect(structuredText).toContain("connected");
+    expect(structuredText).toContain('"session_id": "s-1"');
+    expect(structuredText).toContain('"tool_count": 3');
+    expect(withStructured.details.mcpResult).toMatchObject({
+      structuredContent: { session_id: "s-1", tool_count: 3 },
+    });
+
+    // Tool failures surface as an Error-prefixed result, not raw JSON; failed
+    // calls may also carry structured facts, which are delivered alongside.
     managerSpies.connect.mockResolvedValue({
       status: "connected",
       tools: [{ name: "echo" }],
       resources: [],
-      client: { callTool: vi.fn().mockResolvedValue({ isError: true, content: [{ type: "text", text: "boom" }] }) },
+      client: {
+        callTool: vi.fn().mockResolvedValue({
+          isError: true,
+          content: [{ type: "text", text: "boom" }],
+          structuredContent: { interaction_id: "i-1", status: "failed" },
+        }),
+      },
     });
     const failed = await tool.execute("c3", { action: "call", server: "native", tool: "echo", args: "{}" }, signal);
-    expect(failed.content[0]).toEqual({ type: "text", text: "Error: boom" });
+    const failedText = failed.content.map((block: { text?: string }) => block.text ?? "").join("\n");
+    expect(failedText).toContain("Error: boom");
+    expect(failedText).toContain('"interaction_id": "i-1"');
     expect(failed.details.error).toBe("tool_error");
 
     // Unknown server names fail with guidance toward the accepted tokens.

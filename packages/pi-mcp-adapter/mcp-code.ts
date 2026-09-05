@@ -2,7 +2,7 @@ import type { ToolInfo } from "@earendil-works/pi-coding-agent";
 import { formatWithOptions } from "node:util";
 import { Worker } from "node:worker_threads";
 import { guardMcpOutput, guardedMcpDetails, resolveMcpOutputGuardOptions } from "./mcp-output-guard.ts";
-import { executeCall } from "./proxy-modes.ts";
+import { executeCall, type ClientCallToolResult } from "./proxy-modes.ts";
 import { combineAbortSignals } from "./runtime-owner.ts";
 import { paginate, rankSuggestions, rankToolMatches } from "./search-ranking.ts";
 import type { McpExtensionState } from "./state.ts";
@@ -141,7 +141,22 @@ export async function runMcpScript(
     // Record before dispatch so calls still in flight at timeout/abort appear in the trace.
     const startedAt = Date.now();
     const index = calls.push({ operation: "call", path, ok: false, error: "incomplete", durationMs: 0, startedAt }) - 1;
-    const result = await executeCall(state, path, args, undefined, getPiTools, callSignal, "script");
+    // Call-local capture of the acquired SDK result: details.mcpResult may be
+    // a bounded summary when the result exceeds the details budget, and a
+    // summary must never be returned to the script as the complete result.
+    let decodedResult: ClientCallToolResult | undefined;
+    const result = await executeCall(
+      state,
+      path,
+      args,
+      undefined,
+      getPiTools,
+      callSignal,
+      "script",
+      (decoded) => {
+        decodedResult = decoded;
+      },
+    );
     const details = result.details;
     if (details.error !== undefined) {
       const errorCode = String(details.error);
@@ -162,7 +177,9 @@ export async function runMcpScript(
     calls[index] = { operation: "call", path, ok: true, durationMs: Date.now() - startedAt, startedAt };
     return {
       ok: true as const,
-      data: details.mcpResult !== undefined ? details.mcpResult : textFromContent(result.content),
+      // Prefer the captured decoded result; the details fallback keeps the
+      // seam optional for call sites that do not capture (e.g. resource reads).
+      data: decodedResult ?? (details.mcpResult !== undefined ? details.mcpResult : textFromContent(result.content)),
     };
   };
 

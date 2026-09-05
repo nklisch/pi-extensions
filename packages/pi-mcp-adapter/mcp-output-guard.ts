@@ -86,6 +86,12 @@ export function guardedMcpDetails(guarded: GuardedMcpOutput): Record<string, unk
  * Bound model-facing MCP output. Text output is capped at maxBytes/maxLines and
  * spilled to a temp file when oversized. Image blocks pass through untouched —
  * they are delivered to the provider as native image content, not text context.
+ *
+ * When the raw details result also overflows detailsMaxBytes, its full JSON is
+ * spilled once and the text truncation notice reuses that same artifact as the
+ * recovery path instead of writing a second, redundant text spill. The raw
+ * result — not the model-facing preview — is the data authority, so the
+ * recovery artifact holds the complete result.
  */
 export async function guardMcpOutput(
   content: ContentBlock[],
@@ -111,6 +117,12 @@ export async function guardMcpOutput(
     };
   }
 
+  // Bound the details result first: its guard-owned spill path is the shared
+  // recovery artifact the text truncation notice can point at.
+  const boundedResult = options.rawMcpResult === undefined
+    ? undefined
+    : await boundMcpResult(options.rawMcpResult, detailsMaxBytes);
+
   const imageBlocks = normalizedContent.filter((block) => block.type === "image");
   const textOutput = normalizedContent
     .filter((block) => block.type === "text")
@@ -123,8 +135,18 @@ export async function guardMcpOutput(
   let outputGuard: McpOutputGuardDetails | undefined;
 
   if (stats.bytes > maxBytes || stats.lines > maxLines) {
-    const { path: fullOutputPath, error: writeError } = await saveArtifact("output", composedOutput);
-    const notice = formatTruncationNotice(stats, fullOutputPath, writeError);
+    // Reuse the full MCP-result spill when the guard wrote one in this call;
+    // only a spill that actually exists can serve as recovery. Otherwise fall
+    // back to the guard's own full-text spill.
+    const resultSpillPath = boundedResult?.spillPath;
+    const recovery = resultSpillPath !== undefined
+      ? { kind: "mcp-result" as const, path: resultSpillPath }
+      : await saveArtifact("output", composedOutput).then((saved) => ({
+          kind: "text" as const,
+          ...(saved.path !== undefined ? { path: saved.path } : {}),
+          ...(saved.error !== undefined ? { error: saved.error } : {}),
+        }));
+    const notice = formatTruncationNotice(stats, recovery);
     const previewBudget = reserveBudget(maxBytes, maxLines, notice);
     const preview = truncateHead(composedOutput, previewBudget.maxBytes, previewBudget.maxLines);
     const finalText = `${preview.content}\n\n${notice}`;
@@ -138,19 +160,15 @@ export async function guardMcpOutput(
       originalLines: stats.lines,
       returnedLines: finalStats.lines,
       ...(imageBlocks.length > 0 ? { imageBlocksPassedThrough: imageBlocks.length } : {}),
-      ...(fullOutputPath !== undefined ? { fullOutputPath } : {}),
-      ...(writeError !== undefined ? { writeError } : {}),
+      ...(recovery.kind === "text" && recovery.path !== undefined ? { fullOutputPath: recovery.path } : {}),
+      ...(recovery.kind === "text" && recovery.error !== undefined ? { writeError: recovery.error } : {}),
     };
   }
-
-  const mcpResult = options.rawMcpResult === undefined
-    ? undefined
-    : await boundMcpResult(options.rawMcpResult, detailsMaxBytes);
 
   return {
     content: guardedContent,
     ...(outputGuard ? { outputGuard } : {}),
-    ...(mcpResult !== undefined ? { mcpResult } : {}),
+    ...(boundedResult !== undefined ? { mcpResult: boundedResult.value } : {}),
   };
 }
 
@@ -250,30 +268,53 @@ function truncateStringToBytes(value: string, maxBytes: number): string {
 
 function formatTruncationNotice(
   stats: { bytes: number; lines: number },
-  fullOutputPath: string | undefined,
-  writeError: string | undefined,
+  recovery: { kind: "text" | "mcp-result"; path?: string; error?: string },
 ): string {
   const base = `[MCP text output truncated: original ${stats.lines.toLocaleString()} lines / ${formatSize(stats.bytes)}.`;
-  if (fullOutputPath) {
-    return `${base} Full text saved to: ${fullOutputPath} — use read with offset/limit or grep to inspect.]`;
+  if (recovery.path) {
+    // Label the artifact's actual format: the full-text spill is the composed
+    // text; the shared result spill is the complete MCP result as readable
+    // (pretty-printed) JSON, so line-based recovery tools genuinely apply.
+    const artifact = recovery.kind === "mcp-result"
+      ? "Full MCP result (JSON)"
+      : "Full text";
+    return `${base} ${artifact} saved to: ${recovery.path} — use read with offset/limit or grep to inspect.]`;
   }
-  return `${base} Full output could not be saved: ${writeError ?? "unknown error"}]`;
+  return `${base} Full output could not be saved: ${recovery.error ?? "unknown error"}]`;
 }
 
 /**
  * Bound details.mcpResult: keep the raw result when its JSON fits within
  * detailsMaxBytes; otherwise replace it with a compact summary and spill the
- * raw JSON to a temp file.
+ * complete result to a temp file as readable JSON. The spill — not the
+ * summary — is the recovery artifact, so it must contain every canonical fact
+ * the result carried.
  */
-async function boundMcpResult(result: unknown, detailsMaxBytes: number): Promise<unknown> {
+async function boundMcpResult(
+  result: unknown,
+  detailsMaxBytes: number,
+): Promise<{ value: unknown; spillPath?: string; spillWriteError?: string }> {
   const raw = safeStringify(result);
   const rawBytes = byteLength(raw);
-  if (rawBytes <= detailsMaxBytes) return result;
+  if (rawBytes <= detailsMaxBytes) return { value: result };
   return summarizeMcpResult(result, raw, rawBytes);
 }
 
-async function summarizeMcpResult(result: unknown, raw: string, rawBytes: number): Promise<McpResultSummary> {
-  const { path: fullResultPath, error: resultWriteError } = await saveArtifact("mcp-result", raw);
+async function summarizeMcpResult(
+  result: unknown,
+  raw: string,
+  rawBytes: number,
+): Promise<{ value: McpResultSummary; spillPath?: string; spillWriteError?: string }> {
+  // Spill readable JSON so recovery tools can address the artifact line by
+  // line. Serialization stays whole-result (never a new guaranteed memory
+  // bound); the compact measurement above remains the details-budget metric.
+  let spillText: string;
+  try {
+    spillText = JSON.stringify(result, null, 2) ?? raw;
+  } catch {
+    spillText = raw;
+  }
+  const { path: fullResultPath, error: resultWriteError } = await saveArtifact("mcp-result", spillText);
 
   const record = asRecord(result);
   const content = Array.isArray(record?.content) ? record.content : [];
@@ -303,7 +344,11 @@ async function summarizeMcpResult(result: unknown, raw: string, rawBytes: number
     if (extraFields.length > 0) summary.extraFields = extraFields;
   }
 
-  return summary;
+  return {
+    value: summary,
+    ...(fullResultPath !== undefined ? { spillPath: fullResultPath } : {}),
+    ...(resultWriteError !== undefined ? { spillWriteError: resultWriteError } : {}),
+  };
 }
 
 function summarizeContent(content: unknown[]): Array<Record<string, unknown>> {

@@ -2,7 +2,7 @@ import type { AgentToolResult, ToolInfo } from "@earendil-works/pi-coding-agent"
 import { UrlElicitationRequiredError, type Client } from "@modelcontextprotocol/client";
 import { createRequire } from "node:module";
 import type { McpExtensionState } from "./state.ts";
-import type { ToolMetadata, McpContent } from "./types.ts";
+import type { ToolMetadata } from "./types.ts";
 import { getServerPrefix, isServerDisabled, parseUiPromptHandoff } from "./types.ts";
 import { lazyConnect, markKeepAliveAfterConnect, notifyToolMetadataUpdated, updateServerMetadata, updateMetadataCache, getFailureAgeSeconds, updateStatusBar, clearFailure, recordFailure } from "./init.ts";
 import { abortable, throwIfAborted } from "./abort.ts";
@@ -10,7 +10,7 @@ import { combineAbortSignals, isAbortError } from "./runtime-owner.ts";
 import { buildToolMetadata, getToolNames, findToolByName, formatSchema } from "./tool-metadata.ts";
 import { renderTsShape } from "./ts-shape.ts";
 import { reconstructPromptMetadata } from "./metadata-cache.ts";
-import { resolveMcpResultContent, transformMcpContent } from "./tool-registrar.ts";
+import { resolveMcpResultContent } from "./tool-registrar.ts";
 import { guardMcpOutput, guardedMcpDetails, resolveMcpOutputGuardOptions } from "./mcp-output-guard.ts";
 import { maybeStartUiSession, summarizeUiSessionResult, type UiSessionRuntime } from "./ui-session.ts";
 import { formatAuthRequiredMessage, formatMcpStatus, formatTerminalError, invokeContainedCallback, resolveServerUrl, truncateAtWord } from "./utils.ts";
@@ -22,6 +22,7 @@ import { logger } from "./logger.ts";
 
 type ProxyToolResult = AgentToolResult<Record<string, unknown>>;
 type ClientCallToolResult = Awaited<ReturnType<Client["callTool"]>>;
+export type { ClientCallToolResult };
 
 const require = createRequire(import.meta.url);
 const MAX_REGEX_SEARCH_QUERY_LENGTH = 256;
@@ -751,6 +752,13 @@ export async function executeCall(
   getPiTools?: () => ToolInfo[],
   signal?: AbortSignal,
   origin?: "proxy" | "script",
+  /**
+   * Call-local capture of the decoded SDK result, consumed by the script
+   * runner so `tools.call` returns the acquired result even when the
+   * details budget reduced `details.mcpResult` to a summary. Never
+   * persisted, never reread — a synchronous out-parameter, not a cache.
+   */
+  captureDecodedResult?: (result: ClientCallToolResult) => void,
 ): Promise<ProxyToolResult> {
   const ownedSignal = combineAbortSignals(state.owner?.signal, signal);
   throwIfAborted(ownedSignal);
@@ -1149,13 +1157,15 @@ export async function executeCall(
         _meta: uiSession?.requestMeta,
       }, requestOptions), ownedSignal),
     );
+    captureDecodedResult?.(result);
 
     if (toolMeta.uiResourceUri) {
       uiSession?.sendToolResult(result as unknown as import("@modelcontextprotocol/client").CallToolResult);
 
       if (result.isError) {
-        const mcpContent = (result.content ?? []) as McpContent[];
-        const content = transformMcpContent(mcpContent);
+        // Error results also carry structuredContent; route through the shared
+        // resolver so those facts reach the model alongside the error text.
+        const content = resolveMcpResultContent(result as Record<string, unknown>);
         const outputContent = content.length > 0 ? content : [{ type: "text" as const, text: "(empty result)" }];
         const schemaText = toolMeta.inputSchema ? `\n\nExpected parameters:\n${formatSchema(toolMeta.inputSchema)}` : "";
         const guarded = await guardMcpOutput(outputContent, { ...outputGuardOptions, prefix: "Error: ", suffix: schemaText, emptyTextFallback: "Tool execution failed", rawMcpResult: result });
@@ -1183,8 +1193,9 @@ export async function executeCall(
     }
 
     if (result.isError) {
-      const mcpContent = (result.content ?? []) as McpContent[];
-      const content = transformMcpContent(mcpContent);
+      // Error results also carry structuredContent; route through the shared
+      // resolver so those facts reach the model alongside the error text.
+      const content = resolveMcpResultContent(result as Record<string, unknown>);
       const outputContent = content.length > 0 ? content : [{ type: "text" as const, text: "(empty result)" }];
       const schemaText = toolMeta.inputSchema ? `\n\nExpected parameters:\n${formatSchema(toolMeta.inputSchema)}` : "";
       const guarded = await guardMcpOutput(outputContent, { ...outputGuardOptions, prefix: "Error: ", suffix: schemaText, emptyTextFallback: "Tool execution failed", rawMcpResult: result });

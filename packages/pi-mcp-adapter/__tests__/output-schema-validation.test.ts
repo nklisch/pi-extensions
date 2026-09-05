@@ -61,7 +61,12 @@ describe("MCP output schema validation", () => {
       : await createDirectToolExecutor(() => state, () => null, directSpec(name))("id", {});
 
     expect(result.details).not.toMatchObject({ error: "call_failed" });
-    expect(result.content).toEqual([{ type: "text", text: name }]);
+    // The server's text summary stays first; the validated structuredContent
+    // facts are delivered alongside it instead of being suppressed.
+    expect(result.content[0]).toMatchObject({ type: "text", text: name });
+    const text = result.content.map((block) => (block.type === "text" ? block.text : "")).join("\n");
+    expect(text).toContain('"values"');
+    expect(text).toContain('"ok"');
   });
 
   it.each([

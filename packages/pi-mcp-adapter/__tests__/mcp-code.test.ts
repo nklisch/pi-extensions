@@ -266,6 +266,43 @@ describe("runMcpScript", () => {
     });
   });
 
+  it("returns the acquired result to scripts even when details exceed the budget", async () => {
+    // A tiny details budget reduces details.mcpResult to a summary; the script
+    // data envelope must carry the actual decoded result instead.
+    const budgetState = {
+      ...state,
+      config: {
+        settings: { outputGuard: { detailsMaxBytes: 50 } },
+        mcpServers: { fixture: definition },
+      },
+    } as unknown as McpExtensionState;
+    const big = "payload-".repeat(400); // ~2800 bytes, far beyond 50
+    const result = await runMcpScript(
+      budgetState,
+      'return await tools.call("fixture_echo", { value: "' + big + '" });',
+    );
+
+    const payload = JSON.parse(textBlocks(result).at(-1)!);
+    expect(payload.ok).toBe(true);
+    // The actual decoded result — a summary would only carry key previews.
+    expect(payload.data.content[0]).toEqual({ type: "text", text: big });
+    expect(payload.data.structuredContent).toEqual({ echoed: big });
+    expect(result.details).toMatchObject({ calls: [{ path: "fixture_echo", ok: true }] });
+  });
+
+  it("surfaces error-result structured facts in the failure envelope text", async () => {
+    const result = await runMcpScript(state, 'return await tools.fixture_fail({ value: "v-1" });');
+
+    const payload = JSON.parse(textBlocks(result).at(-1)!);
+    expect(payload).toMatchObject({
+      ok: false,
+      error: { code: "tool_error", message: expect.stringContaining("fixture failure") },
+    });
+    // The failed call's structured facts are not silently dropped.
+    expect(payload.error.message).toContain('"failed": true');
+    expect(payload.error.message).toContain('"echo": "v-1"');
+  });
+
   it("returns a failure envelope and lets the script continue", async () => {
     const result = await runMcpScript(
       state,

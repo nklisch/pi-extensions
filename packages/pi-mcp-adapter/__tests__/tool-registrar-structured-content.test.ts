@@ -2,13 +2,21 @@ import { describe, it, expect } from "vitest";
 import { resolveMcpResultContent } from "../tool-registrar.ts";
 
 describe("resolveMcpResultContent", () => {
-  it("returns transformed content blocks when content is present", () => {
+  it("appends distinct structured content when content is present", () => {
+    // Regression: the resolver used to suppress structuredContent entirely
+    // whenever any content block existed, losing server-provided facts.
     const blocks = resolveMcpResultContent({
-      content: [{ type: "text", text: "hello" }],
-      structuredContent: { ignored: true },
+      content: [{ type: "text", text: "Captured 1 page (ok)" }],
+      structuredContent: { pages: [{ target_id: "p1" }], correlation_id: "c-1" },
     });
 
-    expect(blocks).toEqual([{ type: "text", text: "hello" }]);
+    expect(blocks).toEqual([
+      { type: "text", text: "Captured 1 page (ok)" },
+      {
+        type: "text",
+        text: `[Structured content]\n${JSON.stringify({ pages: [{ target_id: "p1" }], correlation_id: "c-1" }, null, 2)}`,
+      },
+    ]);
   });
 
   it("falls back to structuredContent when content is empty", () => {
@@ -50,13 +58,102 @@ describe("resolveMcpResultContent", () => {
     ).toEqual([{ type: "text", text: "{}" }]);
   });
 
-  it("does not fall back when content has a non-text block", () => {
+  it("appends an empty structuredContent object alongside existing content", () => {
     const blocks = resolveMcpResultContent({
-      content: [{ type: "image", data: "abc", mimeType: "image/png" }],
-      structuredContent: { should: "not appear" },
+      content: [{ type: "text", text: "done" }],
+      structuredContent: {},
     });
 
-    expect(blocks).toEqual([{ type: "image", data: "abc", mimeType: "image/png" }]);
+    expect(blocks).toEqual([
+      { type: "text", text: "done" },
+      { type: "text", text: "[Structured content]\n{}" },
+    ]);
+  });
+
+  it("preserves images and appends structured facts without base64 duplication", () => {
+    const image = { type: "image", data: "AA==", mimeType: "image/png" };
+    const blocks = resolveMcpResultContent({
+      content: [image],
+      structuredContent: { correlation_id: "shot-1" },
+    });
+
+    expect(blocks).toEqual([
+      image,
+      { type: "text", text: '[Structured content]\n{\n  "correlation_id": "shot-1"\n}' },
+    ]);
+    // The image stays native: no base64 leaks into any text block.
+    expect(JSON.stringify(blocks.filter((block) => block.type === "text"))).not.toContain("AA==");
+  });
+
+  it("preserves resource links and appends structured facts", () => {
+    const blocks = resolveMcpResultContent({
+      content: [
+        { type: "resource_link", name: "artifact", uri: "krometrail://fixture/artifact" } as never,
+      ],
+      structuredContent: { range_handle: "r-1" },
+    });
+
+    expect(blocks).toEqual([
+      { type: "text", text: "[Resource Link: artifact]\nURI: krometrail://fixture/artifact" },
+      { type: "text", text: '[Structured content]\n{\n  "range_handle": "r-1"\n}' },
+    ]);
+  });
+
+  it("suppresses the append only when a whole text block is the same JSON value", () => {
+    const structured = { echoed: "round trip" };
+    for (const echo of [JSON.stringify(structured), JSON.stringify(structured, null, 2)]) {
+      expect(
+        resolveMcpResultContent({
+          content: [{ type: "text", text: echo }],
+          structuredContent: structured,
+        }),
+      ).toEqual([{ type: "text", text: echo }]);
+    }
+  });
+
+  it("suppresses the append when any one text block equals the structured value", () => {
+    const structured = { echoed: "yes" };
+    const blocks = resolveMcpResultContent({
+      content: [
+        { type: "text", text: "prose context" },
+        { type: "text", text: JSON.stringify(structured) },
+      ],
+      structuredContent: structured,
+    });
+
+    expect(blocks).toEqual([
+      { type: "text", text: "prose context" },
+      { type: "text", text: JSON.stringify(structured) },
+    ]);
+  });
+
+  it("does not deduplicate prose, substrings, or partial objects", () => {
+    const structured = { status: "ok", items: [1, 2, 3] };
+
+    // Prose mentioning the value is not the value.
+    expect(
+      resolveMcpResultContent({
+        content: [{ type: "text", text: `Result: ${JSON.stringify(structured)}` }],
+        structuredContent: structured,
+      }),
+    ).toHaveLength(2);
+
+    // A substring/partial projection is not the value.
+    expect(
+      resolveMcpResultContent({
+        content: [{ type: "text", text: JSON.stringify({ status: "ok" }) }],
+        structuredContent: structured,
+      }),
+    ).toHaveLength(2);
+
+    // Whitespace/formatting differences are still the same JSON value only
+    // when the whole block parses equal; reordered keys compare equal.
+    expect(
+      resolveMcpResultContent({
+        content: [{ type: "text", text: '{"items":[1,2,3],"status":"ok"}' }],
+        structuredContent: structured,
+      }),
+    ).toHaveLength(1);
   });
 
   it("degrades gracefully when structuredContent is not serializable", () => {
@@ -67,14 +164,33 @@ describe("resolveMcpResultContent", () => {
 
     expect(blocks).toHaveLength(1);
     expect(blocks[0]).toMatchObject({ type: "text" });
+
+    // With content present, the failure is an explicit presentation notice,
+    // never a thrown error that would turn a dispatched call into a failure.
+    const withContent = resolveMcpResultContent({
+      content: [{ type: "text", text: "dispatched" }],
+      structuredContent: circular,
+    });
+    expect(withContent).toHaveLength(2);
+    expect(withContent[1]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("Structured content could not be presented"),
+    });
   });
 
-  it("prefers real content over structuredContent even for a single block", () => {
+  it("appends structured facts after transformed non-text blocks", () => {
     const blocks = resolveMcpResultContent({
-      content: [{ type: "text", text: "real" }],
-      structuredContent: { fallback: "should not appear" },
+      content: [
+        { type: "audio", mimeType: "audio/wav" } as never,
+        { type: "resource", resource: { uri: "file:///tmp/x", text: "data" } } as never,
+      ],
+      structuredContent: { done: true },
     });
 
-    expect(blocks).toEqual([{ type: "text", text: "real" }]);
+    expect(blocks).toEqual([
+      { type: "text", text: "[Audio content: audio/wav]" },
+      { type: "text", text: "[Resource: file:///tmp/x]\ndata" },
+      { type: "text", text: '[Structured content]\n{\n  "done": true\n}' },
+    ]);
   });
 });

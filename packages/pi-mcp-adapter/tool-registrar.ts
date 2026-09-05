@@ -2,7 +2,11 @@
 // NOTE: Tools are NOT registered with Pi - only the unified `mcp` proxy tool is registered.
 // This keeps the LLM context small (1 tool instead of 100s).
 
+import { isDeepStrictEqual } from "node:util";
 import type { McpContent, ContentBlock } from "./types.ts";
+
+const STRUCTURED_CONTENT_LABEL = "[Structured content]";
+const STRUCTURED_CONTENT_UNAVAILABLE = "[Structured content could not be presented: the server sent data this adapter cannot serialize.]";
 
 /**
  * Transform MCP content types to Pi content blocks.
@@ -47,17 +51,56 @@ export function transformMcpContent(content: McpContent[]): ContentBlock[] {
 
 /**
  * Resolve a tool result's content blocks, falling back to structuredContent
- * when content is empty.
+ * when content is empty and appending structuredContent as distinct text when
+ * content is present.
+ *
+ * A result may carry both: a human summary in `content` and distinct facts in
+ * `structuredContent`. Dropping the structured half just because a summary
+ * exists loses facts the model cannot recover, so the serialized value is
+ * appended as its own text block — unless a whole existing text block already
+ * represents the same JSON value (servers commonly echo it as text), in which
+ * case appending would only duplicate output. Prose, substrings, and partial
+ * objects never count as delivered: the whole block must parse as JSON and
+ * compare deeply equal.
  */
 export function resolveMcpResultContent(result: Record<string, unknown>): ContentBlock[] {
   const blocks = transformMcpContent((Array.isArray(result.content) ? result.content : []) as McpContent[]);
-  if (blocks.length > 0) return blocks;
+  const structured = result.structuredContent;
 
-  if (result.structuredContent !== undefined && result.structuredContent !== null) {
-    return [{ type: "text" as const, text: stringifyStructuredContent(result.structuredContent) }];
+  if (structured === undefined || structured === null) return blocks;
+  if (blocks.length === 0) {
+    return [{ type: "text" as const, text: stringifyStructuredContent(structured) }];
   }
 
-  return [];
+  const alreadyDelivered = blocks.some(
+    (block) => block.type === "text" && textIsSameJsonValue(block.text, structured),
+  );
+  if (alreadyDelivered) return blocks;
+
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(structured, null, 2);
+  } catch {
+    // The structured facts exist but cannot be rendered (e.g. a circular
+    // structure). Say so explicitly instead of failing the whole tool call —
+    // the raw result still carries the value in details.mcpResult.
+    return [...blocks, { type: "text" as const, text: STRUCTURED_CONTENT_UNAVAILABLE }];
+  }
+  // JSON.stringify only returns undefined for values with no JSON
+  // representation at all; structuredContent is an object here, so this is
+  // defensive rather than an expected path.
+  if (serialized === undefined) {
+    return [...blocks, { type: "text" as const, text: STRUCTURED_CONTENT_UNAVAILABLE }];
+  }
+  return [...blocks, { type: "text" as const, text: `${STRUCTURED_CONTENT_LABEL}\n${serialized}` }];
+}
+
+function textIsSameJsonValue(text: string, value: unknown): boolean {
+  try {
+    return isDeepStrictEqual(JSON.parse(text), value);
+  } catch {
+    return false;
+  }
 }
 
 function stringifyStructuredContent(value: unknown): string {

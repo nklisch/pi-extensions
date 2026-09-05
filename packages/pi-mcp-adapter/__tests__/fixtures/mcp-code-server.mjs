@@ -32,7 +32,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (request.params.name === "fail") {
-    return { isError: true, content: [{ type: "text", text: "fixture failure" }] };
+    return {
+      isError: true,
+      content: [{ type: "text", text: "fixture failure" }],
+      structuredContent: { failed: true, echo: request.params.arguments?.value ?? null },
+    };
   }
   if (request.params.name === "hang") {
     return new Promise(() => {});
