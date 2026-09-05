@@ -271,12 +271,14 @@ describe("structuredContent fallback — proxy executeCall", () => {
 });
 
 /**
- * Provider-boundary evidence: build the exact ToolResultMessage Pi delivers to
- * the model from an adapter tool result, then run the exported provider-input
- * construction (convertToLlm). No network request or model call is made —
- * convertToLlm is the pure message transform Pi's agent loop feeds providers.
+ * Message-level delivery evidence: Pi turns an AgentToolResult into a
+ * ToolResultMessage and hands message content to the provider layer.
+ * convertToLlm (the exported Pi message transform, pi-coding-agent 0.82.0)
+ * passes toolResult messages through unchanged — these captures prove what
+ * the message layer would carry, NOT provider-specific request construction
+ * (covered separately below with the actual pinned provider implementation).
  */
-describe("provider-input construction captures", () => {
+describe("provider message delivery via convertToLlm — pi-coding-agent 0.82.0", () => {
   beforeEach(() => {
     vi.resetModules();
     mocks.lazyConnect.mockReset().mockResolvedValue(true);
@@ -337,7 +339,7 @@ describe("provider-input construction captures", () => {
     expect(textBlocks).toContain('"interaction_id": "i-7"');
   });
 
-  it("bounds oversized provider input and keeps native images out of the text stream", async () => {
+  it("bounds oversized message content and keeps native images out of the text stream", async () => {
     const { executeCall } = await import("../proxy-modes.ts");
     const bigText = "z".repeat(200 * 1024);
     const state = makeState({
@@ -360,5 +362,159 @@ describe("provider-input construction captures", () => {
     // Image data is delivered as native image content, never inlined as text.
     expect(joinedText).not.toContain("QQ==");
     expect(content.some((block) => block.type === "image")).toBe(true);
+  });
+});
+
+/**
+ * Offline provider request construction with the actual pinned provider
+ * implementation: pi-ai 0.82.0's anthropic-messages API provider. The request
+ * payload is captured through the provider's own onPayload seam before
+ * dispatch; dispatch itself is stopped with an already-aborted signal and a
+ * dead loopback baseUrl (127.0.0.1:9), so no network request is made and only
+ * a fixture API key is present. Installed 0.85.1 Pi, native Claude/Codex
+ * clients, Rust MCP servers, and live providers are NOT qualified by this.
+ */
+describe("offline provider request construction — pi-ai 0.82.0 anthropic-messages", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mocks.lazyConnect.mockReset().mockResolvedValue(true);
+    mocks.getFailureAgeSeconds.mockReset().mockReturnValue(null);
+  });
+
+  async function capturedAnthropicPayload(toolResult: { content: unknown[]; details: unknown; isError: boolean }) {
+    const { anthropicProvider } = await import("@earendil-works/pi-ai/providers/anthropic");
+    const provider = anthropicProvider();
+    const model = {
+      id: "fixture-claude",
+      name: "Fixture Claude",
+      api: "anthropic-messages" as const,
+      provider: "anthropic" as const,
+      baseUrl: "http://127.0.0.1:9",
+      reasoning: false,
+      input: ["text", "image"] as ("text" | "image")[],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+      contextWindow: 200_000,
+      maxTokens: 4_096,
+    };
+    const controller = new AbortController();
+    const payloads: unknown[] = [];
+    const stream = provider.stream(
+      model as never,
+      {
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "call-1", name: "mcp", arguments: {} }],
+            api: "anthropic-messages",
+            provider: "anthropic",
+            model: "fixture-claude",
+            usage: {},
+            stopReason: "toolUse",
+            timestamp: Date.now(),
+          },
+          {
+            role: "toolResult",
+            toolCallId: "call-1",
+            toolName: "mcp",
+            content: toolResult.content,
+            details: toolResult.details,
+            isError: toolResult.isError,
+            timestamp: Date.now(),
+          },
+        ],
+      } as never,
+      {
+        apiKey: "fixture-not-a-real-key",
+        signal: controller.signal,
+        onPayload: (payload: unknown) => {
+          payloads.push(payload);
+          // Stop dispatch before any request leaves the process.
+          controller.abort();
+          return undefined;
+        },
+      } as never,
+    );
+    try {
+      for await (const _event of stream) {
+        void _event;
+      }
+    } catch {
+      // Expected: dispatch is aborted before reaching any endpoint.
+    }
+    return payloads;
+  }
+
+  it("carries structured sentinels, native images, and error semantics in the built request", async () => {
+    const { executeCall } = await import("../proxy-modes.ts");
+    const structured = { session_id: "s-1", pages: [{ target_id: "p-1" }] };
+    const state = makeState({
+      isError: false,
+      content: [
+        { type: "image", data: "PROVIDERIMGCANARY", mimeType: "image/png" },
+        { type: "text", text: "2 pages" },
+      ],
+      structuredContent: structured,
+    }, "list_pages");
+
+    const result = await executeCall(state, "demo_list_pages", {}, "demo");
+    const payloads = await capturedAnthropicPayload({
+      content: result.content,
+      details: result.details,
+      isError: toolErrorOverride(result.details)?.isError ?? false,
+    });
+    expect(payloads).toHaveLength(1);
+    const payload = payloads[0] as { model: string; messages: Array<{ content: unknown }> };
+    expect(payload.model).toBe("fixture-claude");
+    const toolResultBlock = payload.messages
+      .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+      .find((block) => (block as Record<string, unknown>).type === "tool_result") as {
+      content: string | Array<Record<string, unknown>>;
+      is_error: boolean;
+    };
+    expect(toolResultBlock.is_error).toBe(false);
+    const blocks: Array<Record<string, unknown>> = typeof toolResultBlock.content === "string"
+      ? [{ type: "text", text: toolResultBlock.content }]
+      : toolResultBlock.content;
+    const joinedText = blocks.filter((block) => block.type === "text").map((block) => block.text as string).join("\n");
+    // Structured facts and the summary text are inside the tool_result content.
+    expect(joinedText).toContain("2 pages");
+    expect(joinedText).toContain('"session_id": "s-1"');
+    expect(joinedText).toContain('"target_id": "p-1"');
+    // The image travels as a native base64 source, never as model text.
+    const imageBlock = blocks.find((block) => block.type === "image") as { source?: { type?: string; data?: string } };
+    expect(imageBlock.source).toMatchObject({ type: "base64", data: "PROVIDERIMGCANARY" });
+    expect(joinedText).not.toContain("PROVIDERIMGCANARY");
+  });
+
+  it("marks failed MCP results as errors in the built request", async () => {
+    const { executeCall } = await import("../proxy-modes.ts");
+    const structured = { interaction_id: "i-7", status: "failed" };
+    const state = makeState({
+      isError: true,
+      content: [{ type: "text", text: "dispatch rejected" }],
+      structuredContent: structured,
+    }, "click");
+
+    const result = await executeCall(state, "demo_click", {}, "demo");
+    const payloads = await capturedAnthropicPayload({
+      content: result.content,
+      details: result.details,
+      isError: toolErrorOverride(result.details)?.isError ?? false,
+    });
+    expect(payloads).toHaveLength(1);
+
+    const payload = payloads[0] as { messages: Array<{ content: unknown }> };
+    const toolResultBlock = payload.messages
+      .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+      .find((block) => (block as Record<string, unknown>).type === "tool_result") as {
+      content: string | Array<Record<string, unknown>>;
+      is_error: boolean;
+    };
+    expect(toolResultBlock.is_error).toBe(true);
+    const text = typeof toolResultBlock.content === "string"
+      ? toolResultBlock.content
+      : toolResultBlock.content.map((block) => (block.type === "text" ? block.text : "")).join("\n");
+    expect(text).toContain("Error: dispatch rejected");
+    expect(text).toContain('"interaction_id": "i-7"');
   });
 });

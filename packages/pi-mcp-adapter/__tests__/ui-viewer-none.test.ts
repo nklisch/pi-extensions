@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { ConsentManager } from "../consent-manager.ts";
 import { createDirectToolExecutor } from "../direct-tools.ts";
@@ -189,6 +190,41 @@ describe("MCP_UI_VIEWER=none", () => {
     expect(result.details).toMatchObject({ uiOpen: false, uiViewer: "suppressed" });
     expect(result.details.uiUrl).toContain("http://localhost:");
     expect(state.openBrowser).not.toHaveBeenCalled();
+
+    state.uiServer?.close("test-cleanup");
+  });
+
+  it("keeps oversized UI-handoff guidance recoverable through the text spill", async () => {
+    // Regression: when the raw result also exceeded the details budget, the
+    // guard reused the raw-JSON spill as the sole recovery artifact. The UI
+    // handoff suffix (window state and viewer URL) exists only in the composed
+    // text, so it was lost from both the preview and the recovery artifact.
+    process.env.MCP_UI_VIEWER = "none";
+    const { state, callTool } = makeState();
+    callTool.mockResolvedValue({
+      isError: false,
+      content: [{ type: "text", text: `flood ${"u".repeat(60_000)}` }],
+      structuredContent: { flooded: true },
+    });
+    state.config.settings.outputGuard = { maxBytes: 5000, detailsMaxBytes: 1000 };
+
+    const result = await executeCall(state, "demo_app", {}, "demo");
+
+    const returnedText = textOf(result);
+    expect(returnedText).toContain("MCP text output truncated");
+    expect(returnedText.length).toBeLessThan(20_000);
+    expect(result.details).toMatchObject({ uiOpen: false, uiViewer: "suppressed" });
+
+    // The composed-text spill retains the UI handoff that the raw result
+    // cannot; the raw details spill still exists separately.
+    const textSpillPath = (result.details.outputGuard as { fullOutputPath?: string }).fullOutputPath;
+    expect(textSpillPath).toBeTruthy();
+    const savedText = await readFile(textSpillPath!, "utf8");
+    expect(savedText).toContain("MCP UI window was suppressed");
+    expect(savedText).toContain(String(result.details.uiUrl));
+    const rawSpillPath = (result.details.mcpResult as { fullResultPath?: string }).fullResultPath;
+    expect(rawSpillPath).toBeTruthy();
+    expect(rawSpillPath).not.toBe(textSpillPath);
 
     state.uiServer?.close("test-cleanup");
   });

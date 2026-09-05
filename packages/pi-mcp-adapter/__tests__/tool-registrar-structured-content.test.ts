@@ -127,6 +127,52 @@ describe("resolveMcpResultContent", () => {
     ]);
   });
 
+  it("compares deeply nested values without stack exhaustion", () => {
+    // SDK decoding passes depth-2000 JSON, but recursive deep-equality
+    // implementations overflow the stack on it, misread the failure as
+    // inequality, and then serialize an enormous duplicate. The whole-block
+    // comparison must stay depth-tolerant.
+    let deepSame = { fact: true } as Record<string, unknown>;
+    for (let i = 0; i < 2000; i++) deepSame = { x: deepSame };
+    let deepDifferent = { fact: false } as Record<string, unknown>;
+    for (let i = 0; i < 2000; i++) deepDifferent = { x: deepDifferent };
+
+    // Same deep value: no duplicate append.
+    expect(
+      resolveMcpResultContent({
+        content: [{ type: "text", text: JSON.stringify(deepSame) }],
+        structuredContent: deepSame,
+      }),
+    ).toHaveLength(1);
+
+    // Distinct deep value: facts still delivered exactly once.
+    const distinct = resolveMcpResultContent({
+      content: [{ type: "text", text: JSON.stringify(deepDifferent) }],
+      structuredContent: deepSame,
+    });
+    expect(distinct).toHaveLength(2);
+    expect(distinct[1]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining('"fact": true'),
+    });
+  });
+
+  it("compares reordered deep keys as the same JSON value", () => {
+    let text = '{"c":2,"b":1}';
+    let value = { b: 1, c: 2 } as Record<string, unknown>;
+    for (let i = 0; i < 300; i++) {
+      text = `{"x":${text},"z":${i}}`;
+      value = { x: value, z: i };
+    }
+
+    expect(
+      resolveMcpResultContent({
+        content: [{ type: "text", text }],
+        structuredContent: value,
+      }),
+    ).toHaveLength(1);
+  });
+
   it("does not deduplicate prose, substrings, or partial objects", () => {
     const structured = { status: "ok", items: [1, 2, 3] };
 

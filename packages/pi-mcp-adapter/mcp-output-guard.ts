@@ -11,6 +11,12 @@ export const DEFAULT_MCP_DETAILS_MAX_BYTES = 16 * 1024;
 const CONTENT_SUMMARY_LIMIT = 20;
 const KEY_PREVIEW_LIMIT = 20;
 const KEY_MAX_CHARS = 120;
+/**
+ * Read-style tools refuse single lines beyond roughly 50 KB, so a spilled
+ * artifact whose longest line exceeds this cannot honestly advertise
+ * line-offset paging. Measured against the actual composed text.
+ */
+const PAGEABLE_LINE_LIMIT_BYTES = 50_000;
 
 type Recordish = Record<string, unknown>;
 
@@ -88,10 +94,12 @@ export function guardedMcpDetails(guarded: GuardedMcpOutput): Record<string, unk
  * they are delivered to the provider as native image content, not text context.
  *
  * When the raw details result also overflows detailsMaxBytes, its full JSON is
- * spilled once and the text truncation notice reuses that same artifact as the
- * recovery path instead of writing a second, redundant text spill. The raw
- * result — not the model-facing preview — is the data authority, so the
- * recovery artifact holds the complete result.
+ * spilled once. The text truncation notice reuses that artifact as the recovery
+ * path only when no affixes are present (the composed text is then contained in
+ * the raw result); adapter affixes such as schema guidance or UI handoff exist
+ * only in the composed text, so those cases keep the composed-text spill for
+ * recovery alongside the raw details spill. The raw result — not the
+ * model-facing preview — is the data authority.
  */
 export async function guardMcpOutput(
   content: ContentBlock[],
@@ -135,18 +143,30 @@ export async function guardMcpOutput(
   let outputGuard: McpOutputGuardDetails | undefined;
 
   if (stats.bytes > maxBytes || stats.lines > maxLines) {
-    // Reuse the full MCP-result spill when the guard wrote one in this call;
-    // only a spill that actually exists can serve as recovery. Otherwise fall
-    // back to the guard's own full-text spill.
+    // Recovery choice is affix-aware. Adapter affixes (error prefixes, schema
+    // guidance, UI handoff) exist only in the composed text — the raw result
+    // JSON cannot recover them — so the composed-text spill is retained
+    // whenever affixes are present, alongside the raw details spill. The raw
+    // spill is reused as the single recovery artifact only when there are no
+    // affixes and the composed text is therefore fully contained in the raw
+    // result; only a spill that actually exists can serve as recovery.
+    const affixesPresent = prefix !== "" || suffix !== "";
     const resultSpillPath = boundedResult?.spillPath;
-    const recovery = resultSpillPath !== undefined
+    const reuseResultSpill = !affixesPresent && resultSpillPath !== undefined;
+    const longestLineBytes = composedOutput.length === 0
+      ? 0
+      : Math.max(...composedOutput.split("\n").map(byteLength));
+    const recovery = reuseResultSpill
       ? { kind: "mcp-result" as const, path: resultSpillPath }
       : await saveArtifact("output", composedOutput).then((saved) => ({
           kind: "text" as const,
           ...(saved.path !== undefined ? { path: saved.path } : {}),
           ...(saved.error !== undefined ? { error: saved.error } : {}),
         }));
-    const notice = formatTruncationNotice(stats, recovery);
+    const notice = formatTruncationNotice(stats, recovery, {
+      longestLineBytes,
+      ...(resultSpillPath !== undefined ? { rawResultSpillPath: resultSpillPath } : {}),
+    });
     const previewBudget = reserveBudget(maxBytes, maxLines, notice);
     const preview = truncateHead(composedOutput, previewBudget.maxBytes, previewBudget.maxLines);
     const finalText = `${preview.content}\n\n${notice}`;
@@ -269,18 +289,29 @@ function truncateStringToBytes(value: string, maxBytes: number): string {
 function formatTruncationNotice(
   stats: { bytes: number; lines: number },
   recovery: { kind: "text" | "mcp-result"; path?: string; error?: string },
+  options: { longestLineBytes?: number; rawResultSpillPath?: string } = {},
 ): string {
   const base = `[MCP text output truncated: original ${stats.lines.toLocaleString()} lines / ${formatSize(stats.bytes)}.`;
-  if (recovery.path) {
-    // Label the artifact's actual format: the full-text spill is the composed
-    // text; the shared result spill is the complete MCP result as readable
-    // (pretty-printed) JSON, so line-based recovery tools genuinely apply.
-    const artifact = recovery.kind === "mcp-result"
-      ? "Full MCP result (JSON)"
-      : "Full text";
-    return `${base} ${artifact} saved to: ${recovery.path} — use read with offset/limit or grep to inspect.]`;
+  if (recovery.path && recovery.kind === "mcp-result") {
+    // The result spill is one JSON document: pretty-printing splits structure
+    // onto lines, but long string VALUES stay single lines that read-style
+    // tools refuse to page. Direct the model to JSON-aware local extraction.
+    return `${base} Full MCP result (JSON) saved to: ${recovery.path} — recover fields with JSON-aware local tools (grep -o for keys, or node -e 'JSON.parse(...)' to select fields or slice long strings); do not rely on read line paging.]`;
   }
-  return `${base} Full output could not be saved: ${recovery.error ?? "unknown error"}]`;
+  if (recovery.path) {
+    const longestLineBytes = options.longestLineBytes ?? 0;
+    if (longestLineBytes > PAGEABLE_LINE_LIMIT_BYTES) {
+      return `${base} Full text saved to: ${recovery.path} — use grep to inspect; the longest line (~${formatSize(longestLineBytes)}) exceeds read's per-line limit.]`;
+    }
+    return `${base} Full text saved to: ${recovery.path} — use read with offset/limit or grep to inspect.]`;
+  }
+  const textFailure = `${base} Full output could not be saved: ${recovery.error ?? "unknown error"}`;
+  if (options.rawResultSpillPath) {
+    // The composed guidance is unrecoverable, but the raw result spill that
+    // was written earlier still is; say so explicitly.
+    return `${textFailure} Raw MCP result (JSON) saved to: ${options.rawResultSpillPath} — recover fields with JSON-aware local tools.]`;
+  }
+  return `${textFailure}]`;
 }
 
 /**

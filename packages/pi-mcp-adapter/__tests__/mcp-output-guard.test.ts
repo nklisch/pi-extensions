@@ -62,6 +62,10 @@ describe("guardMcpOutput", () => {
     const returnedText = guarded.content[0].type === "text" ? guarded.content[0].text : "";
     expect(returnedText).toContain("MCP text output truncated");
     expect(returnedText).toContain("Full MCP result (JSON) saved to:");
+    // Honest recovery instructions for one JSON document: JSON-aware local
+    // extraction, never a promise of line-offset paging over embedded strings.
+    expect(returnedText).toContain("JSON-aware local tools");
+    expect(returnedText).not.toContain("use read with offset/limit");
     expect(returnedText).not.toContain("line-19");
 
     const summary = guarded.mcpResult as McpResultSummary;
@@ -89,6 +93,88 @@ describe("guardMcpOutput", () => {
     expect(returnedText).toContain("Full text saved to:");
     const saved = await readFile(guarded.outputGuard!.fullOutputPath!, "utf8");
     expect(saved).toBe(text);
+  });
+
+  it("retains the composed-text spill when affixes add information absent from the raw result", async () => {
+    // Adapter suffixes (schema guidance, UI handoff) exist only in the
+    // composed text; the raw result JSON cannot recover them. Both spills must
+    // exist and the notice must point at the one holding the guidance.
+    const text = "r".repeat(60_000);
+    const suffix = "\n\nExpected parameters:\nEXPECTED-SCHEMA-CANARY";
+    const rawMcpResult = { content: [{ type: "text", text }], isError: false };
+    const guarded = await guardMcpOutput(
+      [{ type: "text", text }],
+      { maxBytes: 10_000, maxLines: 2000, detailsMaxBytes: 1000, prefix: "Error: ", suffix, rawMcpResult },
+    );
+
+    // Composed-text spill retained for affix recovery.
+    expect(guarded.outputGuard?.fullOutputPath).toBeTruthy();
+    const savedText = await readFile(guarded.outputGuard!.fullOutputPath!, "utf8");
+    expect(savedText).toContain("Error: ");
+    expect(savedText).toContain("EXPECTED-SCHEMA-CANARY");
+    // Raw details spill still exists as the canonical-result artifact.
+    const summary = guarded.mcpResult as McpResultSummary;
+    expect(summary.fullResultPath).toBeTruthy();
+    expect(summary.fullResultPath).not.toBe(guarded.outputGuard!.fullOutputPath);
+    expect(JSON.parse(await readFile(summary.fullResultPath!, "utf8"))).toEqual(rawMcpResult);
+    // Returned content stays bounded; the notice points at the text artifact.
+    const returnedText = guarded.content[0].type === "text" ? guarded.content[0].text : "";
+    expect(returnedText.length).toBeLessThan(20_000);
+    expect(returnedText).toContain("Full text saved to:");
+    expect(returnedText).not.toContain("Full output could not be saved");
+  });
+
+  it("keeps truthful instructions for text spills with unpagedable lines", async () => {
+    const oneHugeLine = "L".repeat(100_000);
+    const guarded = await guardMcpOutput([{ type: "text", text: oneHugeLine }], { maxBytes: 1000, maxLines: 2000 });
+
+    const returnedText = guarded.content[0].type === "text" ? guarded.content[0].text : "";
+    expect(guarded.outputGuard?.fullOutputPath).toBeTruthy();
+    expect(returnedText).toContain("use grep to inspect");
+    expect(returnedText).toContain("exceeds read's per-line limit");
+    expect(returnedText).not.toContain("use read with offset/limit");
+  });
+
+  it("supports bounded JSON-aware recovery from the actual shared spill", async () => {
+    const rawMcpResult = {
+      content: [{ type: "text", text: "rows attached" }],
+      isError: false,
+      structuredContent: { correlation_id: "fact-1", rows: "y".repeat(120_000) },
+    };
+    const guarded = await guardMcpOutput(
+      [{ type: "text", text: "rows attached" }],
+      { maxBytes: 2000, maxLines: 2000, detailsMaxBytes: 500, rawMcpResult },
+    );
+
+    const summary = guarded.mcpResult as McpResultSummary;
+    expect(summary.fullResultPath).toBeTruthy();
+    const saved = await readFile(summary.fullResultPath!, "utf8");
+
+    // Exactly what a model can do locally with standard Node tooling: select a
+    // field and take a bounded slice of a long string value from the spill.
+    const recovered = JSON.parse(saved) as typeof rawMcpResult;
+    expect(recovered.structuredContent.correlation_id).toBe("fact-1");
+    const rowSlice = recovered.structuredContent.rows.slice(0, 200);
+    expect(rowSlice).toBe("y".repeat(200));
+    expect(rowSlice.length).toBeLessThanOrEqual(200);
+
+    // The model-facing text stays bounded and never inlines the long value.
+    const returnedText = guarded.content[0].type === "text" ? guarded.content[0].text : "";
+    expect(returnedText.length).toBeLessThan(5000);
+    expect(returnedText).not.toContain("yyyyyyy");
+  });
+
+  it("keeps image base64 out of the recovery notice and truncated text", async () => {
+    const image = { type: "image" as const, data: "IMGBASE64CANARY".repeat(100), mimeType: "image/png" };
+    const guarded = await guardMcpOutput(
+      [image, { type: "text", text: "z".repeat(60_000) }],
+      { maxBytes: 2000, maxLines: 2000, detailsMaxBytes: 500, rawMcpResult: { content: [{ type: "text", text: "z".repeat(60_000) }] } },
+    );
+
+    const returnedText = guarded.content.filter((block) => block.type === "text").map((block) => (block as { text: string }).text).join("\n");
+    expect(returnedText).not.toContain("IMGBASE64CANARY");
+    // The image passes through as native content next to the truncated text.
+    expect(guarded.content.some((block) => block.type === "image")).toBe(true);
   });
 
   it("falls back to the text spill when the result spill write fails", async () => {

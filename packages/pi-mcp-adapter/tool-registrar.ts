@@ -2,7 +2,6 @@
 // NOTE: Tools are NOT registered with Pi - only the unified `mcp` proxy tool is registered.
 // This keeps the LLM context small (1 tool instead of 100s).
 
-import { isDeepStrictEqual } from "node:util";
 import type { McpContent, ContentBlock } from "./types.ts";
 
 const STRUCTURED_CONTENT_LABEL = "[Structured content]";
@@ -96,11 +95,60 @@ export function resolveMcpResultContent(result: Record<string, unknown>): Conten
 }
 
 function textIsSameJsonValue(text: string, value: unknown): boolean {
+  let parsed: unknown;
   try {
-    return isDeepStrictEqual(JSON.parse(text), value);
+    parsed = JSON.parse(text);
   } catch {
     return false;
   }
+  try {
+    return jsonValuesEqual(parsed, value);
+  } catch {
+    // A comparison that could not complete is not an established inequality:
+    // appending on a failed comparison risks duplicating a giant value, while
+    // transport values are plain JSON, so this is defensive only.
+    return true;
+  }
+}
+
+/**
+ * Depth-tolerant equality for JSON-decoded values. Both sides come from JSON
+ * (wire text and SDK decode), so plain objects/arrays/primitives suffice; an
+ * explicit worklist keeps arbitrarily deep structures from exhausting the
+ * stack, and key order is irrelevant. This is a transport-value comparison,
+ * not a general object framework.
+ */
+function jsonValuesEqual(a: unknown, b: unknown): boolean {
+  const stack: Array<[unknown, unknown]> = [[a, b]];
+  while (stack.length > 0) {
+    const [x, y] = stack.pop()!;
+    if (x === y) continue;
+    if (
+      x === null || y === null ||
+      typeof x !== "object" || typeof y !== "object"
+    ) {
+      if (x !== y) return false;
+      continue;
+    }
+    const xIsArray = Array.isArray(x);
+    const yIsArray = Array.isArray(y);
+    if (xIsArray !== yIsArray) return false;
+    if (xIsArray && yIsArray) {
+      if (x.length !== y.length) return false;
+      for (let i = 0; i < x.length; i++) stack.push([x[i], y[i]]);
+      continue;
+    }
+    const xRecord = x as Record<string, unknown>;
+    const yRecord = y as Record<string, unknown>;
+    const xKeys = Object.keys(xRecord);
+    const yKeys = Object.keys(yRecord);
+    if (xKeys.length !== yKeys.length) return false;
+    for (const key of xKeys) {
+      if (!Object.hasOwn(yRecord, key)) return false;
+      stack.push([xRecord[key], yRecord[key]]);
+    }
+  }
+  return true;
 }
 
 function stringifyStructuredContent(value: unknown): string {

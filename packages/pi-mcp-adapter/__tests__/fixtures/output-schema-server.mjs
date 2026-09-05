@@ -43,6 +43,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     { name: "draft07-invalid", inputSchema: { type: "object" }, outputSchema: draft07InvalidSchema },
     { name: "draft2020-valid", inputSchema: { type: "object" }, outputSchema: draft2020Schema },
     { name: "draft2020-invalid", inputSchema: { type: "object" }, outputSchema: draft2020Schema },
+    { name: "flood-error", inputSchema: { type: "object", properties: {} } },
   ],
 }));
 
@@ -51,11 +52,17 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   if (name === "draft07-valid" || name === "draft2020-valid") {
     return { structuredContent: { values: ["ok", 1] }, content: [{ type: "text", text: name }] };
   }
-  if (name === "draft07-invalid") {
+  if (name === "draft07-invalid" || name === "draft2020-invalid") {
     return { structuredContent: { values: ["ok", 1, true] }, content: [{ type: "text", text: name }] };
   }
-  if (name === "draft2020-invalid") {
-    return { structuredContent: { values: ["ok", 1, true] }, content: [{ type: "text", text: name }] };
+  if (name === "flood-error") {
+    // Oversized error text: the model-facing preview truncates, so recovery
+    // of the adapter-appended schema guidance depends on the text spill.
+    return {
+      isError: true,
+      content: [{ type: "text", text: `flood ${"e".repeat(60_000)}` }],
+      structuredContent: { flooded: true },
+    };
   }
   throw new Error(`Unknown tool: ${name}`);
 });
