@@ -714,6 +714,39 @@
       "relationships": []
     },
     {
+      "path": ".work/backlog/bundled-adapter-upgrade-qualification.md",
+      "namespace": "work",
+      "kind": "backlog-item",
+      "id": "bundled-adapter-upgrade-qualification",
+      "title": "Pi package update leaves empty adapter directory",
+      "summary": null,
+      "updated": "2026-09-06",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".work/backlog/ncu-consumer-schema-discovery.md",
+      "namespace": "work",
+      "kind": "backlog-item",
+      "id": "ncu-consumer-schema-discovery",
+      "title": "Pi MCP describe omits referenced crop fields and compact field guidance",
+      "summary": null,
+      "updated": "2026-09-06",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".work/backlog/phantom-named-control-input-friction.md",
+      "namespace": "work",
+      "kind": "backlog-item",
+      "id": "phantom-named-control-input-friction",
+      "title": "Phantom named Ctrl+C did not interrupt the terminal fixture",
+      "summary": null,
+      "updated": "2026-09-06",
+      "status": null,
+      "relationships": []
+    },
+    {
       "path": ".work/backlog/subagents-ephemeral-extension-inheritance.md",
       "namespace": "work",
       "kind": "backlog-item",
