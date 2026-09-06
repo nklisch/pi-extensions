@@ -11,7 +11,7 @@ The package lives in the `nklisch/pi-extensions` monorepo under `packages/pi-mcp
 - Reviewed post-release fixes integrated through: `08fe82be1d55036d3960c4bb3fa77ed8707f2bca`
 - Selective reliability intake evaluated against `8243eba3421e301c88c047444f34ab7d5d57163e` (after upstream `2.32.1`, `10a45367e033a32026987a75d6f401e37340c86f`). This is not a wholesale integration through that commit: discovery/schema behavior and selected initialization, catalog, endpoint-diagnostic, and OAuth fixes were adapted to the local ownership model. The accepted design and release record enumerate the included and excluded changes.
 - Common ancestry used for three-way integration: `82724dccc13a49310530898f922bafff12b7f3fe` (`v2.11.0`)
-- npm package: `@nklisch/pi-mcp-adapter`, published through `2.21.0-nklisch.2` (trusted workflow `33024148610`, commit `d9052df46e8aae1c2a0a842e0d61ed5ef3ddbcb3`)
+- npm package: `@nklisch/pi-mcp-adapter`, published through `2.21.0-nklisch.4` (trusted workflow `34009640753`, source commit `b9504d5b208c83243cf47465c7bec30fe5b576de`; registry receipts and consumer qualification in `.work/releases/mcp-agent-reliability.md` at the repository root)
 - Security reports: the private GitHub security-advisory channel for the maintained package
 - License: MIT
 

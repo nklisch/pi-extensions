@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.21.0-nklisch.4] - Prepared
+## [2.21.0-nklisch.4] - 2026-09-06
 
 ### Improved
 

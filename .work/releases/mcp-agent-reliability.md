@@ -1,6 +1,6 @@
 ---
 release: mcp-agent-reliability
-status: prepared
+status: published
 date: 2026-09-06
 packages:
   - "@nklisch/pi-mcp-adapter@2.21.0-nklisch.4"
@@ -44,7 +44,7 @@ MIT license and upstream attribution are preserved. Adapter LICENSE SHA-256: `2d
 
 One Astra-high design, inline owner implementation, and exactly one independent Astra-high implementation review were used, as requested. All seven reproduced review findings were accepted and corrected: subscription caller lifetime, failed host removal bookkeeping, frozen startup recovery, call-triggered reconnect failure visibility, issuer-pinned replacement credentials, TTL renewal on persistence, and invalid script search scopes. Regression tests exercise the actual SDK subscription lifetime and actual adapter factory with a faulting host. Smaller schema/auth/script guidance issues were also corrected; no second review was commissioned.
 
-Local qualification uses Node `24.17.0` and Pi `0.82.0`. The adapter suite and 114 standalone OAuth tests pass. The root `npm run check` and packed-adapter qualification pass against the coordinated versions; the final publication gate also includes the picker-restoration correction. CI must qualify the exact source commit before publication. Windows behavior is covered by an independent 1280-code-unit store fixture, not a claim of testing a live Windows keyring.
+Local qualification uses Node `24.17.0` and Pi `0.82.0`. All 1,080 adapter tests and 114 standalone OAuth tests pass. The root `npm run check` and packed-adapter qualification pass against the coordinated versions; the final publication gate also includes the picker-restoration correction. CI must qualify the exact source commit before publication. Windows behavior is covered by an independent 1280-code-unit store fixture, not a claim of testing a live Windows keyring.
 
 The pre-existing Workbench validator failures remain out of scope: superseded/noncanonical `.work/archive` and a missing id in the older completed subagent-session item. Existing completed outcomes are not absorbed into this release. Unrelated Ollama work, its lock entries, and the existing structured-result release edits are excluded.
 
@@ -52,4 +52,34 @@ Documentation amendments preserve the existing reference structure and plain tec
 
 ## Publication receipts
 
-Pending trusted workflow publication and registry-byte qualification. Dispatch only the three selected packages, never `all`. No package is declared published from local build or preparation evidence.
+Published from source commit `b9504d5b208c83243cf47465c7bec30fe5b576de` through separate successful trusted workflow runs. Each run qualified the exact commit with the root checks before publishing. No unrelated package was selected.
+
+### @nklisch/pi-mcp-adapter@2.21.0-nklisch.4
+
+- Published: `2026-09-06T03:50:15.108Z`.
+- Workflow: https://github.com/nklisch/pi-extensions/actions/runs/34009640753
+- Tarball: https://registry.npmjs.org/@nklisch/pi-mcp-adapter/-/pi-mcp-adapter-2.21.0-nklisch.4.tgz
+- Integrity: `sha512-QdW8aUoA5G/M5rkFfY1EUZecaf15pYkXHkkM86eC/KZB8vY2tB8DeS9NLmmNWOF8k1Sy+VCiAHN9+wrMPaMxpg==`.
+- Provenance: https://registry.npmjs.org/-/npm/v1/attestations/@nklisch%2fpi-mcp-adapter@2.21.0-nklisch.4
+
+### @nklisch/pi-plugins@0.8.4
+
+- Published: `2026-09-06T04:01:57.510Z`.
+- Workflow: https://github.com/nklisch/pi-extensions/actions/runs/34010126443
+- Tarball: https://registry.npmjs.org/@nklisch/pi-plugins/-/pi-plugins-0.8.4.tgz
+- Integrity: `sha512-HpWgZ11b2nPBvK4RwDyF656ZWGBX5+EHKQCmCZYBeyzPcDEvLv+WmUdpmJz6CNnRLI5V6j0y52dBiEGa/8xmFQ==`.
+- Provenance: https://registry.npmjs.org/-/npm/v1/attestations/@nklisch%2fpi-plugins@0.8.4
+
+### @nklisch/pi-enhanced@0.4.4
+
+- Published: `2026-09-06T04:11:29.185Z`.
+- Workflow: https://github.com/nklisch/pi-extensions/actions/runs/34010522138
+- Tarball: https://registry.npmjs.org/@nklisch/pi-enhanced/-/pi-enhanced-0.4.4.tgz
+- Integrity: `sha512-1fN3HoMZ+kwJ0KsDwmFfpvt/QcIMkbNIJ4x4WfoVEkbgcQHqAvJM9aHzyCCBUzfpfEJLFHOymQKf4lyCxJl3Yw==`.
+- Provenance: https://registry.npmjs.org/-/npm/v1/attestations/@nklisch%2fpi-enhanced@0.4.4
+
+The registry omits `gitHead` for all three packages. Their SLSA provenance statements instead identify the exact source commit above and the corresponding workflow invocation; no missing registry field is inferred.
+
+Fresh temporary consumers installed each exact version from npm with Pi `0.82.0`. Registry-byte checks passed for standalone and programmatic ESM exports, private-export boundaries, CLI help (adapter), actual source-overlay registration, cold-search coverage, referenced exact schemas, and structured facts alongside native tool results. Host consumers resolve adapter `.4` and subagents `18.2.0-nklisch.1`. Enhanced contains Host `0.8.4`, adapter `.4`, unchanged subagents, and all five Clearance native artifacts (Linux x64/arm64, macOS x64/arm64, Windows x64). Those artifact checks confirm bundled presence, not execution on foreign platforms. Temporary consumers were removed.
+
+The active outcome was removed after verified completion. Local Pi installation was not changed; publication and isolated consumer qualification were the authorized release actions.

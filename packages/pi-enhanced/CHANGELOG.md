@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.4.4 — Prepared
+## v0.4.4 — 2026-09-06
 
 ### Fixed
 
