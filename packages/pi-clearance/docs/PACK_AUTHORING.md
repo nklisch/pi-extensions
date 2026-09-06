@@ -305,11 +305,11 @@ is not covered makes a project-local allow return `false`. For `none-in` without
 `deny > review > allow` — so a `review` rule for `mkdir -m` and a sealed-floor `deny` for
 `sudo` still win over a matching path-scoped allow.
 
-The runtime enrichment seam supplies cwd and project scope only; `homeDirectory` plumbing is
-tracked separately. As a result a runtime `~/...` operand stays `scope: "unknown"` and fails
-closed rather than resolving to `home` — this is safe current behavior, not a historical aside,
-and it causes extra review, never an unsafe allow. Supplying `homeDirectory` at the runtime
-seam is the follow-up that lets `~/...` classify as `home`.
+Runtime enrichment receives cwd, project scope, and the resolved `homeDirectory` when
+available. Supported unquoted `~/...` operands resolve lexically against that home before
+scope classification; the winning scope still follows configured precedence, so it is not
+necessarily `home`. Without a usable home directory, these operands remain `unknown` and
+cannot satisfy a constructive allow.
 
 ## Compound shell matchers
 

@@ -1,7 +1,7 @@
 # Engineering Principles
 
-Project-owned engineering values for the pi-extensions monorepo. Confirmed
-during Workbench setup; change them deliberately, not drift-wise.
+Project-owned engineering values for the pi-extensions monorepo. Change these
+rules deliberately, not incidentally.
 
 ## Publishing safety
 
@@ -56,14 +56,40 @@ would break real installations.
 - User-facing config paths and data formats of published packages are real
   data: migrations are planned by the agent but approved and executed by the
   user.
-- Mid-implementation packages (currently pi-plugins) may break their own
-  internals freely until published.
 
 ### Boundaries
 
 Packages that have never been published have no external consumers regardless
 of how polished they look. The default for anything project-owned is no
 compatibility work.
+
+## Contract truth has one owner
+
+Code-defined structures have one machine-readable authority. Documents explain
+semantics, invariants, boundaries, and rationale rather than maintaining a
+second copy of internal schemas or interfaces. Public protocols may need a
+standalone or generated specification, but each structural definition still
+has one authoritative source.
+
+### Why
+
+Independent copies drift and make contributors guess which one is binding.
+Choose authority at the contract boundary and derive dependent representations
+where practical.
+
+## Leave touched work simpler
+
+Remove code, tests, abstractions, checks, and compatibility paths that the
+current work makes unnecessary. Preserve meaningful behavior, guarantees,
+validation, compatibility, safety, and measured performance constraints unless
+the user explicitly authorizes a change. Avoid obvious plausible performance
+regressions.
+
+### Why
+
+Every retained mechanism has a maintenance cost. Simplification earns its place
+by lowering that cost without weakening the product; it does not authorize
+adjacent redesigns or removal of protections that still serve a real need.
 
 ## Tests earn their upkeep
 
@@ -74,9 +100,8 @@ ever catching a bug gets deleted, not nursed.
 
 ### Why
 
-The repo carries very large suites (pi-clearance ~2,700 tests, pi-plugins
-~1,700). At that scale, low-value tests are a tax on every change and teach
-contributors (human and agent) to ignore failures.
+Large test suites make low-value tests a tax on every change and teach
+contributors to ignore failures.
 
 ### Implications
 
@@ -102,33 +127,15 @@ refuses to read, refuses to install — must justify the refusal with a concrete
 threat model and a protection the guard actually provides. "Conservative" is
 not a substitute for a threat model. A fail-closed stance that breaks
 legitimate real-world input without protecting against a real attack is a
-bug wearing a security costume. Three rounds of the same anti-pattern in
-pi-plugins cost real uptime before this rule was named.
+bug wearing a security costume.
 
 ### Why
 
-The pi-plugins filesystem gate failed closed three times in a row, each time
-on a different common platform, each time after a "conservative" fix to the
-previous round:
-
-1. **v0.2.3** — treated `st_dev` as stable file identity. btrfs and overlayfs
-   assign anonymous device numbers per mount, so every reboot changed device
-   while files and inodes were unchanged. The host hard-failed startup.
-2. **v0.2.4** — the entire sqlite file-identity machinery (`.identity`
-   markers, `.initializing` claims, root identity markers, device/inode
-   validation, hard-link handle aliases, per-transaction root re-verification)
-   was ripped out. The CHANGELOG's own verdict: *"the guards false-positive-
-   broke normal operation after every routine reboot on btrfs/overlayfs…
-   while never catching a real replacement."*
-3. **v0.3.3 (issue #2)** — a fresh "conservative" magic-number `f_type`
-   allowlist failed closed on every real macOS APFS volume because Node returns
-   a vestigial `0x1a` on Darwin regardless of filesystem. The package refused
-   to start on macOS.
-
-The shared shape: each guard read as thorough, had a plausible-sounding
-comment, and shipped over real user-visible breakage because reviewers could
-not tell ceremonial security from real security. The category is the enemy,
-not any one guard.
+Filesystem identity heuristics, unfamiliar platform values, and missing optional
+artifacts do not by themselves prove an attack or an unusable capability. A
+refusal based on those guesses can disable legitimate installations without
+protecting user data. Measure the required behavior or keep a degraded path;
+reserve refusal for a concrete threat or an actual capability gap.
 
 ### Implications
 
@@ -153,8 +160,7 @@ not any one guard.
   user on a legitimate input. Build the override at the same time as the guard.
 - **Do not write a regression test that accepts either failure or success.**
   That test is a confession that the behavior is underspecified. Pin the
-  behavior per platform or pin the override semantics. (The capability gate
-  regression was hidden for exactly this reason.)
+  behavior per platform or pin the override semantics.
 - **After two rounds of the same breakage, remove the category, not the
   instance.** If a class of guard has bitten twice, the third conservative
   variant of it will bite too. Either drop the category or replace it with a

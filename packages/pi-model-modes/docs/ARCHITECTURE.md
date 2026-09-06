@@ -238,6 +238,5 @@ would double-inject identity/mode fragments if used as the base.
   happens inside the system prompt; the plugin never mutates or rewrites
   existing conversation entries. The one additive exception is the
   user-invoked `/mode:inspect`, which emits a single `display:true` status
-  message (so the inspect panel may appear in later context — an accepted v1
-  tradeoff, see `epic-identity-injection-mode-inspect`). Ordinary turns add
+  message, so the inspect panel may appear in later context. Ordinary turns add
   nothing to conversation cost or context growth.

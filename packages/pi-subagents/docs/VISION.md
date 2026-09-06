@@ -28,9 +28,8 @@ model, exact effective thinking level, active or final runtime, run id, delivery
 mode, and terminal reason when one exists. Parent-only lifecycle tools are
 centrally registered and removed from child tool definitions, preventing
 recursive orchestration while preserving ordinary inherited extension tools.
-The package excludes the retired experimental editors, wizards, and bespoke
-conversation viewer from the import branch (see ADR 0004 for the UI direction
-history).
+The package excludes agent-definition editors, wizards, and a bespoke
+conversation viewer; ADR 0004 defines the narrow operator UI contract.
 
 ## Fork posture
 

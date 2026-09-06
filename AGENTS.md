@@ -16,47 +16,62 @@ in a comment and (b) an env or config override. If a class of guard has
 broken twice already, remove the category instead of writing the third
 variant.
 
+Inter-package dependency ranges are major-only (`^0`, `^2`) — never exact
+pins and never patch-floor carets (`^0.1.18` on a 0.x package means
+`>=0.1.18 <0.2.0`, which can strand consumers on an old minor line).
+Exceptions: pi-plugins' sibling pins on pi-mcp-adapter and pi-subagents stay
+exact so the host resolves its maintained adapter and bundled subagent runtime.
+Update consumer pins whenever those sibling versions change.
+pi-enhanced also pins pi-mcp-adapter exactly because its bundled registry must
+identify this maintained fork rather than admit an upstream `^2` release.
+
 <!-- workbench:start -->
 ## Workbench
 
-Work is tracked in `.work/`: active items in `.work/active/`, deferred context
-in `.work/backlog/`, project behavior in `.work/CONVENTIONS.md`, and—when release
-summaries are enabled—temporary completion stubs in `.work/archive/` plus
-summaries in `.work/releases/`. Grounded evidence lives in `.research/` and
-interactive requirements walkthroughs live in `.mockups/`; work items reference
-both. Confirm `owner: workbench` before operating. Optional project defaults for
-interaction, rigor, review, capability, execution, and commits also live in
-`CONVENTIONS.md`; explicit user direction overrides them for the current request
-without changing the stored defaults.
+This repository is Workbench-owned. For stateful Workbench work, read
+`.work/CONVENTIONS.md`, relevant foundation documents, and the selected skill
+before acting. Follow that skill's required references. Compare
+`workbench_version` with the loaded plugin; recommend setup reconciliation on a
+mismatch, but continue unless an actual incompatibility prevents the work.
+Never run setup without explicit user direction. Keep unrelated requests
+outside Workbench.
 
-Treat natural-language requests as the workflow. Gather consequential
-requirements before confident execution: inspect the repository and research
-facts first, then ask the user for choices. Use a structured question tool when
-available; otherwise ask inline and pause. UI mockups are requirements evidence
-and should converge on a working walkthrough that is browser/vision-inspected
-before presentation when those tools exist.
+Use `work` to own a continuous outcome, drawing on `design` for consequential
+choices and `deliver` for ready implementation without restarting the workflow.
+Reuse unchanged context. Use `ideate` for valuable early exploration, `scan` for
+opportunities without remediation, `park` for selected out-of-scope findings,
+and `release` only for a requested versioned summary.
 
-Foundation documents contain only current or clearly intended future vision,
-direction, architectural boundaries, high-level design, and durable contracts.
-Code is the source of truth for implementation details. Reconcile affected
-foundation assertions before completing work. Project-owned engineering values
-live in `docs/PRINCIPLES.md`; observed recurring code structures live in
-`.agents/skills/patterns/`.
+The user's request and effective autonomy posture define the authorized
+boundary. Ask about consequential requirements; do not invent requirements,
+expand scope, or treat repository aspirations as current work. Use features as
+the normal delivery unit, epics for multiple feature outcomes, and stories for
+narrow slices. Keep independent items parallel and add `blocked_by` only for a
+real sequencing dependency.
 
-Compatibility is earned, not assumed. Unless the project declares external
-consumers (in `docs/PRINCIPLES.md` or `CONVENTIONS.md`), only two things
-create compatibility obligations: dependencies outside the repository that are
-not owned by the author, and substantial real data that must be preserved or
-transformed. Never version project-owned schemas (v1/v2/v3) or keep
-compatibility shims for surfaces the project owns—agent tooling such as MCP
-servers, internal services, and unpublished libraries included; change them in
-place. Real-data migrations are planned by the agent but approved and executed
-by the user for production data; do not run production data transforms
-autonomously.
+Before any design or review, including a loose request, apply the current
+`## Overbuilding calibration` from `.work/CONVENTIONS.md`. Loose work gets the
+lens without other Workbench mechanics. Pass it to delegated roles rather than
+assuming fresh context inherited it.
 
-Completed items never remain active. With summarized releases they immediately
-become small archive stubs and later collapse into one release summary; with no
-release lifecycle they are removed. Sweep stale terminal items whenever working
-in the substrate. Prefer coherent feature-sized delivery commits over commits
-for individual workflow transitions.
+`.work/` is the operational record; foundation documents describe durable
+project truth, including the engineering shape contributors need to build and
+operate the repository coherently. Only write durable artifacts named by the
+active workflow. Questions, proposals, progress, recommendations, and
+completion reports belong in chat. Keep human-facing documents clean and
+self-contained: lead with
+business or real-world meaning, define important non-obvious domain concepts
+before using them, and omit agent history or review narration.
+
+Apply configured execution, review, simplification, and commit postures.
+Align optional design review once per run. Choose adaptive implementation review
+boundaries, including shared reviews across features or deliveries. Verify each
+unit promptly and keep deferred review visible until the owning items can close.
+Scale effort to the work. Quick implementation and focused review often benefit
+from the current context; use another when it adds enough value or is requested.
+Test meaningful behavior at stable
+interfaces, verify the full requested boundary, reconcile affected foundation
+truth and indexes, and close completed work. Reviewers propose; the outcome
+owner verifies and adjudicates. Park valuable adjacent findings instead of
+silently adding them to scope.
 <!-- workbench:end -->

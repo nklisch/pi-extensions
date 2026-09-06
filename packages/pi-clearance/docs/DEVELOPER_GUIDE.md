@@ -2,7 +2,7 @@
 
 This guide is for people changing Pi Clearance itself.
 
-> The pre-public command surface is `/clearance`; removed commands and aliases are not preserved.
+> The command surface is `/clearance`; unsupported commands have no compatibility aliases.
 
 For product behavior, start with [README.md](../README.md) and [USER_GUIDE.md](USER_GUIDE.md). For design intent, read the foundation docs linked at the end of this file.
 
@@ -127,7 +127,7 @@ package README snippets.
 | `src/skill/clearance-tune/` | internal tune helper harness plus display-only structured proposal presentation seam |
 | `src/skill/clearance-*/` | thin agent guidance that points to canonical docs |
 | `test/` | unit, fixture, replay, runtime, and skill tests |
-| `.work/` | Workbench state (active items, backlog, conventions) |
+| [Repository `.work/`](../../../.work/) | Workbench state (active items, backlog, conventions) |
 
 ## Settings command surface and dispatcher seam
 
@@ -262,23 +262,22 @@ Public docs should stay practical and low-hype:
 
 The root README and these reference docs are user/developer docs. The foundation docs remain the design source of truth.
 
-## Agile-workflow substrate
+## Contributor workflow
 
-Work is tracked in `.work/` as plain markdown items: `active/` for in-flight
-epics/features/stories, `backlog/` for parked ideas, and `CONVENTIONS.md` for
-project behavior (tags, verification commands, body discipline). Read item
-files directly; there is no separate query binary.
-
-Before design, implementation, or review work, read `.work/CONVENTIONS.md` and
-the relevant `docs/` foundation docs.
+Follow the repository's [AGENTS.md](../../../AGENTS.md) and
+[Workbench conventions](../../../.work/CONVENTIONS.md) for work tracking,
+verification, and review.
 
 ## Foundation docs
 
-- [VISION.md](VISION.md) — product direction and open questions.
+- [VISION.md](VISION.md) — product direction.
 - [SPEC.md](SPEC.md) — behavior contract.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module boundaries.
 - [PRINCIPLES.md](PRINCIPLES.md) — safety and execution rules.
+
+## Focused references
+
 - [RULE_PACKS.md](RULE_PACKS.md) — shipped pack intent.
 - [PACK_AUTHORING.md](PACK_AUTHORING.md) — data-pack, TypeScript-pack, and package distribution guidance.
 - [REVIEWER_PROMPTS.md](REVIEWER_PROMPTS.md) — prompt and reviewer contract.
-- [REFERENCE_PATTERNS.md](REFERENCE_PATTERNS.md) — reference patterns from earlier captures.
+- [REFERENCE_PATTERNS.md](REFERENCE_PATTERNS.md) — policy-corpus vocabulary, command-family lessons, and capture provenance; not an implementation-pattern catalog or foundation.

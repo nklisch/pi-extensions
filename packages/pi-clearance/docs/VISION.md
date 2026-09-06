@@ -20,4 +20,4 @@ The sealed floor always wins. Invalid config fails closed to floor-only policy. 
 
 ## Trust and growth
 
-User-owned global/project config may widen policy. Repository policy and installed packs cannot silently widen it. Persisted settings written through Clearance contain only non-default choices, while runtime normalization supplies the rest. Package installation neither changes config nor enables packs. Tune replay, adversarial checks, explicit confirmation, and post-write validation make policy growth auditable. The default non-Bash bypass is an intentional published behavioral break requiring next-minor release communication.
+User-owned global/project config may widen policy. Repository policy and installed packs cannot silently widen it. Persisted settings written through Clearance contain only non-default choices, while runtime normalization supplies the rest. Package installation neither changes config nor enables packs. Tune replay, adversarial checks, explicit confirmation, and post-write validation make policy growth auditable.

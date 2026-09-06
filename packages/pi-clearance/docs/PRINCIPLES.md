@@ -56,8 +56,7 @@ the host approval boundary. Global `gatedTools` is an exact-name opt-in list wit
 wildcards or future-tool consent; Bash is always fully gated and cannot be listed. An
 opted-in tool without a registered analyzer uses `unknownToolPosture`, which defaults to
 `"allow"` and may be tightened to `"review"` or `"deny"`. The posture does not apply to
-absent names, and the next minor release must communicate this intentional typed-tool
-protection break.
+absent names.
 
 **Implication:** the interpreter must be pure and total for gated calls: every analyzed
 or opted-in unknown input returns `allow`, `deny`, or `review` with a reason; bypasses are

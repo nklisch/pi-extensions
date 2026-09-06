@@ -114,6 +114,16 @@ In fresh temporary consumers, install exact registry versions and verify root/pr
 
 Only after those receipts exist should the parent change status to published, replace the Prepared changelog headings with publication dates, reconcile the completed outcome stub, and update local installations. The separate Krometrail live-page attachment failure is not part of this Pi fix.
 
+## Installed upgrade incident — workaround verified, cause open
+
+After `pi update npm:@nklisch/pi-enhanced` returned success upgrading 0.4.2 to 0.4.3, Pi failed to load the installed host entry with `Cannot find module '@nklisch/pi-mcp-adapter'`. The missing package was expected at `node_modules/@nklisch/pi-enhanced/node_modules/@nklisch/pi-mcp-adapter` under the Pi npm installation. That directory existed but was empty; both npm lockfiles and `npm ls` nevertheless reported adapter `2.21.0-nklisch.3` there with `inBundle: true`. The top-level adapter package was absent. Fresh registry-consumer composition had passed before this update: it did not qualify an existing-install upgrade. npm's upgrade/bundle handling is a hypothesis, not an established cause.
+
+Environment: Pi 0.85.1, Node 24.17.0, npm 11.18.0, Linux. Host 0.8.3 and Enhanced 0.4.3 manifests retained the expected exact adapter pin.
+
+Local workaround: fetched the published adapter `.3` using `npm pack --ignore-scripts`, verified its tarball SHA-512 against the existing installation lockfile (`sha512-s46282owfKnokAEyUQ19iCMofYAJmlqM44MuYzEd8i08WIL1tquSiJRbVpoC43QkEipg8zX42iHB07nqqroRfw==`), and restored only the confirmed-empty adapter directory. No package manifest, lockfile, settings, or unrelated package was changed.
+
+Verification after restoration: `/tmp/pi-installed-host-loader-check.mjs` loads the actual installed `pi-plugins/dist/pi/extension.js` through Pi 0.85.1's `DefaultResourceLoader.additionalExtensionPaths`, not an imported inline factory. A fresh isolated session passed extension loading, `mcp`/`mcpScript` registration, structured facts, native image-byte/resource preservation, and error-hook delivery against the synthetic MCP fixture. Actual disk manifests resolve Enhanced 0.4.3 → Host 0.8.3 → Adapter `.3`. This verifies the local repair, not the running user's session, live browser behavior, or a permanent upgrade-path fix. Reproduce the 0.4.2 → 0.4.3 installed-tree upgrade and add regression coverage before closing the incident.
+
 ## Authentication and approvals
 
 Use trusted GitHub Actions publishing, not `npm publish --local`, local npm tokens, or new secrets. The existing workflow has `id-token: write`, no environment approval declaration, and no `registry-url` token injection. Existing package trusted-publisher registrations must still authorize this repository and `.github/workflows/publish.yml`.

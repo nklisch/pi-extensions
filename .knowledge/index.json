@@ -2,17 +2,6 @@
   "schema": 1,
   "entries": [
     {
-      "path": "packages/pi-subagents/docs/decisions/0001-deferred-patches.md",
-      "namespace": "docs",
-      "kind": "0001-deferred-patches",
-      "id": "packages/pi-subagents/docs/decisions/0001-deferred-patches",
-      "title": "0001 — Deferred fork patches and upstream-PR strategy",
-      "summary": null,
-      "updated": null,
-      "status": "superseded",
-      "relationships": []
-    },
-    {
       "path": "packages/pi-subagents/docs/decisions/0002-extensions-on-a-minimal-core.md",
       "namespace": "docs",
       "kind": "0002-extensions-on-a-minimal-core",
@@ -20,7 +9,7 @@
       "title": "0002 — Workspaces and permissions are extensions on a minimal core",
       "summary": null,
       "updated": null,
-      "status": "accepted",
+      "status": null,
       "relationships": []
     },
     {
@@ -28,10 +17,10 @@
       "namespace": "docs",
       "kind": "0003-publish-bundled-type-declarations",
       "id": "packages/pi-subagents/docs/decisions/0003-publish-bundled-type-declarations",
-      "title": "0003 — Publish a bundled `.d.ts` for the public surface",
+      "title": "0003 — Publish bundled declarations for the public surface",
       "summary": null,
       "updated": null,
-      "status": "accepted",
+      "status": null,
       "relationships": []
     },
     {
@@ -39,10 +28,10 @@
       "namespace": "docs",
       "kind": "0004-reconsider-ui-direction",
       "id": "packages/pi-subagents/docs/decisions/0004-reconsider-ui-direction",
-      "title": "0004 — Reconsider the UI direction from first principles",
+      "title": "0004 — Keep a narrow, substitutable operator UI",
       "summary": null,
       "updated": null,
-      "status": "accepted",
+      "status": null,
       "relationships": []
     },
     {
@@ -101,33 +90,11 @@
       "relationships": []
     },
     {
-      "path": "packages/pi-subagents/docs/architecture/client-server-opportunities.md",
-      "namespace": "docs",
-      "kind": "client-server-opportunities",
-      "id": "packages/pi-subagents/docs/architecture/client-server-opportunities",
-      "title": "Client-server architecture: opportunities for pi-subagents",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
       "path": "packages/pi-subagents/docs/comparison-with-upstream.md",
       "namespace": "docs",
       "kind": "comparison-with-upstream",
       "id": "packages/pi-subagents/docs/comparison-with-upstream",
       "title": "Comparison with upstream",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-plugins/docs/COMPATIBILITY.md",
-      "namespace": "docs",
-      "kind": "compatibility",
-      "id": "packages/pi-plugins/docs/compatibility",
-      "title": "Plugin Compatibility Contract",
       "summary": null,
       "updated": null,
       "status": null,
@@ -172,226 +139,6 @@
       "kind": "pack_authoring",
       "id": "packages/pi-clearance/docs/pack_authoring",
       "title": "Pack authoring",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-1-api-boundary.md",
-      "namespace": "docs",
-      "kind": "phase-1-api-boundary",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-1-api-boundary",
-      "title": "Phase 1: Export SubagentsService from this package",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-10-structural-decomposition.md",
-      "namespace": "docs",
-      "kind": "phase-10-structural-decomposition",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-10-structural-decomposition",
-      "title": "Phase 10: Domain organization, bag decomposition, and complexity reduction",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-11-closure-to-class.md",
-      "namespace": "docs",
-      "kind": "phase-11-closure-to-class",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-11-closure-to-class",
-      "title": "Phase 11: Closure factories to classes",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-12-complexity-test-fixtures.md",
-      "namespace": "docs",
-      "kind": "phase-12-complexity-test-fixtures",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-12-complexity-test-fixtures",
-      "title": "Phase 12: Complexity reduction and test fixture extraction",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-13-remaining-smells.md",
-      "namespace": "docs",
-      "kind": "phase-13-remaining-smells",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-13-remaining-smells",
-      "title": "Phase 13: Remaining structural smells",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-14-strip-policy.md",
-      "namespace": "docs",
-      "kind": "phase-14-strip-policy",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-14-strip-policy",
-      "title": "Phase 14: Strip policy from core",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-15-domain-model-evolution.md",
-      "namespace": "docs",
-      "kind": "phase-15-domain-model-evolution",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-15-domain-model-evolution",
-      "title": "Phase 15: Domain model evolution",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-16-invert-dependencies.md",
-      "namespace": "docs",
-      "kind": "phase-16-invert-dependencies",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-16-invert-dependencies",
-      "title": "Phase 16: Invert dependencies — extensions on a minimal core",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-17-core-consolidation.md",
-      "namespace": "docs",
-      "kind": "phase-17-core-consolidation",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-17-core-consolidation",
-      "title": "Phase 17: Core consolidation",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-18-reconsider-ui.md",
-      "namespace": "docs",
-      "kind": "phase-18-reconsider-ui",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-18-reconsider-ui",
-      "title": "Phase 18: Reconsider UI from first principles",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-19-implement-ui-decisions.md",
-      "namespace": "docs",
-      "kind": "phase-19-implement-ui-decisions",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-19-implement-ui-decisions",
-      "title": "Phase 19: Implement the ADR-0004 UI decisions",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-2-remove-scheduling.md",
-      "namespace": "docs",
-      "kind": "phase-2-remove-scheduling",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-2-remove-scheduling",
-      "title": "Phase 2: Remove scheduling",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-3-remove-rpc-groupjoin.md",
-      "namespace": "docs",
-      "kind": "phase-3-remove-rpc-groupjoin",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-3-remove-rpc-groupjoin",
-      "title": "Phase 3: Remove group-join, ad-hoc RPC; replace output-file",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-4-implement-service.md",
-      "namespace": "docs",
-      "kind": "phase-4-implement-service",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-4-implement-service",
-      "title": "Phase 4: Implement and publish SubagentsService",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-5-decompose-index.md",
-      "namespace": "docs",
-      "kind": "phase-5-decompose-index",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-5-decompose-index",
-      "title": "Phase 5: Decompose index.ts",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-7-encapsulation.md",
-      "namespace": "docs",
-      "kind": "phase-7-encapsulation",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-7-encapsulation",
-      "title": "Phase 7: Encapsulation and dependency narrowing",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-8-testability.md",
-      "namespace": "docs",
-      "kind": "phase-8-testability",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-8-testability",
-      "title": "Phase 8: Testability, display extraction, and menu decomposition",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-subagents/docs/architecture/history/phase-9-observation-ctx.md",
-      "namespace": "docs",
-      "kind": "phase-9-observation-ctx",
-      "id": "packages/pi-subagents/docs/architecture/history/phase-9-observation-ctx",
-      "title": "Phase 9: Observation consolidation, ctx elimination, and remaining mocks",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-plugins/docs/research/pi-mcp-adapter-config-source.md",
-      "namespace": "docs",
-      "kind": "pi-mcp-adapter-config-source",
-      "id": "packages/pi-plugins/docs/research/pi-mcp-adapter-config-source",
-      "title": "Research: `pi-mcp-adapter` configuration-source integration",
-      "summary": null,
-      "updated": null,
-      "status": null,
-      "relationships": []
-    },
-    {
-      "path": "packages/pi-plugins/docs/research/pi-subagents-lifecycle-interception.md",
-      "namespace": "docs",
-      "kind": "pi-subagents-lifecycle-interception",
-      "id": "packages/pi-plugins/docs/research/pi-subagents-lifecycle-interception",
-      "title": "Research: `@gotgenes/pi-subagents` lifecycle interception",
       "summary": null,
       "updated": null,
       "status": null,
@@ -545,7 +292,7 @@
       "namespace": "docs",
       "kind": "vision",
       "id": "packages/pi-plugins/docs/vision",
-      "title": "Pi Plugin Host",
+      "title": "Pi Plugin Host Vision",
       "summary": null,
       "updated": null,
       "status": null,
@@ -967,13 +714,35 @@
       "relationships": []
     },
     {
-      "path": ".work/backlog/test-typecheck-brand-cleanup.md",
+      "path": ".work/backlog/subagents-ephemeral-extension-inheritance.md",
       "namespace": "work",
       "kind": "backlog-item",
-      "id": "test-typecheck-brand-cleanup",
-      "title": "Test-suite typecheck: branded-type cleanup",
+      "id": "subagents-ephemeral-extension-inheritance",
+      "title": "Revisit parent CLI-only extension inheritance when a consumer needs it",
       "summary": null,
-      "updated": "2026-08-02",
+      "updated": "2026-09-06",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".work/backlog/subagents-host-session-sync-opportunity.md",
+      "namespace": "work",
+      "kind": "backlog-item",
+      "id": "subagents-host-session-sync-opportunity",
+      "title": "Revisit child-session integration if Pi supplies session synchronization",
+      "summary": null,
+      "updated": "2026-09-06",
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".work/backlog/subagents-residual-boundary-proposals.md",
+      "namespace": "work",
+      "kind": "backlog-item",
+      "id": "subagents-residual-boundary-proposals",
+      "title": "Reconsider residual subagent boundary proposals",
+      "summary": null,
+      "updated": "2026-09-06",
       "status": null,
       "relationships": []
     },
@@ -996,6 +765,28 @@
       "title": "Replace the transactional plugin lifecycle with files-and-pointer convergence (completed)",
       "summary": null,
       "updated": "2026-08-22",
+      "status": "completed",
+      "relationships": []
+    },
+    {
+      "path": ".work/active/controlled-ollama-cloud-adapter.md",
+      "namespace": "work",
+      "kind": "feature",
+      "id": "controlled-ollama-cloud-adapter",
+      "title": "Control Ollama Cloud request bursts",
+      "summary": null,
+      "updated": "2026-08-30",
+      "status": "active",
+      "relationships": []
+    },
+    {
+      "path": ".work/completed/codex-account-pool.md",
+      "namespace": "work",
+      "kind": "feature",
+      "id": "codex-account-pool",
+      "title": "Route Codex requests across account quotas",
+      "summary": null,
+      "updated": "2026-09-03",
       "status": "completed",
       "relationships": []
     },
@@ -1044,6 +835,17 @@
       "relationships": []
     },
     {
+      "path": ".work/completed/mcp-structured-result-delivery.md",
+      "namespace": "work",
+      "kind": "feature",
+      "id": "mcp-structured-result-delivery",
+      "title": "Preserve structured MCP results in model-visible delivery",
+      "summary": null,
+      "updated": "2026-09-05",
+      "status": "completed",
+      "relationships": []
+    },
+    {
       "path": ".work/releases/extension-error-containment-2026-08-23.md",
       "namespace": "work",
       "kind": "release",
@@ -1052,6 +854,28 @@
       "summary": null,
       "updated": null,
       "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".work/releases/fff-extension-entrypoint-hotfix-2026-08-23.md",
+      "namespace": "work",
+      "kind": "release",
+      "id": "releases/fff-extension-entrypoint-hotfix-2026-08-23",
+      "title": "FFF extension entrypoint hotfix — 2026-08-23",
+      "summary": null,
+      "updated": null,
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".work/releases/mcp-agent-reliability.md",
+      "namespace": "work",
+      "kind": "release",
+      "id": "releases/mcp-agent-reliability",
+      "title": "MCP discovery and recovery reliability",
+      "summary": null,
+      "updated": null,
+      "status": "published",
       "relationships": []
     },
     {
@@ -1071,6 +895,17 @@
       "kind": "release",
       "id": "releases/pi-enhanced-0.1.3",
       "title": "pi-enhanced 0.1.3",
+      "summary": null,
+      "updated": null,
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".work/releases/pi-enhanced-0.4.2.md",
+      "namespace": "work",
+      "kind": "release",
+      "id": "releases/pi-enhanced-0.4.2",
+      "title": "Repository-scoped Astral Pocket memory",
       "summary": null,
       "updated": null,
       "status": null,
@@ -1176,6 +1011,39 @@
       "relationships": []
     },
     {
+      "path": ".work/releases/plugin-manager-2026-08-27.md",
+      "namespace": "work",
+      "kind": "release",
+      "id": "releases/plugin-manager-2026-08-27",
+      "title": "Keyboard-first plugin manager — 2026-08-27",
+      "summary": null,
+      "updated": null,
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".work/releases/plugin-manager-and-session-fixes-2026-09-04.md",
+      "namespace": "work",
+      "kind": "release",
+      "id": "releases/plugin-manager-and-session-fixes-2026-09-04",
+      "title": "Accurate plugin versions, a clearer manager, and session-safe extensions",
+      "summary": null,
+      "updated": null,
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".work/releases/plugin-manager-peer-resolution-hotfix-2026-08-27.md",
+      "namespace": "work",
+      "kind": "release",
+      "id": "releases/plugin-manager-peer-resolution-hotfix-2026-08-27",
+      "title": "Plugin manager peer-resolution hotfix — 2026-08-27",
+      "summary": null,
+      "updated": null,
+      "status": null,
+      "relationships": []
+    },
+    {
       "path": ".work/releases/prepared-packages-2026-08-06.md",
       "namespace": "work",
       "kind": "release",
@@ -1209,25 +1077,69 @@
       "relationships": []
     },
     {
-      "path": ".work/backlog/backlog-fs-capability-probe.md",
+      "path": ".work/releases/simple-plugin-host-2026-08-26.md",
       "namespace": "work",
-      "kind": "story",
-      "id": "backlog-fs-capability-probe",
-      "title": "Replace the filesystem magic-number capability gate with a lock behavior probe",
+      "kind": "release",
+      "id": "releases/simple-plugin-host-2026-08-26",
+      "title": "Filesystem-first plugin host — 2026-08-26",
       "summary": null,
-      "updated": "2026-08-23",
-      "status": "active",
+      "updated": null,
+      "status": null,
       "relationships": []
     },
     {
-      "path": ".work/backlog/backlog-npm-sha1-integrity-fallback.md",
+      "path": ".work/releases/structured-result-delivery.md",
       "namespace": "work",
-      "kind": "story",
-      "id": "backlog-npm-sha1-integrity-fallback",
-      "title": "Allow npm SHA-1 integrity fallback when SHA-512 is absent",
+      "kind": "release",
+      "id": "releases/structured-result-delivery",
+      "title": "Structured MCP result delivery — prepared, not published",
       "summary": null,
-      "updated": "2026-09-14",
-      "status": "active",
+      "updated": null,
+      "status": "prepared",
+      "relationships": []
+    },
+    {
+      "path": ".work/releases/subagent-lifecycle-resume-2026-08-24.md",
+      "namespace": "work",
+      "kind": "release",
+      "id": "releases/subagent-lifecycle-resume-2026-08-24",
+      "title": "Subagent lifecycle and resume reliability — 2026-08-24",
+      "summary": null,
+      "updated": null,
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".work/releases/subagent-orchestration-2026-09-01.md",
+      "namespace": "work",
+      "kind": "release",
+      "id": "releases/subagent-orchestration-2026-09-01",
+      "title": "Controllable and inspectable subagent orchestration",
+      "summary": null,
+      "updated": null,
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".work/releases/subagent-query-recovery-2026-09-01.md",
+      "namespace": "work",
+      "kind": "release",
+      "id": "releases/subagent-query-recovery-2026-09-01",
+      "title": "Complete long-transcript query recovery",
+      "summary": null,
+      "updated": null,
+      "status": null,
+      "relationships": []
+    },
+    {
+      "path": ".work/releases/subagent-result-delivery-2026-08-27.md",
+      "namespace": "work",
+      "kind": "release",
+      "id": "releases/subagent-result-delivery-2026-08-27",
+      "title": "Direct subagent result delivery — 2026-08-27",
+      "summary": null,
+      "updated": null,
+      "status": null,
       "relationships": []
     },
     {

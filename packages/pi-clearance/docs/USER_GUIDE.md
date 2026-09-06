@@ -34,7 +34,7 @@ Global and project config written through Clearance is persisted sparsely. Packa
 /clearance allow
 ```
 
-Bare `/clearance` opens guided setup. `/clearance mode` without an argument still opens settings. `/clearance profile` and `/clearance auto` were removed before release. There are no aliases. Settings mutations require interactive confirmation and write only user-owned config.
+Bare `/clearance` opens guided setup. `/clearance mode` without an argument still opens settings. `/clearance profile` and `/clearance auto` are unsupported and have no aliases. Settings mutations require interactive confirmation and write only user-owned config.
 
 ## Allow a command family
 
@@ -59,14 +59,13 @@ Review surfaces speak plain language. The human approval card shows what the com
 
 The settings control center uses compact selector/toggle rows. It exposes mode, reviewer model and evidence posture, scope preset and unknown-path behavior, a pack explorer, exact gated non-Bash tools, and Stream briefing preferences (note mode, model label, accent). Every mutation uses confirmation, the config planner, atomic write, reload, and policy invalidation. Advanced context, budget, escalation, prompt appends, and overrides remain config-file settings; status names their customization categories without dumping values.
 
-The baseline is broad by default: it includes the former default pack set plus expanded inspection, shell-builtin and system/service reads, bounded development verification, network reads, typed network research, non-secret home and agent-support typed Pi reads, and safe-home typed Pi mutations. Literal project/temp output redirects and `/dev/null` are eligible, while dynamic, `.git`, unknown-fd, and network output redirects remain review-gated. Installed package packs are merely available until explicitly enabled by user-owned config.
+The baseline is broad by default: the [built-in packs](RULE_PACKS.md#baseline) cover inspection, shell-builtin and system/service reads, bounded development verification, network reads, typed network research, non-secret home and agent-support typed Pi reads, and safe-home typed Pi mutations. Literal project/temp output redirects and `/dev/null` are eligible, while dynamic, `.git`, unknown-fd, and network output redirects remain review-gated. Installed package packs are merely available until explicitly enabled by user-owned config.
 
 ## Safety model
 
 - Parsed structure, not raw shell text, drives policy.
 - Non-Bash tools bypass Clearance unless their exact name appears in global `gatedTools` (default `[]`); Bash is always gated and cannot be listed.
 - Opted-in unknown tools follow `unknownToolPosture` (default `allow`). Wildcards and future-tool opt-in are not supported.
-- This default typed-tool bypass is an intentional published behavior break and must be called out in the next minor release.
 - Parser uncertainty and unsupported forms fail closed to review.
 - Model decisions resolve one call and never create permanent policy.
 - Tune mode proposes user-approved inspectable data-pack changes after replay and adversarial evidence; executable TypeScript rule modules are not supported.

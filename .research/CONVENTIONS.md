@@ -1,3 +1,9 @@
+---
+owner: workbench-research
+schema: 1
+verification_rigor: adaptive
+---
+
 # Research conventions
 
 Research in this repository follows the Workbench research discipline.

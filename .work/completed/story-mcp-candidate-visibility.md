@@ -9,8 +9,6 @@ completed: 2026-08-22
 
 # Surface MCP candidate-attach failure instead of silent undefined (completed)
 
-> Workbench version mismatch: stop and offer setup upgrade.
-
 The isolated MCP candidate factory returns a structured outcome
 (`verified` | `unavailable` with `PACKAGE_MISSING` / `PACKAGE_DRIFT` /
 `PACKAGE_IMPORT_FAILED`, safe explanation, internal cause) instead of

@@ -9,8 +9,6 @@ completed: 2026-08-22
 
 # Convergent lifecycle core and state migration (completed)
 
-> Workbench version mismatch: stop and offer setup upgrade.
-
 The two-phase lifecycle machinery (transition journal, reconciler, recovery
 service, owner fencing, activation-observation settlement, mutation
 coordinator, scheduler, scope locks) was deleted and replaced by single

@@ -9,8 +9,6 @@ completed: 2026-08-22
 
 # Degraded-state semantics and repair UX (completed)
 
-> Workbench version mismatch: stop and offer setup upgrade.
-
 A plugin whose selected revision fails to load is visibly degraded with
 mandatory session-local fallback to the previous revision (the state pointer
 never moves); repair (re-materialize, no state transaction) and rollback

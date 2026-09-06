@@ -1,58 +1,33 @@
 ---
 owner: workbench
 schema: 1
-workbench_version: 0.10.1
-release_mode: summarized
+workbench_version: 0.21.0
 completed_items: summarize
-# Optional project overrides—omit to use Workbench defaults:
-# interaction: collaborative|checkpointed|autonomous
-# rigor: lean|standard|rigorous
-# review: inline|fresh|cross-model|convergent
-# capability: efficient|adaptive|maximum
-# execution: cohesive|adaptive|parallel
-# commits: delivery|checkpoint|granular
+review_weight: standard
+simplification_posture: balanced
+autonomy: adaptive
+execution_posture: adaptive
 ---
 
 # Workbench Conventions
 
 ## Project verification
 
-- `npm run check` — the authoritative gate: package validation, pi-subagents +
-  pi-mcp-adapter build, typecheck, tests, builds, and npm pack inspection.
+- `npm run check` — the authoritative gate: package validation, native engine and dependency-ordered sibling builds, typecheck, tests, builds, and npm pack inspection.
 - `npm run validate` — fast manifest/policy check for all workspaces.
 - Per-package: `npm test --workspace @nklisch/<name>` or `bun test
   extensions/*.test.ts` inside the package for the bun-style packages.
-- `pi-plugins` sibling contract: pi-plugins, pi-mcp-adapter, and pi-subagents
-  are owned and released together from this repo. The load-time probe
-  verifies manifest SHAPE only (name, version, license, engine/peer ranges,
-  required exports, declared Pi resources) — no registry SRIs or tree
-  digests. Byte integrity is npm's job (lockfile SRIs at install); the
-  bundle ships inside pi-plugins' own tarball. A sync-invariant test
-  (`test/runtime/published-package-provenance.test.ts`) fails if the
-  receipt version, dependency pin, and sibling workspace version diverge —
-  bump them together. The subagents lifecycle CONFORMANCE model
-  (qualification digests, behavioral vectors) is separate and still intact.
-
-## Tags
-
-Not yet recorded.
 
 ## Project-specific guidance
 
-- Agent model posture: GPT-5.6 Luna at `xhigh` implements all repository work. Kimi K3 or GPT-5.6 Sol reviews implementations. GPT-5.6 Sol or Kimi K3 handles design.
-- Inter-package dependency ranges are major-only (`^0`, `^2`) — never exact
-  pins and never patch-floor carets (`^0.1.18` on a 0.x package means
-  `>=0.1.18 <0.2.0`, which silently strands consumers on an old minor line;
-  pi-enhanced bundled registry pi-plugins@0.1.23 while the repo shipped 0.2.5).
-  Exceptions: pi-plugins' sibling pins on pi-mcp-adapter and pi-subagents stay
-  exact by design — the three are released together and the load-time
-  provenance receipt plus sync-invariant test bind the exact versions.
-  pi-enhanced also pins pi-mcp-adapter exactly because its bundled registry must
-  identify this maintained fork rather than admit an upstream `^2` release.
+- Select available models through live discovery rather than fixed model names.
+  Use Kimi K3 only when explicitly requested or approved by the user.
+- Implementation review uses adaptive boundaries, including shared reviews where
+  useful. Align optional design review once per run. Commit boundaries follow
+  meaningful changes, not work-item transitions.
+- No additional release gates or Workbench-managed roadmap are configured.
 - Packages are independently versioned; publishing is manual via the
   **Publish Pi extension** GitHub Actions workflow (npm trusted publishing).
-- New packages come from `npm run create:extension -- <name> [description]`,
-  not from copying an existing package.
 - Foundation truth lives per subproject in `packages/<pkg>/docs/` following
   the house set — `VISION.md` (direction), `ARCHITECTURE.md` / `SPEC.md`
   (design and contract), `decisions/` (ADRs), plus fork policy docs
@@ -70,6 +45,22 @@ Not yet recorded.
   the same step before any install runs; if an install runs while pin !=
   workspace version, npm nests the registry copy under
   `packages/pi-plugins/node_modules/` (shadowing the workspace link and
-  tripping the load gate with PACKAGE_DRIFT). Fix: prune the nested lockfile
-  entries under `packages/pi-plugins/node_modules/`, delete the dir,
-  reinstall.
+  causing builds or packs to consume the wrong sibling). Update all affected
+  manifests before installation and inspect the resolved dependency tree and
+  packed contents afterward.
+
+## Overbuilding calibration
+
+These extensions run on personal developer machines and have real npm consumers.
+Complexity should protect user data, host stability, useful automation, and
+reliable installation rather than imitate a multi-tenant service.
+
+Avoid duplicating Pi's host lifecycle, speculative generic frameworks, permanent
+coordination machinery for transient work, and capability allowlists that reject
+legitimate environments without measuring the capability they claim to protect.
+Credential and private-data protection, bounded and cancellable work, contained
+extension failures, public-contract tests, and publishing safeguards justify
+complexity because failures affect real sessions and installed packages.
+
+Revisit this calibration when measured failures, substantial durable data,
+external consumers, or a changed deployment model demonstrate a concrete need.

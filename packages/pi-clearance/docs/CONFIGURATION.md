@@ -34,7 +34,7 @@ display, pack, and posture fields are supplied by runtime normalization.
 | `ask` | human prompt; unattended calls block-and-log | deny |
 | `auto` | model first, then human/block fallback | deny |
 
-`gatedTools` is a global exact-name list and defaults to empty. Non-Bash tools absent from the list bypass Clearance analysis and policy entirely, execute, and receive an audit entry marked as an allow/bypass. There are no wildcards or future-tool opt-ins, and `bash` cannot be listed. Bash remains fully gated. This intentionally makes typed edit/read protections opt-in and is a published behavioral break for the next minor release.
+`gatedTools` is a global exact-name list and defaults to empty. Non-Bash tools absent from the list bypass Clearance analysis and policy entirely, execute, and receive an audit entry marked as an allow/bypass. There are no wildcards or future-tool opt-ins, and `bash` cannot be listed. Bash remains fully gated. Typed edit/read protections are opt-in.
 
 `unknownToolPosture` remains a config-file-only knob and applies only to an opted-in non-Bash tool that has no registered analyzer. It defaults to `"allow"`; it does not re-gate tools absent from `gatedTools`. Setting it to `"review"` or `"deny"` tightens opted-in unknown tools. The sealed floor and all active user/shipped deny rules run in every mode.
 
@@ -71,7 +71,7 @@ The reviewer settings selector exposes `promptPosture` and `model` interactively
 
 ## Packs
 
-The baseline is always the old default pack set plus `bash.network.read`, `pi.extension.network-research`, and `pi.home.safe`. Mode never changes baseline activation. Package packs remain available until explicitly enabled through `packEnablement.enabledPackagePacks`; user-owned config packs can be disabled with `disabledConfigPacks`.
+The built-in baseline is described in [RULE_PACKS.md](RULE_PACKS.md#baseline), including `bash.network.read`, `pi.extension.network-research`, and `pi.home.safe`. Mode never changes baseline activation. Package packs remain available until explicitly enabled through `packEnablement.enabledPackagePacks`; user-owned config packs can be disabled with `disabledConfigPacks`.
 
 ## Commands
 
@@ -81,4 +81,4 @@ The baseline is always the old default pack set plus `bash.network.read`, `pi.ex
 - `/clearance status`, `/clearance packs`, `/clearance scope`, `/clearance tune`, `/clearance why` — unchanged surfaces with mode/baseline vocabulary. Scope management also supports `scope agent-support add|remove <path>` and `scope agent-support-defaults <on|off>`.
 - `/clearance allow <plain language>` or `/clearance allow` — hand an agent-authored structural allow request to the shared proposal card. Accepted rules land in the user-global pack; this command adds no separate config surface.
 
-`/clearance profile` and `/clearance auto` are removed with no aliases. The next minor release must call out the non-Bash default bypass and the typed-tool protection break.
+`/clearance profile` and `/clearance auto` are unsupported and have no aliases.

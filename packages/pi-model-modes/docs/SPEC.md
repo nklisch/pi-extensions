@@ -136,9 +136,8 @@ You are {model.name} from {providerDisplayName(model.provider)}.
 - `{model.name}` is the human-facing model name from the registry.
 - Provider is rendered to a display name (e.g. `anthropic` → "Anthropic",
   `zai` → "Zhipu AI").
-- Identity is **name + provider only** for v1. No context-window, no
-  capability, no knowledge-cutoff text — those are signal-to-noise calls
-  deferred to a future modifier.
+- Identity is **name + provider only**. It includes no context-window,
+  capability, or knowledge-cutoff text, keeping the identity line focused.
 
 The identity line is prepended to the spliced prompt as the very first
 line. It is the most-stable element and therefore the longest-lived cached
@@ -146,7 +145,10 @@ prefix.
 
 Identity is prepended on **every** turn — including mode-unset turns and
 turns with a custom `SYSTEM.md` / `--system-prompt`. It is purely additive
-and never overrides or removes the user's base content.
+and never overrides or removes the user's base content. A mid-session model
+switch or registry display-name change updates identity on the next turn:
+`model.name`, `model.id`, and `model.provider` participate in the cache key,
+so any change forces reassembly from live `ctx.model`.
 
 ## Mode composition
 
@@ -320,7 +322,7 @@ is ephemeral (lives in module state, not written to disk). A new session restart
 from the config default. Mutating the default tier does not clear an active
 override; this preserves the two-tier model and the precedence invariant.
 
-## Out of scope for v1
+## Out of scope
 
 - Capability metadata in the identity line (context window, reasoning
   support) — deferred to a possible future modifier.
@@ -329,17 +331,3 @@ override; this preserves the two-tier model and the precedence invariant.
 - Project-level auto-detection of mode from `AGENTS.md` or `.pi/mode`.
 - Per-fragment customization UI — fragments are markdown files edited by
   hand.
-
-## Open questions
-
-- **`ctx.model` freshness under mid-session `/model`:** does the
-  `before_agent_start` handler see the switched model on the immediately
-  next turn, or one turn later? Resolved — identity is derived fresh each
-  MISS off live `ctx.model`; the model-switch test in `tests/handler.test.ts`
-  proves the line updates on the next MISS. The cache key includes
-  `model.name`/`model.id`/`model.provider`, so a model switch or registry-side
-  display-name rename forces a MISS and re-derive.
-- **Default cycle keybinding:** Resolved — no default shortcut is registered.
-  `Ctrl+M` was avoided because terminal legacy input encodes it as carriage
-  return (collides with Enter); the actual opt-in binding is `Ctrl+Shift+U` /
-  `Ctrl+Shift+Alt+U`, exposed via the global `cycleKeybinding` flag.

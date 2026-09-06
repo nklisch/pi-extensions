@@ -2,11 +2,11 @@
 
 ## Purpose statement
 
-This document is the durable bridge from two reference sources into the clean
-pi-clearance product:
+This policy-corpus reference preserves vocabulary, command-family lessons, and
+provenance from two sources:
 
 - the local `pi-config` clearance proof of concept; and
-- the old fork-shaped permission-system scaffold currently being retired.
+- a fork-shaped permission-system scaffold.
 
 These sources are **command-pattern, fixture-vocabulary, package-shape, and
 tune-report inspiration only**. They are not runtime architecture for
@@ -252,10 +252,9 @@ Additional shape notes:
 
 ## Package-metadata reference note
 
-The old fork `package.json` is mined for package-shape facts only. The durable product
-target identity is Pi Clearance / `pi-clearance` as a clean pre-1.0 Pi extension; `package-spine` resets the
-fork-shaped `name`, `version`, and `description` instead of preserving them as product
-identity.
+The old fork `package.json` supplies package-shape reference facts only. Its name,
+version, and description do not define Pi Clearance's product identity; the current
+package manifest owns that metadata.
 
 Package-shape facts to carry forward:
 
@@ -268,14 +267,10 @@ Package-shape facts to carry forward:
   dependency shape.
 - Node engine: `node >=22.18`, matching the Pi host runtime expectation. Pi loads the package's TypeScript extension entrypoint directly.
 
-Cleanup inputs only:
-
-- The fork-shaped package `name`, `version`, and `description` are not durable identity.
-  `package-spine` owns the reset to clean pre-1.0 metadata for this product.
-- The old fork exports, files list, schemas, config examples, permission-system keywords,
-  and extra permission-manager package surface are not behavior contracts. Future package
-  metadata should be derived from `docs/VISION.md`, `docs/SPEC.md`, and the clean module
-  spine.
+The old fork exports, files list, schemas, config examples, permission-system keywords,
+and extra permission-manager package surface are not behavior contracts. Package metadata
+must follow the current product boundaries in [VISION.md](VISION.md),
+[SPEC.md](SPEC.md), and [ARCHITECTURE.md](ARCHITECTURE.md), not the reference scaffold.
 
 ## Do-not-port architecture bullets
 
@@ -329,7 +324,6 @@ categories the downstream fixture harness must preserve:
   `mkfs -t ext4 /dev/sda`, including when hidden inside `&&`, semicolon, or newline
   chains.
 
-This coverage assertion is a reference-capture check, not the final product contract.
-`capture-verification` enforces that the two corpus files keep these categories
-represented, while downstream pack/core design remains responsible for deciding which
-categories become allow, review, or deny under the clean interpreter.
+These categories describe reference-corpus coverage, not the product's policy outcomes.
+Corpus maintenance should preserve their representation; the current packs and core
+interpreter determine which cases become allow, review, or deny.

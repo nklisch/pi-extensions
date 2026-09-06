@@ -9,8 +9,6 @@ completed: 2026-08-22
 
 # Replace the transactional plugin lifecycle with files-and-pointer convergence (completed)
 
-> Workbench version mismatch: stop and offer setup upgrade.
-
 Delivered. pi-plugins lifecycle mutations are single CAS sqlite transactions
 over immutable revision dirs; startup converges (migration once, then
 reconstruction + bounded sweep) instead of recovering; broken revisions are

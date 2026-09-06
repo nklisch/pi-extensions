@@ -14,14 +14,14 @@ Pi Clearance is a Pi extension that structurally analyzes tool calls, evaluates 
 - User-owned global/project config may add policy; repository policy is tighten-only unless Pi reports the project as trusted.
 - Package installation makes packs available, not active. Explicit user-owned enablement is required. Clearance defines no npm install lifecycle hooks and package installation never reads or writes user config.
 - Global and project config written through Clearance is sparse: `version` plus recursively retained non-default user choices. Defaults remain runtime-only. Invalid or obsolete files fail strict validation and runtime falls back to floor-only policy; package installation does not migrate them.
-- Pre-public migrations are clean cutovers. Removed keys fail strict schema validation; there are no translators or aliases. Trusted TypeScript rule modules are deliberately cut and are never loaded.
+- Unsupported config keys fail strict schema validation; there are no translators or aliases for removed keys. Executable TypeScript rule modules are never loaded.
 - The native engine is distributed as prebuilt Node-API artifacts for Linux x64 glibc, Linux arm64 glibc, macOS x64, macOS arm64, and Windows x64 MSVC. Windows ARM is not a release target. Installation never runs Cargo; a missing or unsupported artifact fails closed.
 
 ## Config
 
 `GlobalConfigSchema` contains `version`, `mode` (default `ask`), exact `gatedTools` (default empty; Bash and wildcards rejected), `unknownToolPosture`, packs, package/config enablement, reviewer advanced fields, and display preferences. Project overlays contain packs, enablement, project scope, and trusted prompt appends. Repository policy has no mode or posture. The complete schemas normalize runtime views; `src/config/persistence.ts` owns the sparse persisted representation.
 
-The former policy posture system and reviewer `enabled`/`mode` fields are removed. Reviewer model pinning and the compact selector/toggle settings controls remain confirm-backed. The separate reviewer consent schema/file is removed; explicit `mode: "auto"` is the acknowledgment. The next minor release must communicate the intentional typed-tool bypass behavior break.
+Reviewer model pinning and the compact selector/toggle settings controls are confirm-backed. Explicit `mode: "auto"` is the acknowledgment for model review; no separate reviewer consent file is read or written. [CONFIGURATION.md](CONFIGURATION.md) lists unsupported legacy keys and their strict-validation behavior.
 
 ## Native boundary
 
@@ -39,8 +39,8 @@ corpus acquisition, proposal heuristics, presentation, and Pi I/O.
 4. user-project packs and scope;
 5. trusted repository/package inputs.
 
-The baseline is the former default pack set plus `bash.network.read`, `pi.extension.network-research`, and `pi.home.safe`. Individual pack ids flow into provenance; no posture pseudo-pack exists.
+The baseline comprises the built-in packs described in [RULE_PACKS.md](RULE_PACKS.md#baseline), including `bash.network.read`, `pi.extension.network-research`, and `pi.home.safe`. Individual pack ids flow into provenance; no posture pseudo-pack exists.
 
 ## Commands
 
-`/clearance`, `/clearance setup`, `/clearance mode [off|ask|auto]`, `/clearance settings`, `/clearance status`, `/clearance packs`, `/clearance scope`, `/clearance tune`, `/clearance why`, `/clearance allow <plain language>`, and `/clearance allow`. The allow handler only hands a deterministic brief to the agent; it does not construct policy or call the reviewer. `/clearance profile` and `/clearance auto` are removed.
+`/clearance`, `/clearance setup`, `/clearance mode [off|ask|auto]`, `/clearance settings`, `/clearance status`, `/clearance packs`, `/clearance scope`, `/clearance tune`, `/clearance why`, `/clearance allow <plain language>`, and `/clearance allow`. The allow handler only hands a deterministic brief to the agent; it does not construct policy or call the reviewer. `/clearance profile` and `/clearance auto` are unsupported and have no aliases.

@@ -33,7 +33,7 @@ Run them in joined or detached mode, steer them while active, resume retained se
 ## Install
 
 This branch is locally qualified but unpublished, so it cannot be installed from npm yet.
-After an explicitly authorized publication, the package name will be `@nklisch/pi-subagents` and its immutable registry receipt will be recorded in [Fork maintenance](./docs/FORK-MAINTENANCE.md).
+The published package is `@nklisch/pi-subagents`. [Fork maintenance](./docs/FORK-MAINTENANCE.md) records its provenance, release policy, and compatibility commitments.
 
 Load it directly for development:
 
@@ -458,7 +458,7 @@ It never throws — all error conditions produce a `console.warn` and return `{}
 
 This extension is a minimal, composable core: it owns agent spawning, execution, and result retrieval, and exposes a typed `SubagentsService` plus lifecycle events that other extensions build on.
 
-See [`docs/architecture/architecture.md`](./docs/architecture/architecture.md) for the full architecture document — design principles, domain decomposition, module dependency flow, Mermaid diagrams, and the improvement roadmap.
+See [`docs/architecture/architecture.md`](./docs/architecture/architecture.md) for design principles, domain ownership, lifecycle and service contracts, and module dependency diagrams.
 
 ## Relationship to upstream
 

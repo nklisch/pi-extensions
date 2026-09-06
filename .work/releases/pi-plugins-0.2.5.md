@@ -60,4 +60,5 @@ foreground gestures, no repeated confirmations.
   from runtime reconstruction) was fixed and covered by tests.
 - The stage→restart→activate e2e golden is updated but not executed locally:
   the e2e harness cannot pack workspace bundles in this checkout (pre-existing
-  harness issue; see backlog item test-typecheck-brand-cleanup).
+  harness issue in the former host; that infrastructure was later removed by
+  the [filesystem-first replacement](simple-plugin-host-2026-08-26.md)).
