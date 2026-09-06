@@ -1,3 +1,5 @@
+import { isCatalogSearchable } from "./server-availability.ts";
+import { abortable } from "./abort.ts";
 import type { AgentToolUpdateCallback, ExtensionAPI, ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent";
 import type { McpExtensionState } from "./state.ts";
 import type { DirectToolSpec, McpAdapterOptions, McpConfig, PromptMetadata } from "./types.ts";
@@ -70,6 +72,9 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
   let currentOwner: McpRuntimeOwner | null = null;
   let currentOAuthRuntime: McpOAuthRuntime | null = null;
   let lifecycleGeneration = 0;
+  let initError: string | undefined;
+  let sessionStopped = false;
+  let frozenSpecs: DirectToolSpec[] | undefined;
 
   async function shutdownState(currentState: McpExtensionState | null, reason: string): Promise<void> {
     if (!currentState) {
@@ -163,10 +168,11 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     });
   }
 
-  function resolveCurrentDirectTools(config: McpConfig, cache: MetadataCache | null): DirectToolSpec[] {
+  function resolveCurrentDirectTools(config: McpConfig, cache: MetadataCache | null, includeUnavailable = false): DirectToolSpec[] {
     if (envRaw === "__none__") return [];
     const prefix = config.settings?.toolPrefix ?? "server";
-    return resolveDirectTools(config, cache, prefix, envDirectToolOverride);
+    const specs = directToolsFrozen && frozenSpecs ? frozenSpecs : resolveDirectTools(config, cache, prefix, envDirectToolOverride, state?.toolMetadata);
+    return state && !includeUnavailable ? specs.filter(spec => isCatalogSearchable(state!, spec.serverName)) : specs;
   }
 
   function deactivateTools(toolNames: string[]): string[] {
@@ -206,23 +212,24 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
       if (previous !== fingerprint) {
         registerDirectTool(spec);
         registeredDirectTools.set(spec.prefixedName, fingerprint);
-        if (fallbackDeactivatedTools.delete(spec.prefixedName)) {
-          const activeTools = pi.getActiveTools?.();
-          if (activeTools && !activeTools.includes(spec.prefixedName)) {
-            pi.setActiveTools([...activeTools, spec.prefixedName]);
-          }
-        }
         (previous ? updated : added).push(spec.prefixedName);
+      }
+      if (fallbackDeactivatedTools.has(spec.prefixedName)) {
+        const activeTools = pi.getActiveTools?.();
+        if (activeTools && !activeTools.includes(spec.prefixedName)) {
+          pi.setActiveTools([...activeTools, spec.prefixedName]);
+        }
+        fallbackDeactivatedTools.delete(spec.prefixedName);
       }
     }
 
     for (const toolName of [...registeredDirectTools.keys()]) {
       if (nextNames.has(toolName)) continue;
-      registeredDirectTools.delete(toolName);
       deactivated.push(toolName);
     }
 
     deactivateTools(deactivated);
+    for (const toolName of deactivated) registeredDirectTools.delete(toolName);
     return { specs, added, updated, deactivated };
   }
 
@@ -235,11 +242,13 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     }
   }
 
-  function syncToolSurface(ctx?: ExtensionContext): void {
+  function syncToolSurface(ctx?: ExtensionContext, deliberate = false): void {
+    if (deliberate) directToolsFrozen = false;
     const config = state?.config ?? earlyConfig;
     const cache = loadMetadataCache();
     const result = syncDirectTools(config, cache);
     syncProxyTool(config, cache, result.specs);
+    if (deliberate && config.settings?.freezeDirectTools) { frozenSpecs = result.specs; directToolsFrozen = true; }
     const changed = result.added.length + result.updated.length + result.deactivated.length;
     if (changed > 0 && ctx?.hasUI) {
       ctx.ui.notify(
@@ -277,66 +286,61 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
 
   function startInitialization(ctx: ExtensionContext, owner: McpRuntimeOwner, oauthRuntime: McpOAuthRuntime, generation: number, staleReason: string): Promise<void> {
     const promise = initializeMcp(pi, ctx, owner, {
-      ...(programmaticConfig || sessionOverlay !== undefined || options.configPath !== undefined
-        ? {
-            ...(earlyConfigPath !== undefined ? { configPath: earlyConfigPath } : {}),
-            ...(sessionConfig !== undefined ? { config: sessionConfig } : {}),
-            ...(sessionOverlay !== undefined ? { configOverlay: sessionOverlay } : {}),
-          }
-        : {}),
+      ...(earlyConfigPath !== undefined ? { configPath: earlyConfigPath } : {}),
+      ...(sessionConfig !== undefined ? { config: sessionConfig } : {}),
+      ...(sessionOverlay !== undefined ? { configOverlay: sessionOverlay } : {}),
       oauthRuntime,
-      statusEvents: pi.events,
-    });
-    initPromise = promise;
-
-    return promise.then(async (nextState) => {
-      if (!owner.isActive() || generation !== lifecycleGeneration || initPromise !== promise) {
-        try {
-          await shutdownState(nextState, staleReason);
-        } catch (error) {
-          console.error(`MCP: failed to clean stale initialization state: ${formatTerminalError(error)}`);
-        }
-        return;
+    }).then(async nextState => {
+      if (!owner.isActive() || generation !== lifecycleGeneration) {
+        await shutdownState(nextState, staleReason);
+        throw new Error("MCP initialization superseded");
       }
-
       state = nextState;
-      nextState.onToolMetadataUpdated = (_serverName, _reason) => {
+      nextState.onToolMetadataUpdated = () => {
         if (state !== nextState || !owner.isActive()) return;
         syncPromptCommands();
-        if (directToolsFrozen) {
-          logger.debug(`MCP: metadata update for ${_serverName} (${_reason}) skipped — directTools frozen`);
-          return;
-        }
-        syncToolSurface(ctx);
+        syncToolSurface();
       };
       syncPromptCommands();
-      syncToolSurface(ctx);
+      syncToolSurface();
+      nextState.statusEvents = pi.events;
       updateStatusBar(nextState);
-      initPromise = null;
+      initError = undefined;
       if (earlyConfig.settings?.freezeDirectTools === true) {
+        frozenSpecs = resolveCurrentDirectTools(nextState.config, loadMetadataCache(), true);
         directToolsFrozen = true;
-        logger.info("MCP: direct tools frozen after initial sync — reconnects won't rebuild the system prompt; use mcp({ connect: \"server\" }) to rediscover");
       }
-    }).catch(async err => {
-      if (!owner.isActive() || generation !== lifecycleGeneration) {
-        return;
+      return nextState;
+    }).catch(async error => {
+      if (generation === lifecycleGeneration && owner.isActive()) {
+        initError = formatTerminalError(error).slice(0, 2048);
+        state = null;
+        const results = await Promise.allSettled([owner.stop("MCP initialization failed"), shutdownOAuth(oauthRuntime)]);
+        for (const result of results) if (result.status === "rejected") logger.error(`MCP initialization cleanup failed: ${formatTerminalError(result.reason)}`);
       }
-      if (initPromise !== promise && initPromise !== null) {
-        return;
-      }
-      console.error(`MCP initialization failed: ${formatTerminalError(err)}`);
-      initPromise = null;
-      if (state) return;
-
-      try {
-        await Promise.all([
-          owner.stop("MCP initialization failed"),
-          shutdownOAuth(oauthRuntime),
-        ]);
-      } catch (error) {
-        console.error(`MCP: failed to clean rejected initialization: ${formatTerminalError(error)}`);
-      }
+      throw error;
+    }).finally(() => {
+      if (initPromise === promise) initPromise = null;
     });
+    initPromise = promise;
+    // Detached initialization always has a rejection sink; tool callers join
+    // the authoritative promise including publication and cleanup above.
+    return promise.then(() => {}, error => { logger.error(`MCP initialization failed: ${formatTerminalError(error)}`); });
+  }
+
+  async function ensureInitialized(ctx: ExtensionContext, signal?: AbortSignal): Promise<void> {
+    if (sessionStopped) throw new Error("MCP session has ended");
+    if (state && !initPromise) return;
+    if (!initPromise) {
+      const generation = ++lifecycleGeneration;
+      const owner = createMcpRuntimeOwner();
+      const oauthRuntime = createOAuthRuntime(owner.signal);
+      currentOwner = owner; currentOAuthRuntime = oauthRuntime;
+      void startInitialization(ctx, owner, oauthRuntime, generation, "superseded_retry");
+    }
+    const initialized = await abortable(awaitWithTimeout(initPromise!, INIT_WAIT_TIMEOUT_MS), signal);
+    if (initialized === INIT_WAIT_TIMED_OUT) throw Object.assign(new Error("MCP initialization is still in progress. Try again shortly; no new attempt was started."), { code: "init_timeout" });
+    if (!state) throw new Error(initError ?? "MCP initialization did not publish a usable runtime. Retry mcp({}).");
   }
 
   function startLoadTimeInitialization(): void {
@@ -364,6 +368,8 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    sessionStopped = false;
+    directToolsFrozen = false; frozenSpecs = undefined; initError = undefined;
     const generation = ++lifecycleGeneration;
     const previousState = state;
     const previousOwner = currentOwner;
@@ -404,6 +410,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
   });
 
   pi.on("session_shutdown", async () => {
+    sessionStopped = true;
     ++lifecycleGeneration;
     const currentState = state;
     const owner = currentOwner;
@@ -426,6 +433,18 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
       console.error(`MCP: session shutdown cleanup failed: ${formatTerminalError(error)}`);
     }
   });
+
+  const converge = async () => {
+    const current = state;
+    if (!current?.lifecycle.ensureConverged) return;
+    // One foreground wait budget, regardless of configured server count. The
+    // underlying single-flight work stays owned and cancellable at shutdown.
+    const work = current.lifecycle.ensureConverged();
+    void work.catch(error => logger.debug(`MCP convergence deferred: ${formatTerminalError(error)}`));
+    await awaitWithTimeout(work.catch(() => {}), 5000);
+  };
+  pi.on("input", converge);
+  pi.on("before_agent_start", converge);
 
   // Re-flag returned MCP tool failures so pi registers them as errors (see toolErrorOverride).
   pi.on("tool_result", (event) => toolErrorOverride(event.details));
@@ -499,7 +518,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         case "reconnect":
           commandOwner?.throwIfInactive();
           await reconnectServers(state, commandCtx, targetServer);
-          if (directToolsFrozen) syncToolSurface(commandCtx);
+          if (directToolsFrozen) syncToolSurface(commandCtx, true);
           break;
         case "tools":
           await showTools(state, commandCtx);
@@ -567,7 +586,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
             }
             const result = await openMcpPanel(state, pi, commandCtx, earlyConfigPath, (changes) => {
               applyDirectToolConfigChanges(changes);
-              syncToolSurface(commandCtx);
+              syncToolSurface(commandCtx, true);
             });
             if (result?.configChanged) {
               commandOwner?.throwIfInactive();
@@ -645,36 +664,11 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         timeoutMs: optionalNumber({ minimum: 1, description: "Execution timeout in milliseconds (default: 30000)" }),
       }),
       renderResult: renderMcpToolResult,
-      async execute(_toolCallId: string, params: { code: string; timeoutMs?: number }, signal: AbortSignal | undefined) {
+      async execute(_toolCallId: string, params: { code: string; timeoutMs?: number }, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext) {
         const executeOwner = currentOwner;
-        if (!state && initPromise) {
-          try {
-            const initialized = await awaitWithTimeout(initPromise, INIT_WAIT_TIMEOUT_MS);
-            if (initialized === INIT_WAIT_TIMED_OUT) {
-              return {
-                content: [{ type: "text" as const, text: "MCP initialization is still in progress. Try again shortly." }],
-                details: { mode: "script", error: "init_timeout", timeoutMs: INIT_WAIT_TIMEOUT_MS },
-              };
-            }
-            executeOwner?.throwIfInactive();
-            state = initialized;
-          } catch (error) {
-            if (executeOwner && isAbortError(error, executeOwner.signal)) throw error;
-            const message = error instanceof Error ? error.message : String(error);
-            return {
-              content: [{ type: "text" as const, text: `MCP initialization failed: ${message}` }],
-              details: { mode: "script", error: "init_failed", message },
-            };
-          }
-        }
-        if (!state) {
-          return {
-            content: [{ type: "text" as const, text: "MCP not initialized" }],
-            details: { mode: "script", error: "not_initialized" },
-          };
-        }
-        executeOwner?.throwIfInactive();
-        return runMcpScript(state, params.code, params.timeoutMs, getPiTools, signal);
+        try { await ensureInitialized(ctx, signal); }
+        catch (error) { if (signal?.aborted) throw error; return { content: [{ type: "text" as const, text: `MCP initialization failed: ${initError ?? formatTerminalError(error)}. Retry mcp({}) after correcting the cause.` }], details: { mode: "script", error: error instanceof Error && "code" in error && error.code === "init_timeout" ? "init_timeout" : "init_failed", ...(error instanceof Error && "code" in error && error.code === "init_timeout" ? { timeoutMs: INIT_WAIT_TIMEOUT_MS } : {}) } }; }
+        return runMcpScript(state!, params.code, params.timeoutMs, getPiTools, signal);
       },
     });
   }
@@ -685,6 +679,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
       label: "MCP",
       description,
       promptSnippet: "MCP gateway — status, search, describe, auth, and single MCP tool calls",
+      promptGuidelines: ['Use mcp to discover configured servers before declaring MCP capabilities unavailable. Cached tools connect on use; undiscovered catalogs require mcp({connect:"name"}). Load exact schemas with mcp describe before unfamiliar calls; search shapes are only previews.'],
       renderCall: renderMcpProxyToolCall,
       parameters: Type.Object({
         tool: Type.Optional(Type.String({ description: "Tool name to call (e.g., 'xcodebuild_list_sims')" })),
@@ -745,33 +740,9 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
           parsedArgs = args as Record<string, unknown>;
         }
 
-        if (!state && initPromise) {
-          try {
-            const initialized = await awaitWithTimeout(initPromise, INIT_WAIT_TIMEOUT_MS);
-            if (initialized === INIT_WAIT_TIMED_OUT) {
-              return {
-                content: [{ type: "text" as const, text: "MCP initialization is still in progress. Try again shortly." }],
-                details: { error: "init_timeout", timeoutMs: INIT_WAIT_TIMEOUT_MS },
-              };
-            }
-            executeOwner?.throwIfInactive();
-            state = initialized;
-          } catch (error) {
-            if (executeOwner && isAbortError(error, executeOwner.signal)) throw error;
-            const message = error instanceof Error ? error.message : String(error);
-            return {
-              content: [{ type: "text" as const, text: `MCP initialization failed: ${message}` }],
-              details: { error: "init_failed", message },
-            };
-          }
-        }
-        if (!state) {
-          return {
-            content: [{ type: "text" as const, text: "MCP not initialized" }],
-            details: { error: "not_initialized" },
-          };
-        }
-        executeOwner?.throwIfInactive();
+        try { await ensureInitialized(_ctx, signal); }
+        catch (error) { if (signal?.aborted) throw error; return { content: [{ type: "text" as const, text: `MCP initialization failed: ${initError ?? formatTerminalError(error)}. Retry mcp({}) after correcting the cause.` }], details: { error: error instanceof Error && "code" in error && error.code === "init_timeout" ? "init_timeout" : "init_failed", ...(error instanceof Error && "code" in error && error.code === "init_timeout" ? { timeoutMs: INIT_WAIT_TIMEOUT_MS } : {}) } }; }
+        if (!state) throw new Error("MCP initialization was superseded");
 
         if (params.action === "ui-messages") {
           return executeUiMessages(state);
@@ -810,11 +781,13 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         }
         if (params.connect) {
           const result = await executeConnect(state, params.connect, signal);
+          directToolsFrozen = false;
           syncToolSurface(_ctx as ExtensionContext);
+          if (state.config.settings?.freezeDirectTools) { frozenSpecs = resolveCurrentDirectTools(state.config, loadMetadataCache()); directToolsFrozen = true; }
           return result;
         }
         if (params.describe) {
-          return executeDescribe(state, params.describe);
+          return executeDescribe(state, params.describe, params.server);
         }
         if (params.instructions) {
           return executeInstructions(state, params.instructions);
@@ -844,7 +817,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
       || missingConfiguredDirectToolServers.length > 0;
 
     if (shouldRegisterProxyTool) {
-      const description = buildProxyDescription(config, cache, directSpecs);
+      const description = buildProxyDescription(config);
       if (!proxyToolRegistered || proxyToolDescription !== description) {
         registerProxyTool(description);
         return;

@@ -162,4 +162,111 @@ describe("McpServerManager.reconnect", () => {
     freshClient.onclose?.();
     expect(fresh.status).toBe("closed");
   });
+  it("retains a healthy catalog when a refresh exceeds its request budget", async () => {
+    const { McpServerManager } = await import("../server-manager.ts");
+    const manager = new McpServerManager();
+    const connection = await manager.connect("slow", { ...def, auth: false, requestTimeoutMs: 20 });
+    connection.tools = [{ name: "old", inputSchema: { type: "object" } }];
+    connection.client.getServerCapabilities = () => ({ tools: {} });
+    connection.client.listTools = vi.fn(() => new Promise(() => {}));
+    expect(await manager.refreshTools("slow", connection)).toBe("deferred");
+    expect(connection.status).toBe("connected");
+    expect(connection.tools[0]?.name).toBe("old");
+    await manager.closeAll();
+  });
+
+  it("does not overwrite a newer notification with a slow catalog result", async () => {
+    const { McpServerManager } = await import("../server-manager.ts");
+    const manager = new McpServerManager();
+    const connection = await manager.connect("revision", { ...def, auth: false });
+    connection.client.getServerCapabilities = () => ({ tools: {} });
+    let resolve!: (value: any) => void;
+    connection.client.listTools = vi.fn(() => new Promise(res => { resolve = res; }));
+    const refresh = manager.refreshTools("revision", connection);
+    await Promise.resolve(); await Promise.resolve();
+    connection.catalogRevision = (connection.catalogRevision ?? 0) + 1;
+    connection.tools = [{ name: "notification", inputSchema: { type: "object" } }];
+    resolve({ tools: [{ name: "stale", inputSchema: { type: "object" } }] });
+    expect(await refresh).toBe("superseded");
+    expect(connection.tools[0]?.name).toBe("notification");
+    await manager.closeAll();
+  });
+
+  it("retries failed surface publication even when the next catalog is unchanged", async () => {
+    const { McpServerManager } = await import("../server-manager.ts");
+    const manager = new McpServerManager();
+    const connection = await manager.connect("publication", { ...def, auth: false });
+    connection.client.getServerCapabilities = () => ({ tools: {} });
+    connection.client.listTools = vi.fn(async () => ({ tools: [{ name: "new", inputSchema: { type: "object" } }], ttlMs: 0 }));
+    const publish = vi.fn().mockRejectedValueOnce(new Error("host sync failed")).mockResolvedValue(undefined);
+    manager.setMetadataListChangedListener(publish);
+    expect(await manager.refreshTools("publication", connection)).toBe("updated");
+    expect(connection.publicationPending).toBe(true);
+    expect(connection.toolListHints).toEqual({ ttlMs: 0 });
+    expect(await manager.refreshTools("publication", connection)).toBe("unchanged");
+    expect(connection.publicationPending).toBe(false);
+    expect(publish).toHaveBeenCalledTimes(2);
+    await manager.closeAll();
+  });
+
+  it("does not adopt a refresh from a replaced connection", async () => {
+    const { McpServerManager } = await import("../server-manager.ts");
+    const manager = new McpServerManager();
+    const connection = await manager.connect("replaced", { ...def, auth: false });
+    connection.client.getServerCapabilities = () => ({ tools: {} });
+    let resolve!: (value: any) => void;
+    connection.client.listTools = vi.fn(() => new Promise(res => { resolve = res; }));
+    const refresh = manager.refreshTools("replaced", connection);
+    await Promise.resolve(); await Promise.resolve();
+    const replacement = await manager.reconnect("replaced", { ...def, auth: false }, connection);
+    resolve({ tools: [{ name: "stale", inputSchema: { type: "object" } }] });
+    expect(await refresh).toBe("superseded");
+    expect(replacement.tools).toEqual([]);
+    await manager.closeAll();
+  });
+
+  it("repairs a dropped modern catalog stream without timing out the adopted stream", async () => {
+    const { McpServerManager } = await import("../server-manager.ts");
+    const manager = new McpServerManager();
+    const connection = await manager.connect("listen", { ...def, auth: false });
+    connection.client.getProtocolEra = () => "modern";
+    connection.client.getServerCapabilities = () => ({ tools: { listChanged: true } });
+    connection.listenState = "dropped";
+    connection.listenCatalogStale = true;
+    const subscription = { closed: new Promise(() => {}), close: vi.fn(async () => {}) };
+    connection.client.listen = vi.fn(async () => subscription) as any;
+    vi.useFakeTimers();
+    try {
+      await manager.ensureListen("listen", connection);
+      expect(connection.listenState).toBe("active");
+      expect(connection.listenCatalogStale).toBe(false);
+      const signal = (connection.client.listen as any).mock.calls[0][1].signal as AbortSignal;
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(signal.aborted).toBe(false);
+      expect(subscription.close).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); await manager.closeAll(); }
+  });
+
+  it("closes a late subscription after its repair deadline", async () => {
+    const { McpServerManager } = await import("../server-manager.ts");
+    const manager = new McpServerManager();
+    const connection = await manager.connect("late-listen", { ...def, auth: false });
+    connection.client.getProtocolEra = () => "modern";
+    connection.client.getServerCapabilities = () => ({ tools: { listChanged: true } });
+    connection.listenState = "dropped";
+    let resolve!: (subscription: any) => void;
+    connection.client.listen = vi.fn(() => new Promise(res => { resolve = res; })) as any;
+    vi.useFakeTimers();
+    try {
+      const repair = manager.ensureListen("late-listen", connection);
+      await vi.advanceTimersByTimeAsync(5001);
+      await repair;
+      const subscription = { closed: new Promise(() => {}), close: vi.fn(async () => {}) };
+      resolve(subscription);
+      await Promise.resolve(); await Promise.resolve();
+      expect(subscription.close).toHaveBeenCalledTimes(1);
+      expect(connection.listenState).toBe("dropped");
+    } finally { vi.useRealTimers(); await manager.closeAll(); }
+  });
+
 });

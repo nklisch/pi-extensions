@@ -51,7 +51,7 @@ interface ProgrammaticConnection {
     ): Promise<CallToolResult>;
     readResource(params: { uri: string }, options?: RequestOptions): Promise<ReadResourceResult>;
   };
-  tools: readonly { name: string; description?: string; inputSchema?: unknown }[];
+  tools: readonly { name: string; description?: string; inputSchema?: unknown; outputSchema?: unknown }[];
   resources: readonly { uri: string; name: string; description?: string }[];
   instructions?: string;
   transport?: { sessionId?: string };
@@ -899,7 +899,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
     identity: McpSourceIdentity | undefined,
     serverKey: string,
     signal: AbortSignal,
-  ): Promise<readonly { identity: string; name: string; description?: string; inputSchema?: unknown }[]> {
+  ): Promise<readonly { identity: string; name: string; description?: string; inputSchema?: unknown; outputSchema?: unknown }[]> {
     const { record, serverKey: resolvedKey } = this.recordForCall(identity, serverKey);
     const server = record.registration.source.servers[resolvedKey]!;
     const execution = await this.openExecution(record.registration.source.identity, resolvedKey, signal);
@@ -913,6 +913,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
           name: tool.name,
           ...(tool.description === undefined ? {} : { description: tool.description }),
           ...(tool.inputSchema === undefined ? {} : { inputSchema: tool.inputSchema }),
+          ...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
         }));
     } finally {
       await execution.close(new AbortController().signal);
@@ -1032,7 +1033,7 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
 
   private warmInventory(
     qualifiedKey: string,
-    tools: readonly { name: string; description?: string; inputSchema?: unknown }[],
+    tools: readonly { name: string; description?: string; inputSchema?: unknown; outputSchema?: unknown }[],
   ): void {
     this.ensureInventoryLoaded();
     this.inventory.set(qualifiedKey, {
@@ -1117,12 +1118,12 @@ export class ProgrammaticMcpRuntime implements McpProgrammaticRuntime {
     toolNames: readonly string[],
     signal: AbortSignal,
   ): Promise<{
-    schemas: readonly { name: string; description?: string; inputSchema?: unknown }[];
+    schemas: readonly { name: string; description?: string; inputSchema?: unknown; outputSchema?: unknown }[];
     missing: readonly string[];
   }> {
     const tools = await this.listTools(identity, serverKey, signal);
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
-    const schemas: { name: string; description?: string; inputSchema?: unknown }[] = [];
+    const schemas: { name: string; description?: string; inputSchema?: unknown; outputSchema?: unknown }[] = [];
     const missing: string[] = [];
     for (const name of toolNames) {
       const found = byName.get(name);

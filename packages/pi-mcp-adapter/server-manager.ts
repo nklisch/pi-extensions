@@ -1,6 +1,11 @@
+import { isDeepStrictEqual } from "node:util";
+import { stat } from "node:fs/promises";
+import { isTemporarilyUnavailable } from "./server-availability.ts";
 import {
   Client,
   SdkHttpError,
+  SdkError,
+  SdkErrorCode,
   SSEClientTransport,
   StreamableHTTPClientTransport,
   UnauthorizedError,
@@ -30,7 +35,7 @@ import { createJsonSchemaValidator } from "./json-schema-validator.ts";
 import { logger } from "./logger.ts";
 import { McpOAuthProvider } from "./mcp-oauth-provider.ts";
 import { extractOAuthConfig, supportsOAuth, type McpOAuthRuntime } from "./mcp-auth-flow.ts";
-import type { AuthStorageOptions } from "./mcp-auth.ts";
+import { inspectAuthForUrl, type AuthStorageOptions } from "./mcp-auth.ts";
 import { registerSamplingHandler, type ServerSamplingConfig } from "./sampling-handler.ts";
 import {
   handleUrlElicitation,
@@ -128,13 +133,24 @@ export interface ServerConnection {
   /** True when prompts were advertised but prompts/list failed. */
   promptDiscoveryFailed?: boolean;
   instructions?: string;
+  toolListHints?: { ttlMs?: number; cacheScope?: string } | undefined;
+  catalogRevision?: number;
+  catalogAcquiredAt?: number;
+  publicationPending?: boolean;
+  listenSubscription?: Awaited<ReturnType<Client["listen"]>>;
+  listenPromise?: Promise<void>;
+  listenStopped?: boolean;
+  listenCatalogStale?: boolean;
+  listenRetryAfter?: number;
+  listenState?: "active" | "dropped" | "legacy" | "not-listening" | "re-establishing";
+
   lastUsedAt: number;
   inFlight: number;
   status: "connected" | "closed" | "needs-auth";
 }
 
 type UiStreamListener = (serverName: string, notification: ServerStreamResultPatchNotification["params"]) => void;
-type MetadataListChangedListener = (serverName: string, reason: string) => void;
+type MetadataListChangedListener = (serverName: string, reason: string) => void | Promise<void>;
 
 function connectionServerUrl(definition: ServerDefinition, resolved: boolean): string {
   if (!resolved) return resolveServerUrl(definition)!;
@@ -163,6 +179,7 @@ export class McpServerManager {
   private uiStreamListeners = new Map<string, UiStreamListener>();
   private samplingConfig: ServerSamplingConfig | undefined;
   private metadataListChangedListener: MetadataListChangedListener | undefined;
+  private reconnectFailureListener: ((name: string, error: unknown) => void) | undefined;
   private elicitationConfig: ServerElicitationConfig | undefined;
   private authStorageOptions: AuthStorageOptions = {};
   private oauthRuntime: McpOAuthRuntime | undefined;
@@ -181,6 +198,10 @@ export class McpServerManager {
 
   setSamplingConfig(config: ServerSamplingConfig | undefined): void {
     this.samplingConfig = config;
+  }
+
+  setReconnectFailureListener(listener: (name: string, error: unknown) => void): void {
+    this.reconnectFailureListener = listener;
   }
 
   setMetadataListChangedListener(listener: MetadataListChangedListener | undefined): void {
@@ -270,7 +291,7 @@ export class McpServerManager {
     const attemptSignal = combineAbortSignals(ownedSignal, attemptController.signal);
     const connectionAttempt = this.createConnection(name, definition, attemptSignal, ownedSignal, options);
     const promise = definition.url
-      ? connectionAttempt.catch(async error => { throw await this.enrichHttpConnectionError(definition, error, options); })
+      ? connectionAttempt.catch(async error => { throw await this.enrichHttpConnectionError(definition, error, options, attemptSignal); })
       : connectionAttempt;
     this.connectPromises.set(name, promise);
     this.connectAttempts.set(name, attemptController);
@@ -283,6 +304,7 @@ export class McpServerManager {
         throw new Error(`MCP connection for ${name} was closed while connecting`);
       }
       this.connections.set(name, connection);
+      if (connection.listenSubscription) this.watchListen(name, connection, connection.listenSubscription);
       return connection;
     } finally {
       if (this.connectPromises.get(name) === promise) this.connectPromises.delete(name);
@@ -341,8 +363,17 @@ export class McpServerManager {
 
     const staleInFlight = staleConnection.inFlight;
     await this.close(name);
-    const fresh = await this.connect(name, definition, signal);
+    let fresh: ServerConnection;
+    try {
+      fresh = await this.connect(name, definition, signal);
+    } catch (error) {
+      if (!signal?.aborted && !this.stopped) {
+        this.invokeDetachedCallback("reconnect failure", this.reconnectFailureListener, [name, error]);
+      }
+      throw error;
+    }
     fresh.inFlight = Math.max(fresh.inFlight, staleInFlight);
+    await this.publishMetadata(name, fresh, "session-reconnect");
     return fresh;
   }
 
@@ -483,14 +514,21 @@ export class McpServerManager {
         }
       };
 
+      const subscription = client.autoOpenedSubscription;
+      if (subscription) connection.listenSubscription = subscription;
+      connection.listenState = client.getProtocolEra?.() === "modern" ? subscription ? "active" : "not-listening" : "legacy";
+      const hints: { ttlMs?: number; cacheScope?: string } = {};
       // Discover tools, resources, and prompts. Resource and prompt listing is
       // optional: only servers advertising the capability are queried.
       const [tools, resources, promptResult] = await Promise.all([
-        this.fetchAllTools(client, requestOptions),
+        this.fetchAllTools(client, requestOptions, hints),
         this.fetchAllResources(client, requestOptions),
         this.fetchAllPrompts(client, requestOptions),
       ]);
       connection.tools = tools;
+      connection.catalogRevision = 0;
+      connection.catalogAcquiredAt = Date.now();
+      connection.toolListHints = hints;
       connection.resources = resources;
       connection.prompts = promptResult.prompts;
       connection.promptDiscoveryFailed = promptResult.failed;
@@ -537,14 +575,23 @@ export class McpServerManager {
           throw new Error(`${baseMessage} (${detail})`, { cause: reportedError });
         }
       }
+      if (definition.command && reportedError instanceof Error && "code" in reportedError && ["ENOENT", "ENOTDIR"].includes(String(reportedError.code))) {
+        const cwd = options.values === "resolved" ? definition.cwd ?? this.defaultCwd : resolveConfigPath(definition.cwd) ?? this.defaultCwd;
+        if (cwd) {
+          const info = await stat(cwd).catch(() => undefined);
+          if (!info?.isDirectory()) throw new Error(`MCP server ${name} has a missing or non-directory cwd: ${cwd}`, { cause: reportedError });
+        }
+      }
       throw reportedError;
     }
   }
 
-  private async enrichHttpConnectionError(definition: ServerDefinition, error: unknown, options: ConnectOptions): Promise<Error> {
+  private async enrichHttpConnectionError(definition: ServerDefinition, error: unknown, options: ConnectOptions, signal?: AbortSignal): Promise<Error> {
+    if (signal?.aborted) { throwIfAborted(signal); }
+    if (isTemporarilyUnavailable(error)) return new Error("MCP server temporarily unavailable (HTTP 503); retry later or explicitly reconnect.", { cause: error });
     const originalMessage = error instanceof Error ? error.message : String(error);
     try {
-      const probe = await probeMcpEndpoint(connectionServerUrl(definition, options.values === "resolved"));
+      const probe = await probeMcpEndpoint(connectionServerUrl(definition, options.values === "resolved"), signal);
       return new Error(`${originalMessage} — probe: ${probe.classification}`, { cause: error });
     } catch {
       return error instanceof Error ? error : new Error(originalMessage);
@@ -667,7 +714,10 @@ export class McpServerManager {
     const connection = this.connections.get(serverName);
     if (!connection || connection.client !== client || connection.status !== "connected") return;
     connection.tools = tools;
-    this.invokeDetachedCallback("metadata list change", this.metadataListChangedListener, [serverName, "tools-list-changed"]);
+    connection.catalogAcquiredAt = Date.now();
+    connection.catalogRevision = (connection.catalogRevision ?? 0) + 1;
+    connection.toolListHints = undefined;
+    void this.publishMetadata(serverName, connection, "tools-list-changed");
   }
 
   private handlePromptsListChanged(
@@ -684,8 +734,10 @@ export class McpServerManager {
     const connection = this.connections.get(serverName);
     if (!connection || connection.client !== client || connection.status !== "connected") return;
     connection.prompts = prompts;
+    connection.catalogRevision = (connection.catalogRevision ?? 0) + 1;
+    connection.toolListHints = undefined;
     connection.promptDiscoveryFailed = false;
-    this.invokeDetachedCallback("metadata list change", this.metadataListChangedListener, [serverName, "prompts-list-changed"]);
+    void this.publishMetadata(serverName, connection, "prompts-list-changed");
   }
 
   private handleResourcesListChanged(
@@ -702,7 +754,146 @@ export class McpServerManager {
     const connection = this.connections.get(serverName);
     if (!connection || connection.client !== client || connection.status !== "connected") return;
     connection.resources = resources;
-    this.invokeDetachedCallback("metadata list change", this.metadataListChangedListener, [serverName, "resources-list-changed"]);
+    connection.catalogRevision = (connection.catalogRevision ?? 0) + 1;
+    connection.toolListHints = undefined;
+    void this.publishMetadata(serverName, connection, "resources-list-changed");
+  }
+
+  /** Publish live truth before status/cache observers; a failed observer is retried. */
+  async publishMetadata(name: string, connection: ServerConnection, reason: string): Promise<void> {
+    if (this.stopped || this.connections.get(name) !== connection || !(["connected", "needs-auth"].includes(connection.status))) return;
+    connection.publicationPending = true;
+    try {
+      await this.metadataListChangedListener?.(name, reason);
+      if (this.connections.get(name) === connection) connection.publicationPending = false;
+    } catch (error) {
+      this.reportDetachedCallbackFailure("metadata publication", error);
+    }
+  }
+
+  async refreshTools(name: string, expected: ServerConnection, signal?: AbortSignal): Promise<"updated" | "unchanged" | "superseded" | "deferred"> {
+    await this.ensureListen(name, expected, signal);
+    return this.refreshCatalog(name, expected, signal);
+  }
+
+  private async refreshCatalog(name: string, expected: ServerConnection, signal?: AbortSignal): Promise<"updated" | "unchanged" | "superseded" | "deferred"> {
+    const owned = combineAbortSignals(this.runtimeSignal, signal);
+    throwIfAborted(owned);
+    const current = () => !this.stopped && this.connections.get(name) === expected && expected.status === "connected";
+    if (!current()) return "superseded";
+    const revision = expected.catalogRevision ?? 0;
+    // This is a background latency budget, not evidence that a slow server died.
+    // Existing explicit request timeouts override the five-second default.
+    const timeout = this.getResolvedRequestTimeoutMs(expected.definition) ?? 5000;
+    const deadline = AbortSignal.timeout(timeout);
+    const requestSignal = combineAbortSignals(owned, deadline)!;
+    const options: RequestOptions & { cacheMode: "refresh" } = { signal: requestSignal, timeout, cacheMode: "refresh" };
+    const hints: { ttlMs?: number; cacheScope?: string } = {};
+    const caps = expected.client.getServerCapabilities?.();
+    const requests = [
+      caps?.tools ? this.fetchAllTools(expected.client, options, hints) : Promise.resolve(expected.tools),
+      this.fetchAllResources(expected.client, options, true),
+      this.fetchAllPrompts(expected.client, options, true),
+    ] as const;
+    const results = await Promise.allSettled(requests.map(request => abortable<unknown>(request, requestSignal)));
+    throwIfAborted(owned);
+    if (!current() || revision !== (expected.catalogRevision ?? 0)) return "superseded";
+    let deferred = false;
+    for (const result of results) {
+      if (result.status === "fulfilled") continue;
+      if (deadline.aborted || isTemporarilyUnavailable(result.reason) || result.reason instanceof SdkError && result.reason.code === SdkErrorCode.RequestTimeout) deferred = true;
+      else throw result.reason;
+    }
+    const tools = results[0]!;
+    const resources = results[1]!;
+    const prompts = results[2]!;
+    let changed = false;
+    if (tools.status === "fulfilled") {
+      changed ||= !isDeepStrictEqual(expected.tools, tools.value) || !isDeepStrictEqual(expected.toolListHints, hints);
+      expected.tools = tools.value as McpTool[]; expected.toolListHints = hints;
+      expected.catalogAcquiredAt = Date.now();
+    }
+    if (resources.status === "fulfilled") {
+      changed ||= !isDeepStrictEqual(expected.resources, resources.value);
+      expected.resources = resources.value as McpResource[];
+    }
+    if (prompts.status === "fulfilled") {
+      const value = prompts.value as { prompts: McpPrompt[]; failed: boolean };
+      changed ||= !isDeepStrictEqual(expected.prompts, value.prompts);
+      expected.prompts = value.prompts; expected.promptDiscoveryFailed = false;
+    }
+    if (changed) expected.catalogRevision = revision + 1;
+    if (!deferred) expected.listenCatalogStale = false;
+    if (changed || expected.publicationPending) await this.publishMetadata(name, expected, "catalog-refresh");
+    return deferred ? "deferred" : changed ? "updated" : "unchanged";
+  }
+
+  private watchListen(name: string, connection: ServerConnection, subscription: NonNullable<ServerConnection["listenSubscription"]>): void {
+    void subscription.closed.then(cause => {
+      if (this.stopped || this.connections.get(name) !== connection || connection.status !== "connected" || connection.listenSubscription !== subscription) return;
+      if (cause === "remote") {
+        connection.listenState = "dropped"; connection.listenCatalogStale = true; connection.listenRetryAfter = 0;
+      } else if (connection.listenState !== "re-establishing") {
+        connection.listenStopped = true; connection.listenState = "not-listening";
+      }
+    }).catch(error => {
+      if (!this.stopped && this.connections.get(name) === connection && connection.listenSubscription === subscription) {
+        connection.listenState = "dropped"; connection.listenCatalogStale = true;
+      }
+      this.reportDetachedCallbackFailure("catalog subscription", error);
+    });
+  }
+
+  /** Repair only negotiated catalog subscriptions; never create resource subscriptions. */
+  async ensureListen(name: string, expected: ServerConnection, signal?: AbortSignal): Promise<void> {
+    const current = () => !this.stopped && !this.runtimeSignal?.aborted && this.connections.get(name) === expected && expected.status === "connected" && !expected.listenStopped;
+    if (!current() || expected.client.getProtocolEra?.() !== "modern") return;
+    if (expected.listenPromise) return abortable(expected.listenPromise, signal);
+    if ((expected.listenRetryAfter ?? 0) > Date.now()) return;
+    if (expected.listenState === "active" && !expected.listenCatalogStale) return;
+    const caps = expected.client.getServerCapabilities?.();
+    const filter = {
+      ...(caps?.tools?.listChanged ? { toolsListChanged: true } : {}),
+      ...(caps?.resources?.listChanged ? { resourcesListChanged: true } : {}),
+      ...(caps?.prompts?.listChanged ? { promptsListChanged: true } : {}),
+    };
+    if (!Object.keys(filter).length) return;
+    // Caller cancellation stops waiting, never the adopted shared stream.
+    const owned = this.runtimeSignal;
+    const attempt = (async () => {
+      const stale = expected.listenCatalogStale;
+      let adopted = false;
+      const timeout = new AbortController();
+      const timer = setTimeout(() => timeout.abort(new Error("Catalog listen timed out")), 5000);
+      timer.unref?.();
+      const requestSignal = combineAbortSignals(owned, timeout.signal)!;
+      expected.listenState = "re-establishing";
+      try {
+        if (expected.listenSubscription) await abortable(expected.listenSubscription.close(), requestSignal);
+        if (!current()) return;
+        const request = expected.client.listen(filter, { signal: requestSignal, timeout: 5000 });
+        // A client ignoring cancellation must not leave a late live subscription.
+        void request.then(subscription => { if (!current() || requestSignal.aborted) return subscription.close(); }).catch(error => this.reportDetachedCallbackFailure("late catalog listen", error));
+        const subscription = await abortable(request, requestSignal);
+        // The deadline bounds establishment, not the live event stream.
+        clearTimeout(timer);
+        if (!current()) { await subscription.close(); return; }
+        expected.listenSubscription = subscription; expected.listenState = "active";
+        adopted = true;
+        this.watchListen(name, expected, subscription);
+        if (stale) {
+          const result = await this.refreshCatalog(name, expected, owned);
+          if (result === "deferred" || result === "superseded") expected.listenRetryAfter = Date.now() + 5000;
+        }
+      } catch (error) {
+        if (!adopted) timeout.abort(error);
+        if (current()) { expected.listenState = "dropped"; expected.listenCatalogStale = true; expected.listenRetryAfter = Date.now() + 5000; }
+        if (owned?.aborted) throw error;
+        logger.debug(`MCP catalog listen repair deferred for ${name}: ${formatTerminalError(error)}`);
+      } finally { clearTimeout(timer); }
+    })().finally(() => { if (expected.listenPromise === attempt) delete expected.listenPromise; });
+    expected.listenPromise = attempt;
+    return abortable(attempt, signal);
   }
 
   async handleUrlElicitationRequired(
@@ -800,6 +991,15 @@ export class McpServerManager {
         : { status: "explicit", provider: createAuthProvider() }
       : { status: "disabled" };
 
+    if (authState.status === "implicit-deferred") {
+      // Storage failure must not prevent an anonymous-capable server from
+      // connecting. A genuine OAuth challenge still exposes its storage error.
+      try {
+        const stored = inspectAuthForUrl(serverName, serverUrl, this.authStorageOptions);
+        if (stored.status === "present" && stored.entry.tokens) authState = { status: "implicit-challenged", provider: createAuthProvider() };
+      } catch { /* malformed optional credentials: anonymous discovery remains usable */ }
+    }
+
     const attempt = async (
       kind: "streamable-http" | "sse",
     ): Promise<
@@ -871,12 +1071,16 @@ export class McpServerManager {
     }
   }
 
-  private async fetchAllTools(client: Client, requestOptions?: RequestOptions): Promise<McpTool[]> {
+  private async fetchAllTools(client: Client, requestOptions?: RequestOptions, hints?: { ttlMs?: number; cacheScope?: string }): Promise<McpTool[]> {
     const allTools: McpTool[] = [];
     let cursor: string | undefined;
 
     do {
       const result = await client.listTools(cursor ? { cursor } : undefined, requestOptions);
+      if (hints) {
+        if (typeof result.ttlMs === "number" && Number.isSafeInteger(result.ttlMs) && result.ttlMs >= 0) hints.ttlMs = Math.min(hints.ttlMs ?? Infinity, result.ttlMs);
+        if (result.cacheScope === "private" || result.cacheScope === "public" && hints.cacheScope === undefined) hints.cacheScope = result.cacheScope;
+      }
       allTools.push(...(result.tools ?? []));
       cursor = result.nextCursor;
     } while (cursor);
@@ -887,6 +1091,7 @@ export class McpServerManager {
   private async fetchAllPrompts(
     client: Client,
     requestOptions?: RequestOptions,
+    strict = false,
   ): Promise<{ prompts: McpPrompt[]; failed: boolean }> {
     const capabilities = client.getServerCapabilities?.();
     if (!capabilities?.prompts) return { prompts: [], failed: false };
@@ -903,12 +1108,13 @@ export class McpServerManager {
     } catch (error) {
       if (requestOptions?.signal?.aborted) throwIfAborted(requestOptions.signal);
       const message = error instanceof Error ? error.message : String(error);
+      if (strict || isUnauthorizedHttpError(error)) throw error;
       logger.debug(`MCP: prompts/list failed: ${message}`);
       return { prompts: [], failed: true };
     }
   }
 
-  private async fetchAllResources(client: Client, requestOptions?: RequestOptions): Promise<McpResource[]> {
+  private async fetchAllResources(client: Client, requestOptions?: RequestOptions, strict = false): Promise<McpResource[]> {
     const capabilities = client.getServerCapabilities?.();
     if (!capabilities?.resources) return [];
 
@@ -923,7 +1129,8 @@ export class McpServerManager {
       } while (cursor);
 
       return allResources;
-    } catch {
+    } catch (error) {
+      if (strict || isUnauthorizedHttpError(error)) throw error;
       if (requestOptions?.signal?.aborted) {
         throwIfAborted(requestOptions.signal);
       }
@@ -1032,6 +1239,7 @@ export class McpServerManager {
     // Delete before awaiting SDK cleanup so a replacement cannot be removed by
     // an old close operation finishing later.
     connection.status = "closed";
+    connection.listenStopped = true;
     this.connections.delete(name);
     this.acceptedUrlElicitations.delete(name);
     const closing = this.disposeConnection(connection).finally(() => {
@@ -1093,6 +1301,10 @@ export class McpServerManager {
       if (current.cause !== undefined) pending.push(current.cause);
     }
     return false;
+  }
+
+  isConnecting(name: string): boolean {
+    return this.connectPromises.has(name);
   }
 
   getConnection(name: string): ServerConnection | undefined {

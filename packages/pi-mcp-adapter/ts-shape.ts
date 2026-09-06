@@ -1,6 +1,6 @@
 type Schema = Record<string, unknown>;
 
-const UNSUPPORTED_KEYWORDS = ["if", "then", "else", "allOf", "not", "patternProperties", "additionalProperties"];
+const UNSUPPORTED_KEYWORDS = ["if", "then", "else", "allOf", "not", "patternProperties"];
 
 /** Renders the useful JSON Schema subset as TypeScript, or null for unsupported schemas. */
 export function renderTsShape(inputSchema: unknown): string | null {
@@ -111,6 +111,7 @@ function isSchema(value: unknown): value is Schema {
 }
 
 function hasUnsupportedKeyword(schema: Schema): boolean {
+  if (Object.hasOwn(schema, "additionalProperties") && schema.additionalProperties !== false) return true;
   return UNSUPPORTED_KEYWORDS.some(keyword => Object.hasOwn(schema, keyword));
 }
 

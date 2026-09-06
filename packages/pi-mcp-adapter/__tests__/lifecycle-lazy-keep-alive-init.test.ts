@@ -115,7 +115,7 @@ describe("lazy-keep-alive initializeMcp integration", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("marks no-cache bootstrap spawns for health-check reconnects", async () => {
+  it("does not spawn cold lazy servers solely to populate the catalog", async () => {
     mocks.cache = null;
     const { initializeMcp } = await import("../init.ts");
 
@@ -129,7 +129,7 @@ describe("lazy-keep-alive initializeMcp integration", () => {
     mocks.manager.clear();
     await (state.lifecycle as any).checkConnections();
 
-    expect(mocks.manager.connect).toHaveBeenCalledTimes(2);
+    expect(mocks.manager.connect).not.toHaveBeenCalled();
   });
 
   it("records direct-tool bootstrap failures", async () => {
@@ -154,7 +154,7 @@ describe("lazy-keep-alive initializeMcp integration", () => {
     expect(state.failureMessages.get("srv")).toBe("bootstrap failed");
   });
 
-  it("clears stale startup diagnostics when direct-tool bootstrap recovers", async () => {
+  it("avoids an immediate duplicate bootstrap after startup failure", async () => {
     mkdirSync(tempDir, { recursive: true });
     writeFileSync(mocks.cachePath, JSON.stringify({ version: 1, servers: {} }));
     mocks.config = {
@@ -172,9 +172,9 @@ describe("lazy-keep-alive initializeMcp integration", () => {
       signal: undefined,
     } as any);
 
-    expect(mocks.manager.connect).toHaveBeenCalledTimes(2);
-    expect(state.failureTracker.has("srv")).toBe(false);
-    expect(state.failureMessages.has("srv")).toBe(false);
+    expect(mocks.manager.connect).toHaveBeenCalledTimes(1);
+    expect(state.failureTracker.has("srv")).toBe(true);
+    expect(state.failureMessages.has("srv")).toBe(true);
   });
 
   it("sanitizes captured diagnostics in startup notifications and terminal logs", async () => {
@@ -251,6 +251,7 @@ describe("lazy-keep-alive initializeMcp integration", () => {
   });
 
   it("does not preserve stale cached resources after authoritative list-change removal", async () => {
+    mocks.getMissingConfiguredDirectToolServers.mockReturnValue(["srv"]);
     const { initializeMcp, updateMetadataCache } = await import("../init.ts");
 
     const state = await initializeMcp({ getFlag: vi.fn(() => undefined) } as any, {

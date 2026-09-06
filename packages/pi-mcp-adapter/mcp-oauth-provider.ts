@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util"
 /**
  * MCP OAuth Provider
  * 
@@ -20,10 +21,6 @@ import {
   getAuthForUrl,
   updateTokens,
   updateClientInfo,
-  clearAllCredentials,
-  clearClientInfo,
-  clearCodeVerifier,
-  clearTokens,
   type AuthEntry,
   type AuthStorageOptions,
   type StoredTokens,
@@ -128,6 +125,11 @@ export class McpOAuthProvider implements OAuthClientProvider {
   private flowDiscoveryState: OAuthDiscoveryState | undefined
   private flowIssuerMismatch = false
   private flowState: string | undefined
+  private observedTokens: StoredTokens | undefined
+  private invalidatedTokens: StoredTokens | undefined
+  private observedClient: StoredClientInfo | undefined
+  private invalidatedClient: StoredClientInfo | undefined
+  private staleRedirect = false
 
   constructor(
     private serverName: string,
@@ -258,6 +260,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
     // Keep client registration associated with this in-flight flow even if
     // another runtime writes the shared persistent entry for the same name.
     const clientInfo = this.flowClientInfo ?? stored?.clientInfo
+    if (clientInfo && isDeepStrictEqual(clientInfo, this.invalidatedClient)) return undefined
     if (clientInfo) {
       // A stored SEP-2352 issuer stub for a config-pre-registered client
       // (identified by the explicit marker, or by the legacy stub shape of
@@ -287,6 +290,8 @@ export class McpOAuthProvider implements OAuthClientProvider {
         this.flowClientInfo = clientInfo
         updateClientInfo(this.serverName, clientInfo, this.serverUrl, this.storageOptions)
       }
+      this.observedClient = structuredClone(clientInfo)
+      this.staleRedirect = this.redirectUrl !== undefined && !clientInfo.redirectUris?.includes(this.redirectUrl)
       // Return all registration metadata and the local issuer extension.
       // This keeps the SDK OAuth view and the stored issuer binding consistent.
       return {
@@ -340,6 +345,8 @@ export class McpOAuthProvider implements OAuthClientProvider {
       ...(issuer !== undefined ? { issuer } : {}),
     }
     this.flowClientInfo = clientInfo
+    this.observedClient = structuredClone(clientInfo)
+    this.invalidatedClient = undefined
     updateClientInfo(this.serverName, clientInfo, this.serverUrl, this.storageOptions)
   }
 
@@ -350,7 +357,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
   async tokens(): Promise<OAuthTokens | undefined> {
     // Use getAuthForUrl to validate tokens are for the current server URL.
     const entry = await getAuthForUrl(this.serverName, this.serverUrl, this.storageOptions)
-    if (!entry?.tokens) return undefined
+    if (!entry?.tokens || isDeepStrictEqual(entry.tokens, this.invalidatedTokens)) return undefined
     const issuer = this.discoveredIssuer
     this.assertStoredIssuerBindings(entry, issuer)
     if (issuer && entry.tokens.issuer === undefined) {
@@ -358,6 +365,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
       updateTokens(this.serverName, entry.tokens, this.serverUrl, this.storageOptions)
     }
 
+    this.observedTokens = structuredClone(entry.tokens)
     return {
       access_token: entry.tokens.accessToken,
       token_type: "Bearer",
@@ -387,6 +395,8 @@ export class McpOAuthProvider implements OAuthClientProvider {
     }
     this.throwIfInactive()
     updateTokens(this.serverName, storedTokens, this.serverUrl, this.storageOptions)
+    this.observedTokens = structuredClone(storedTokens)
+    this.invalidatedTokens = undefined
     // Discovery must survive the browser redirect so the callback can verify
     // the authorization server that minted the code. Once token issuance
     // succeeds, clear it so a later 401 re-reads PRM and can observe an
@@ -482,33 +492,26 @@ export class McpOAuthProvider implements OAuthClientProvider {
 
   /**
    * Invalidate credentials when authentication fails.
-   * Clears tokens, client info, or all credentials based on the type.
+   * Suppresses credentials rejected by this provider without deleting shared state.
    */
   async invalidateCredentials(type: "all" | "client" | "tokens" | "verifier" | "discovery"): Promise<void> {
     this.throwIfInactive()
-    switch (type) {
-      case "all":
-        this.flowClientInfo = undefined
-        this.flowCodeVerifier = undefined
-        this.flowDiscoveryState = undefined
-        this.flowIssuerMismatch = false
-        this.flowState = undefined
-        clearAllCredentials(this.serverName, this.storageOptions)
-        break
-      case "client":
-        this.flowClientInfo = undefined
-        clearClientInfo(this.serverName, this.storageOptions)
-        break
-      case "tokens":
-        clearTokens(this.serverName, this.storageOptions)
-        break
-      case "verifier":
-        clearCodeVerifier(this.serverName, this.storageOptions)
-        break
-      case "discovery":
-        this.flowDiscoveryState = undefined
-        break
+    // SDK invalidation belongs to this failed attempt. Never delete shared
+    // credentials another Pi process may have just replaced; explicit logout
+    // remains the persistent removal authority.
+    if (type === "all" || type === "tokens") {
+      this.invalidatedTokens = this.observedTokens
+      if (this.staleRedirect) {
+        this.invalidatedClient = this.observedClient
+        if (isDeepStrictEqual(this.flowClientInfo, this.invalidatedClient)) this.flowClientInfo = undefined
+      }
     }
+    if (type === "all" || type === "client") {
+      this.invalidatedClient = this.observedClient
+      this.flowClientInfo = undefined
+    }
+    if (type === "all" || type === "verifier") this.flowCodeVerifier = undefined
+    if (type === "all" || type === "discovery") this.flowDiscoveryState = undefined
   }
 
   /**

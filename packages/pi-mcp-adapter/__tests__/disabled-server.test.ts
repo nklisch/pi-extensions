@@ -96,13 +96,13 @@ describe("disabled MCP servers", () => {
   it("rejects proxy execution and hides disabled cached metadata while listing it in status", async () => {
     const state = disabledState();
     expect(executeStatus(state).content[0].text).toContain("disabled");
-    expect(executeStatus(state).content[0].text).toContain("0/1 servers");
+    expect(executeStatus(state).content[0].text).toContain("0 discoverable tools (1 disabled)");
     expect(executeList(state, "disabled").details).toMatchObject({ error: "server_disabled" });
     expect(executeInstructions(state, "disabled").details).toMatchObject({ error: "server_disabled" });
     state.toolMetadata.set("enabled", [{ name: "disabled_search", originalName: "search", description: "enabled duplicate" }]);
-    expect(executeDescribe(state, "disabled_search").details).toMatchObject({ server: "enabled" });
+    expect((await executeDescribe(state, "disabled_search")).details).toMatchObject({ server: "enabled" });
     state.toolMetadata.delete("enabled");
-    expect(executeDescribe(state, "disabled_search").details).toMatchObject({ error: "server_disabled" });
+    expect((await executeDescribe(state, "disabled_search")).details).toMatchObject({ error: "server_disabled" });
     expect(executeSearch(state, "cached").details).toMatchObject({ count: 0 });
     expect(executeSearch(state, "cached", false, "disabled").details).toMatchObject({ error: "server_disabled" });
     expect((await executeCall(state, "disabled_search", {})).details).toMatchObject({ error: "server_disabled" });

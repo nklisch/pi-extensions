@@ -145,7 +145,7 @@ function parseIdentity(value: string | undefined): McpSourceIdentity | undefined
 function formatSchemas(
   server: string,
   result: Readonly<{
-    schemas: readonly Readonly<{ name: string; description?: string; inputSchema?: unknown }>[];
+    schemas: readonly Readonly<{ name: string; description?: string; inputSchema?: unknown; outputSchema?: unknown }>[];
     missing: readonly string[];
   }>,
 ): string {
@@ -153,7 +153,8 @@ function formatSchemas(
   for (const tool of result.schemas) {
     lines.push(`### ${tool.name} (${server})`);
     if (tool.description !== undefined && tool.description.length > 0) lines.push(tool.description);
-    lines.push("```json", JSON.stringify(tool.inputSchema ?? null, null, 2), "```", "");
+    lines.push("Exact input schema:", "```json", JSON.stringify(tool.inputSchema ?? null, null, 2), "```", "");
+    if (tool.outputSchema !== undefined) lines.push("Output schema (structuredContent):", "```json", JSON.stringify(tool.outputSchema, null, 2), "```", "");
   }
   if (result.schemas.length === 0) lines.push(`None of the requested tools exist on ${server}.`);
   if (result.missing.length > 0) lines.push(`Not found on ${server}: ${result.missing.join(", ")}`);

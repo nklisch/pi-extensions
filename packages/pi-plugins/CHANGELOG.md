@@ -1,3 +1,9 @@
+## v0.8.4 — Prepared
+
+### Fixed
+
+- Select maintained MCP adapter `2.21.0-nklisch.4` for truthful discovery, exact schemas, and owned catalog/OAuth recovery. Bundled subagents remain `18.2.0-nklisch.1`.
+
 ## v0.8.3 — Prepared
 
 ### Fixed

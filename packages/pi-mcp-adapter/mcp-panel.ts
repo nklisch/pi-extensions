@@ -565,7 +565,7 @@ class McpPanel {
         if (entry) {
           this.rebuildServerTools(server, entry);
         }
-        server.hasCachedData = true;
+        server.hasCachedData = !!entry;
       }
       if (options.afterAuth) {
         this.authNotice = connected && server.connectionStatus === "connected"

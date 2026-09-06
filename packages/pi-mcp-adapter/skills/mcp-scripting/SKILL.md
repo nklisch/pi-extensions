@@ -10,7 +10,8 @@ For multi-call MCP work, write ordinary JavaScript with loops, filtering, chaini
 Write the source naturally, then pass it as `mcpScript`'s `code` argument:
 
 ```js
-const { items } = await tools.search({ query: "search issues", server: "github" });
+const { items, coverage } = await tools.search({ query: "search issues", server: "github" });
+if (!coverage.complete) return { action: "connect with the top-level mcp tool, then retry", omittedServers: coverage.omittedServers };
 const candidate = items[0];
 if (!candidate) return { error: "No matching tool" };
 
@@ -26,7 +27,9 @@ return result.data;
 ## Workflow
 
 1. Find candidate tools with `await tools.search({ query, server?, limit?, offset? })`.
+   Search never connects servers. If `coverage.complete` is false, return the omitted catalogs and use each suggested top-level `mcp({ connect: "name" })` or auth action before concluding a capability is absent. Unknown and disabled server filters are errors, not successful empty searches.
 2. Inspect the exact returned path with `await tools.describe({ path })`.
+   Describe includes exact `inputSchema` and advertised `outputSchema`; TypeScript shapes are previews. Output schemas describe `data.structuredContent`, not the call envelope. Preserve referenced definitions and constraints when constructing arguments.
 3. Call it with `tools.call(path, args)`.
 
 Calls resolve to `{ ok: true, data }` or `{ ok: false, error }`; `data` is the server's decoded result (text, structured content, images), even when the persisted details were summarized to stay bounded. Handle failed calls instead of expecting them to stop the script. `emit(value)` adds user-visible output before the final `return` value. `console` output is captured too.

@@ -1,25 +1,105 @@
+import { abortable } from "./abort.ts";
+import { combineAbortSignals } from "./runtime-owner.ts";
 const PROBE_TIMEOUT_MS = 5_000;
+const MODERN_PROTOCOL_VERSION = "2026-07-28";
+const LEGACY_PROTOCOL_VERSION = "2025-06-18";
+const JSON_ACCEPT = "application/json, text/event-stream";
+const SSE_ACCEPT = "text/event-stream";
+const MODERN_FALLBACK_STATUSES = new Set([400, 401, 404, 405, 406, 415]);
+const POST_ENDPOINT_MISMATCH_STATUSES = new Set([404, 405, 406, 415]);
+const AMBIGUOUS_STATUSES = new Set([202, 401, 503]);
 
 export interface McpProbeResult {
   isMcp: boolean;
   classification: string;
 }
 
+const DISCOVER_REQUEST = {
+  jsonrpc: "2.0",
+  id: 1,
+  method: "server/discover",
+  params: {},
+};
+
 const INITIALIZE_REQUEST = {
   jsonrpc: "2.0",
   id: 1,
   method: "initialize",
   params: {
-    protocolVersion: "2025-06-18",
+    protocolVersion: LEGACY_PROTOCOL_VERSION,
     capabilities: {},
     clientInfo: { name: "pi-mcp-probe", version: "2.1.2" },
   },
 };
 
-function isJsonRpcEnvelope(value: unknown): boolean {
-  return typeof value === "object" && value !== null &&
-    (value as { jsonrpc?: unknown }).jsonrpc === "2.0" &&
-    ("result" in value || "error" in value);
+type ProbeStrategy =
+  | { kind: "modern"; request: RequestInit; allowJson: true }
+  | { kind: "legacy-post"; request: RequestInit; allowJson: true }
+  | { kind: "legacy-sse"; request: RequestInit; allowJson: false };
+
+const MODERN_STRATEGY: ProbeStrategy = {
+  kind: "modern",
+  request: {
+    method: "POST",
+    headers: {
+      Accept: JSON_ACCEPT,
+      "Content-Type": "application/json",
+      "MCP-Protocol-Version": MODERN_PROTOCOL_VERSION,
+      "Mcp-Method": "server/discover",
+    },
+    body: JSON.stringify(DISCOVER_REQUEST),
+  },
+  allowJson: true,
+};
+
+const LEGACY_POST_STRATEGY: ProbeStrategy = {
+  kind: "legacy-post",
+  request: {
+    method: "POST",
+    headers: {
+      Accept: JSON_ACCEPT,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(INITIALIZE_REQUEST),
+  },
+  allowJson: true,
+};
+
+const LEGACY_SSE_STRATEGY: ProbeStrategy = {
+  kind: "legacy-sse",
+  request: { headers: { Accept: SSE_ACCEPT } },
+  allowJson: false,
+};
+
+type JsonRpcEnvelopeInfo =
+  | { kind: "result"; protocolVersion: unknown }
+  | { kind: "error" };
+
+type ProbeOutcome =
+  | { kind: "mcp"; result: McpProbeResult }
+  | { kind: "unsupported-modern" }
+  | { kind: "unrecognized" };
+
+interface ProbeResult {
+  response: Response;
+  outcome: ProbeOutcome;
+}
+
+function jsonRpcEnvelopeInfo(value: unknown): JsonRpcEnvelopeInfo | null {
+  if (typeof value !== "object" || value === null || (value as { jsonrpc?: unknown }).jsonrpc !== "2.0") {
+    return null;
+  }
+  if ("result" in value) {
+    const result = (value as { result?: unknown }).result;
+    return {
+      kind: "result",
+      protocolVersion: typeof result === "object" && result !== null
+        ? (result as { protocolVersion?: unknown }).protocolVersion
+        : undefined,
+    };
+  }
+  if ("error" in value) return { kind: "error" };
+  return null;
 }
 
 function isBearerChallenge(response: Response): boolean {
@@ -33,58 +113,94 @@ function responseKind(response: Response): string {
   return "an untyped response";
 }
 
-async function hasJsonRpcEnvelope(response: Response): Promise<boolean> {
+async function getJsonRpcEnvelopeInfo(response: Response): Promise<JsonRpcEnvelopeInfo | null> {
   try {
-    return isJsonRpcEnvelope(JSON.parse(await response.text()));
+    return jsonRpcEnvelopeInfo(JSON.parse(await response.text()));
   } catch {
-    return false;
+    return null;
   }
 }
 
-async function classifyResponse(response: Response, allowJson: boolean): Promise<McpProbeResult | null> {
+async function classifyResponse(response: Response, strategy: ProbeStrategy): Promise<ProbeOutcome> {
   const isSse = response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream");
   if (response.ok && isSse) {
-    return { isMcp: true, classification: "endpoint responded with an MCP event stream" };
+    return { kind: "mcp", result: { isMcp: true, classification: "endpoint responded with an MCP event stream" } };
   }
 
-  const isJsonRpc = (allowJson || response.status === 401) && await hasJsonRpcEnvelope(response);
-  if (response.ok && allowJson && isJsonRpc) {
-    return { isMcp: true, classification: "endpoint responded with a JSON-RPC 2.0 envelope" };
+  const envelope = (strategy.allowJson || response.status === 401) ? await getJsonRpcEnvelopeInfo(response) : null;
+  if (response.ok && strategy.allowJson && envelope) {
+    if (strategy.kind === "modern" && (envelope.kind === "error" || envelope.protocolVersion !== MODERN_PROTOCOL_VERSION)) {
+      return { kind: "unsupported-modern" };
+    }
+    return {
+      kind: "mcp",
+      result: {
+        isMcp: true,
+        classification: strategy.kind === "modern"
+          ? `endpoint supports stateless MCP ${MODERN_PROTOCOL_VERSION} server/discover`
+          : "endpoint responded with a JSON-RPC 2.0 envelope",
+      },
+    };
   }
-  if (response.status === 401 && isBearerChallenge(response) && isJsonRpc) {
-    return { isMcp: true, classification: "endpoint requires Bearer authentication and responded with a JSON-RPC 2.0 error" };
+  if (response.status === 401 && isBearerChallenge(response) && envelope) {
+    return {
+      kind: "mcp",
+      result: {
+        isMcp: true,
+        classification: strategy.kind === "modern"
+          ? `endpoint requires Bearer authentication during MCP ${MODERN_PROTOCOL_VERSION} server/discover probing`
+          : "endpoint requires Bearer authentication and responded with a JSON-RPC 2.0 error",
+      },
+    };
   }
 
-  return null;
+  return { kind: "unrecognized" };
+}
+
+async function probe(url: string | URL, strategy: ProbeStrategy, signal: AbortSignal): Promise<ProbeResult> {
+  const response = await fetch(url, {
+    ...strategy.request,
+    signal,
+  });
+  try { return { response, outcome: await abortable(classifyResponse(response, strategy), signal) }; }
+  finally { void response.body?.cancel().catch(() => {}); signal.throwIfAborted(); }
 }
 
 function notMcp(response: Response): McpProbeResult {
+  const responseDescription = `endpoint returned ${responseKind(response)} (${response.status})`;
   return {
     isMcp: false,
-    classification: `endpoint returned ${responseKind(response)} (${response.status}) — this URL does not appear to speak MCP`,
+    classification: response.status === 503
+      ? `${responseDescription} — server is temporarily unavailable; MCP endpoint shape could not be determined`
+      : response.status === 202
+        ? `${responseDescription} — MCP endpoint shape could not be determined`
+      : response.status === 401
+        ? `${responseDescription} — authentication may be required; MCP endpoint shape could not be determined`
+        : `${responseDescription} — this URL does not appear to speak MCP`,
   };
 }
 
+function ambiguousNotMcp(response: Response): McpProbeResult | undefined {
+  return AMBIGUOUS_STATUSES.has(response.status) ? notMcp(response) : undefined;
+}
+
 /** Makes one unauthenticated metadata-only request to identify an HTTP endpoint's protocol shape. */
-export async function probeMcpEndpoint(url: string | URL): Promise<McpProbeResult> {
-  const postResponse = await fetch(url, {
-    method: "POST",
-    headers: {
-      Accept: "application/json, text/event-stream",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(INITIALIZE_REQUEST),
-    signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-  });
-  const postClassification = await classifyResponse(postResponse, true);
-  if (postClassification) return postClassification;
+export async function probeMcpEndpoint(url: string | URL, callerSignal?: AbortSignal): Promise<McpProbeResult> {
+  const signal = combineAbortSignals(callerSignal, AbortSignal.timeout(PROBE_TIMEOUT_MS))!;
+  signal.throwIfAborted();
+  const { response: modernResponse, outcome: modernOutcome } = await probe(url, MODERN_STRATEGY, signal);
+  if (modernOutcome.kind === "mcp") return modernOutcome.result;
+  let ambiguousResult = ambiguousNotMcp(modernResponse);
 
-  if (![404, 405, 406, 415].includes(postResponse.status)) return notMcp(postResponse);
+  if (modernOutcome.kind !== "unsupported-modern" && !MODERN_FALLBACK_STATUSES.has(modernResponse.status)) {
+    return ambiguousResult ?? notMcp(modernResponse);
+  }
 
-  const getResponse = await fetch(url, {
-    headers: { Accept: "text/event-stream" },
-    signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-  });
-  const getClassification = await classifyResponse(getResponse, false);
-  return getClassification ?? notMcp(getResponse);
+  const { response: postResponse, outcome: postOutcome } = await probe(url, LEGACY_POST_STRATEGY, signal);
+  if (postOutcome.kind === "mcp") return postOutcome.result;
+  ambiguousResult ??= ambiguousNotMcp(postResponse);
+  if (!POST_ENDPOINT_MISMATCH_STATUSES.has(postResponse.status)) return ambiguousNotMcp(postResponse) ?? ambiguousResult ?? notMcp(postResponse);
+
+  const { response: getResponse, outcome: getOutcome } = await probe(url, LEGACY_SSE_STRATEGY, signal);
+  return getOutcome.kind === "mcp" ? getOutcome.result : ambiguousNotMcp(getResponse) ?? ambiguousResult ?? notMcp(getResponse);
 }

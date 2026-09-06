@@ -1,3 +1,8 @@
+import { UnauthorizedError, SdkHttpError } from "@modelcontextprotocol/client";
+import { abortable } from "./abort.ts";
+import { combineAbortSignals } from "./runtime-owner.ts";
+import { isTerminatedSession } from "./session-recovery.ts";
+import { parallelLimit } from "./utils.ts";
 import { isServerDisabled, type ServerDefinition } from "./types.ts";
 import type { McpServerManager } from "./server-manager.ts";
 import { hasPendingAuth } from "./mcp-auth-flow.ts";
@@ -19,6 +24,8 @@ export class McpLifecycleManager {
   private activeHealthCheck: Promise<void> | undefined;
   private shutdownPromise: Promise<void> | undefined;
   private stopped = false;
+  private controller = new AbortController();
+  private retry = new Map<string, { at: number; failures: number; connection?: object }>();
   private healthSignal: AbortSignal | undefined;
   private removeHealthAbortListener: (() => void) | undefined;
 
@@ -72,44 +79,69 @@ export class McpLifecycleManager {
     signal?.addEventListener("abort", stop, { once: true });
     this.removeHealthAbortListener = () => signal?.removeEventListener("abort", stop);
     this.healthCheckInterval = setInterval(() => {
-      if (this.stopped || signal?.aborted || this.activeHealthCheck) return;
-      const check = this.checkConnections(signal)
-        .catch(error => {
-          console.error(`MCP: Health check failed: ${formatTerminalError(error)}`);
-        })
-        .finally(() => {
-          if (this.activeHealthCheck === check) this.activeHealthCheck = undefined;
-        });
-      this.activeHealthCheck = check;
+      void this.ensureConverged().catch(error => console.error(`MCP: Health check failed: ${formatTerminalError(error)}`));
     }, intervalMs);
     this.healthCheckInterval.unref();
   }
 
+  deferReconnect(name: string): void {
+    const connection = this.manager.getConnection(name);
+    this.retry.set(name, { ...(connection ? { connection } : {}), failures: 1, at: Date.now() + 60000 });
+  }
+
+  async ensureConverged(signal?: AbortSignal): Promise<void> {
+    if (this.stopped || this.healthSignal?.aborted) return;
+    if (!this.activeHealthCheck) {
+      const owned = combineAbortSignals(this.healthSignal, this.controller.signal);
+      const check = this.checkConnections(owned).finally(() => { if (this.activeHealthCheck === check) this.activeHealthCheck = undefined; });
+      this.activeHealthCheck = check;
+    }
+    return abortable(this.activeHealthCheck, signal);
+  }
+
   private async checkConnections(signal?: AbortSignal): Promise<void> {
     if (this.stopped || signal?.aborted) return;
-    for (const [name, definition] of this.keepAliveServers) {
-      if (isServerDisabled(definition)) continue;
+    await parallelLimit([...this.keepAliveServers], 10, async ([name, definition]) => {
+      if (isServerDisabled(definition) || this.stopped || signal?.aborted) return;
       const connection = this.manager.getConnection(name);
-      if (!connection || connection.status !== "connected") {
-        if (this.hasPendingAuthForServer(name)) {
-          logger.debug(`Skipping reconnect for ${name} while OAuth authorization is pending`);
-          continue;
-        }
-        try {
-          await this.manager.connect(name, definition, signal);
+      if (connection?.status === "needs-auth" || this.hasPendingAuthForServer(name)) return;
+      const retry = this.retry.get(name);
+      if (retry && retry.connection === connection && retry.at > Date.now()) return;
+      try {
+        if (!connection || connection.status !== "connected") {
+          const fresh = await this.manager.connect(name, definition, signal);
           if (this.stopped || signal?.aborted) return;
-          logger.debug(`Reconnected to ${name}`);
+          this.retry.delete(name);
           this.onReconnect?.(name);
-        } catch (error) {
-          if (this.stopped || signal?.aborted) return;
-          this.onReconnectFailure?.(name, error);
-          const message = error instanceof Error ? error.message : String(error);
-          console.error(`MCP: Failed to reconnect to ${name}: ${sanitizeTerminalText(message)}`);
+          if (fresh.status === "needs-auth") return;
+        } else if (definition.url) {
+          const hadSessionId = (connection.transport as { sessionId?: string })?.sessionId != null;
+          try {
+            const result = await this.manager.refreshTools(name, connection, signal);
+            if (result === "deferred") {
+              const failures = retry?.connection === connection ? retry.failures + 1 : 1;
+              this.retry.set(name, { connection, failures, at: Date.now() + Math.min(300000, 30000 * 2 ** Math.min(failures - 1, 4)) });
+            } else this.retry.delete(name);
+          } catch (error) {
+            if (signal?.aborted) return;
+            if (isTerminatedSession(error, hadSessionId)) {
+              await this.manager.reconnect(name, definition, connection, signal);
+              this.retry.delete(name); this.onReconnect?.(name);
+            } else if (error instanceof UnauthorizedError || error instanceof SdkHttpError && error.status === 401) {
+              connection.status = "needs-auth";
+              this.onReconnect?.(name);
+            } else throw error;
+          }
         }
+      } catch (error) {
+        if (this.stopped || signal?.aborted) return;
+        this.retry.set(name, { ...(connection ? { connection } : {}), failures: 1, at: Date.now() + 60000 });
+        this.onReconnectFailure?.(name, error);
+        console.error(`MCP: Failed to reconnect to ${sanitizeTerminalText(name)}: ${formatTerminalError(error)}`);
       }
-    }
-
+    });
     for (const [name] of this.allServers) {
+      if (this.stopped || signal?.aborted) return;
       if (this.keepAliveServers.has(name)) continue;
       const timeout = this.getIdleTimeout(name);
       if (timeout > 0 && this.manager.isIdle(name, timeout)) {
@@ -134,6 +166,7 @@ export class McpLifecycleManager {
 
   private async shutdownOnce(): Promise<void> {
     this.stopped = true;
+    this.controller.abort(new Error("MCP lifecycle stopped"));
     if (this.healthCheckInterval) clearInterval(this.healthCheckInterval);
     this.healthCheckInterval = undefined;
     this.removeHealthAbortListener?.();

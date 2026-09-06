@@ -374,3 +374,15 @@ describe("withSessionRecovery", () => {
     expect(fn).toHaveBeenCalledTimes(4); // 2 failed stale attempts + 2 successful fresh replays
   });
 });
+
+
+describe("catalog-aware tool replay", () => {
+  it("does not replay a removed tool after reconnect", async () => {
+    const stale = makeConnection("old");
+    const fresh = makeConnection("new");
+    const invoke = vi.fn().mockRejectedValueOnce(httpError(404, "session expired"));
+    const manager = { getConnection: () => stale, reconnect: vi.fn(async () => fresh) };
+    await expect(withSessionRecovery({ manager: manager as any, config: { mcpServers: { demo: { url: "https://example.test/mcp" } } }, nativeToolName: "removed" }, "demo", invoke)).rejects.toMatchObject({ name: "ToolRemovedAfterReconnectError" });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+});

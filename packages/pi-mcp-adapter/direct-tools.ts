@@ -1,7 +1,7 @@
 import type { AgentToolResult, AgentToolUpdateCallback, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { UrlElicitationRequiredError, type Client } from "@modelcontextprotocol/client";
 import type { McpExtensionState } from "./state.ts";
-import type { DirectToolSpec, McpConfig, ToolPrefix } from "./types.ts";
+import type { DirectToolSpec, McpConfig, ToolPrefix, ToolMetadata } from "./types.ts";
 import type { MetadataCache } from "./metadata-cache.ts";
 import { lazyConnect, getFailureAgeSeconds, clearFailure } from "./init.ts";
 import { abortable, throwIfAborted } from "./abort.ts";
@@ -15,7 +15,7 @@ import { formatToolName, isServerDisabled, isToolAllowed, resolveToolPrefix } fr
 import { resourceNameToToolName } from "./resource-tools.ts";
 import { authenticate, supportsOAuth } from "./mcp-auth-flow.ts";
 import { formatAuthRequiredMessage, formatTerminalError, invokeContainedCallback, resolveServerUrl, truncateAtWord } from "./utils.ts";
-import { SessionRecoveryAuthRequiredError, withSessionRecovery } from "./session-recovery.ts";
+import { SessionRecoveryAuthRequiredError, ToolRemovedAfterReconnectError, withSessionRecovery } from "./session-recovery.ts";
 import { combineAbortSignals, isAbortError } from "./runtime-owner.ts";
 import { ensureToolCallApproved } from "./tool-approval.ts";
 import { logger } from "./logger.ts";
@@ -23,7 +23,6 @@ import { logger } from "./logger.ts";
 type ClientCallToolResult = Awaited<ReturnType<Client["callTool"]>>;
 
 const BUILTIN_NAMES = new Set(["read", "bash", "edit", "write", "grep", "find", "ls", "mcp"]);
-const INSTRUCTIONS_SNIPPET_LENGTH = 150;
 export const DIRECT_TOOLS_ADVISORY_THRESHOLD = 75;
 
 type DirectAutoAuthResult =
@@ -116,9 +115,10 @@ export function resolveDirectTools(
   cache: MetadataCache | null,
   prefix: ToolPrefix,
   envOverride?: string[],
+  liveMetadata?: ReadonlyMap<string, ToolMetadata[]>,
 ): DirectToolSpec[] {
   const specs: DirectToolSpec[] = [];
-  if (!cache) return specs;
+  if (!cache && !liveMetadata) return specs;
 
   const seenNames = new Set<string>();
 
@@ -127,8 +127,9 @@ export function resolveDirectTools(
 
   for (const [serverName, definition] of Object.entries(config.mcpServers)) {
     if (isServerDisabled(definition)) continue;
-    const serverCache = cache.servers[serverName];
-    if (!serverCache || !isServerCacheValid(serverCache, definition)) continue;
+    const serverCache = cache?.servers[serverName];
+    const live = liveMetadata?.get(serverName);
+    if (!live && (!serverCache || !isServerCacheValid(serverCache, definition))) continue;
 
     let toolFilter: true | string[] | false = false;
 
@@ -150,7 +151,7 @@ export function resolveDirectTools(
 
     const effectivePrefix = resolveToolPrefix(definition, prefix);
 
-    for (const tool of serverCache.tools ?? []) {
+    for (const tool of live ? live.filter(tool => !tool.resourceUri).map(tool => ({ ...tool, name: tool.originalName })) : serverCache?.tools ?? []) {
       if (toolFilter !== true && !toolFilter.includes(tool.name)) continue;
       if (!isToolAllowed(tool.name, serverName, effectivePrefix, definition.includeTools, definition.excludeTools)) continue;
       const prefixedName = formatToolName(tool.name, serverName, effectivePrefix);
@@ -175,8 +176,8 @@ export function resolveDirectTools(
     }
 
     if (definition.exposeResources !== false) {
-      for (const resource of serverCache.resources ?? []) {
-        const baseName = `read_${resourceNameToToolName(resource.name)}`;
+      for (const resource of live ? live.filter(tool => tool.resourceUri).map(tool => ({ name: tool.originalName, uri: tool.resourceUri!, description: tool.description, originalName: tool.originalName })) : serverCache?.resources ?? []) {
+        const baseName = "originalName" in resource ? String(resource.originalName) : `read_${resourceNameToToolName(resource.name)}`;
         if (toolFilter !== true && !toolFilter.includes(baseName)) continue;
         if (!isToolAllowed(baseName, serverName, effectivePrefix, definition.includeTools, definition.excludeTools)) continue;
         const prefixedName = formatToolName(baseName, serverName, effectivePrefix);
@@ -207,51 +208,13 @@ export function resolveDirectTools(
   return specs;
 }
 
-export function buildProxyDescription(
-  config: McpConfig,
-  cache: MetadataCache | null,
-  directSpecs: DirectToolSpec[],
-): string {
-  const prefix = config.settings?.toolPrefix ?? "server";
+export function buildProxyDescription(config: McpConfig): string {
   let desc = `MCP gateway — server status, tool search/describe, auth, and single MCP tool calls. When one request needs several MCP calls with logic between them, use mcpScript. Non-MCP Pi tools should be called directly, not through mcp.\n`;
 
-  const directByServer = new Map<string, number>();
-  for (const spec of directSpecs) {
-    directByServer.set(spec.serverName, (directByServer.get(spec.serverName) ?? 0) + 1);
-  }
-  if (directByServer.size > 0) {
-    const parts = [...directByServer.entries()].map(
-      ([server, count]) => `${server} (${count})`,
-    );
-    desc += `\nDirect tools available (call as normal tools): ${parts.join(", ")}\n`;
-  }
-
-  const serverSummaries: string[] = [];
-  for (const serverName of Object.keys(config.mcpServers)) {
-    const definition = config.mcpServers[serverName];
-    if (!definition || isServerDisabled(definition)) continue;
-    const entry = cache?.servers?.[serverName];
-    const effectivePrefix = resolveToolPrefix(definition, prefix);
-    const toolCount = (entry?.tools ?? []).filter(
-      (tool) => isToolAllowed(tool.name, serverName, effectivePrefix, definition.includeTools, definition.excludeTools),
-    ).length;
-    const resourceCount = definition?.exposeResources !== false
-      ? (entry?.resources ?? []).filter((resource) => {
-          const baseName = `read_${resourceNameToToolName(resource.name)}`;
-          return isToolAllowed(baseName, serverName, effectivePrefix, definition.includeTools, definition.excludeTools);
-        }).length
-      : 0;
-    const totalItems = toolCount + resourceCount;
-    if (totalItems === 0) continue;
-    const directCount = directByServer.get(serverName) ?? 0;
-    const proxyCount = totalItems - directCount;
-    if (proxyCount > 0) {
-      serverSummaries.push(`${serverName} (${proxyCount} tools)`);
-    }
-  }
-
-  if (serverSummaries.length > 0) {
-    desc += `\nServers: ${serverSummaries.join(", ")}\n`;
+  const serverNames = Object.keys(config.mcpServers)
+    .filter((serverName) => !isServerDisabled(config.mcpServers[serverName]));
+  if (serverNames.length > 0) {
+    desc += `\nServers: ${serverNames.join(", ")}\n`;
   }
 
   const disabledServers = Object.entries(config.mcpServers)
@@ -261,20 +224,9 @@ export function buildProxyDescription(
     desc += `\nDisabled servers (enable with /mcp enable <server> and /reload): ${disabledServers.join(", ")}\n`;
   }
 
-  const instructionSummaries: string[] = [];
-  for (const serverName of Object.keys(config.mcpServers)) {
-    if (isServerDisabled(config.mcpServers[serverName])) continue;
-    const instructions = cache?.servers?.[serverName]?.instructions;
-    if (!instructions) continue;
-    const snippet = truncateAtWord(instructions.replace(/\s+/g, " ").trim(), INSTRUCTIONS_SNIPPET_LENGTH);
-    instructionSummaries.push(`  ${serverName}: ${snippet}`);
-  }
-  if (instructionSummaries.length > 0) {
-    desc += `\nServer instructions (truncated - full text via mcp({ instructions: "name" })):\n${instructionSummaries.join("\n")}\n`;
-  }
-
+  desc += `\nConfigured servers connect on demand. Cached or undiscovered does not mean unavailable. Known cached tools connect when called. If search reports an undiscovered relevant server, use mcp({connect:"name"}) before declaring its capability missing. Search uses known catalogs, which may be cached; describe returns exact schemas for unfamiliar tools.\n`;
   desc += `\nUsage:\n`;
-  desc += `  mcp({ })                              → Show server status\n`;
+  desc += `  mcp({ })                              → Show server status and tool counts\n`;
   desc += `  mcp({ server: "name" })               → List tools from server\n`;
   desc += `  mcp({ search: "query" })              → Search MCP tools by name/description\n`;
   desc += `  mcp({ describe: "tool_name" })        → Show tool details and parameters\n`;
@@ -481,6 +433,7 @@ export function createDirectToolExecutor(
         {
           manager: state.manager,
           config: state.config,
+          nativeToolName: spec.originalName,
           ...(ownedSignal ? { signal: ownedSignal } : {}),
           onNeedsAuth: recoverAuthConnection,
         },
@@ -498,7 +451,7 @@ export function createDirectToolExecutor(
         // resolver so those facts reach the model alongside the error text.
         const content = resolveMcpResultContent(result as Record<string, unknown>);
         const outputContent = content.length > 0 ? content : [{ type: "text" as const, text: "(empty result)" }];
-        const schemaText = spec.inputSchema ? `\n\nExpected parameters:\n${formatSchema(spec.inputSchema)}` : "";
+        const schemaText = spec.inputSchema ? `\n\nExpected parameters:\n${formatSchema(spec.inputSchema)}\n\nFor the exact schema use mcp(${JSON.stringify({ describe: spec.prefixedName, server: spec.serverName })}).` : "";
         const guarded = await guardMcpOutput(outputContent, { ...outputGuardOptions, prefix: "Error: ", suffix: schemaText, emptyTextFallback: "Tool execution failed" });
         return {
           content: guarded.content,
@@ -530,6 +483,9 @@ export function createDirectToolExecutor(
         details: { server: spec.serverName, tool: spec.originalName, ...guardedMcpDetails(guarded) },
       };
     } catch (error) {
+      if (error instanceof ToolRemovedAfterReconnectError) {
+        return { content: [{ type: "text" as const, text: error.message }], details: { error: "not_found_after_reconnect" } };
+      }
       if (error instanceof SessionRecoveryAuthRequiredError) {
         const message = error.authMessage ?? getDirectAuthRequiredMessage(state, spec.serverName);
         sendToolCancelled(message);
@@ -559,7 +515,7 @@ export function createDirectToolExecutor(
       sendToolCancelled(message);
       let schemaText = "";
       try {
-        schemaText = spec.inputSchema ? `\n\nExpected parameters:\n${formatSchema(spec.inputSchema)}` : "";
+        schemaText = spec.inputSchema ? `\n\nExpected parameters:\n${formatSchema(spec.inputSchema)}\n\nFor the exact schema use mcp(${JSON.stringify({ describe: spec.prefixedName, server: spec.serverName })}).` : "";
       } catch (schemaError) {
         reportSecondaryFailure("error schema formatting", schemaError);
       }

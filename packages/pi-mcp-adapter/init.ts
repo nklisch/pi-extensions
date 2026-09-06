@@ -1,3 +1,4 @@
+import { FAILURE_BACKOFF_MS, failureAgeSeconds } from "./server-availability.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { McpExtensionState } from "./state.ts";
 import { isServerDisabled, type McpAdapterOptions, type PromptMetadata, type ToolMetadata } from "./types.ts";
@@ -36,7 +37,6 @@ import {
 } from "./runtime-owner.ts";
 import { publishMcpStatusSnapshot } from "./mcp-status.ts";
 
-const FAILURE_BACKOFF_MS = 60 * 1000;
 const MAX_FAILURE_MESSAGE_CHARS = 8 * 1024;
 const failureExpiryTimers = new WeakMap<McpExtensionState, Map<string, ReturnType<typeof setTimeout>>>();
 
@@ -49,13 +49,14 @@ function getFailureExpiryTimers(state: McpExtensionState): Map<string, ReturnTyp
   return timers;
 }
 
-export function clearFailure(state: McpExtensionState, serverName: string): void {
+export function clearFailure(state: McpExtensionState, serverName: string, notify = true): void {
   state.failureTracker.delete(serverName);
   state.failureMessages?.delete(serverName);
   const timers = failureExpiryTimers.get(state);
   const timer = timers?.get(serverName);
   if (timer) clearTimeout(timer);
   timers?.delete(serverName);
+  if (notify) notifyToolMetadataUpdated(state, serverName, "failure-cleared");
 }
 
 export function recordFailure(state: McpExtensionState, serverName: string, message: string): void {
@@ -67,8 +68,7 @@ export function recordFailure(state: McpExtensionState, serverName: string, mess
     try {
       if (!state.owner.isActive()) return;
       if (state.failureTracker.get(serverName) === failedAt) {
-        state.failureTracker.delete(serverName);
-        state.failureMessages?.delete(serverName);
+        // Cooldown elapsed; the recorded failure remains until successful recovery.
         publishMcpStatusSnapshot(state);
       }
     } catch (error) {
@@ -81,6 +81,7 @@ export function recordFailure(state: McpExtensionState, serverName: string, mess
   }, FAILURE_BACKOFF_MS);
   timer.unref?.();
   getFailureExpiryTimers(state).set(serverName, timer);
+  notifyToolMetadataUpdated(state, serverName, "connection-failed");
 }
 
 export function isTuiMode(ctx: Pick<ExtensionContext, "hasUI" | "mode">): boolean {
@@ -191,14 +192,22 @@ export async function initializeMcp(
     ...(options.statusEvents !== undefined ? { statusEvents: options.statusEvents } : {}),
   };
   if (ownsOAuthRuntime) owner.addCleanup(() => shutdownOAuth(oauthRuntime));
-  manager.setMetadataListChangedListener?.((serverName, reason) => {
+  manager.setReconnectFailureListener?.((serverName, error) => {
     if (!owner.isActive()) return;
-    updateServerMetadata(state, serverName);
-    updateMetadataCache(state, serverName, { preserveEmptyResources: false });
-    notifyToolMetadataUpdated(state, serverName, reason);
+    recordFailure(state, serverName, formatTerminalError(error));
+    lifecycle.deferReconnect(serverName);
     updateStatusBar(state);
   });
+  manager.setMetadataListChangedListener?.(async (serverName, reason) => {
+    if (!owner.isActive()) return;
+    updateServerMetadata(state, serverName);
+    clearFailure(state, serverName, false);
+    await state.onToolMetadataUpdated?.(serverName, reason);
+    updateStatusBar(state);
+    updateMetadataCache(state, serverName, { preserveEmptyResources: false });
+  });
   owner.addCleanup(() => lifecycle.gracefulShutdown());
+  owner.addCleanup(() => { for (const timer of getFailureExpiryTimers(state).values()) clearTimeout(timer); getFailureExpiryTimers(state).clear(); });
   owner.addCleanup(() => {
     if (state.uiServer) {
       state.uiServer.close("runtime_owner_stopped");
@@ -219,18 +228,7 @@ export async function initializeMcp(
   const idleSetting = typeof config.settings?.idleTimeout === "number" ? config.settings.idleTimeout : 10;
   lifecycle.setGlobalIdleTimeout(idleSetting);
 
-  const cachePath = getMetadataCachePath();
-  const cacheFileExists = existsSync(cachePath);
-  let cache = loadMetadataCache();
-  let bootstrapAll = false;
-
-  if (!cacheFileExists) {
-    bootstrapAll = true;
-    saveMetadataCache({ version: 1, servers: {} });
-  } else if (!cache) {
-    cache = { version: 1, servers: {} };
-    saveMetadataCache(cache);
-  }
+  const cache = loadMetadataCache();
 
   const prefix = config.settings?.toolPrefix ?? "server";
 
@@ -263,12 +261,10 @@ export async function initializeMcp(
     }
   }
 
-  const startupServers = bootstrapAll
-    ? serverEntries
-    : serverEntries.filter(([, definition]) => {
-        const mode = definition.lifecycle ?? "lazy";
-        return mode === "keep-alive" || mode === "eager";
-      });
+  const startupServers = serverEntries.filter(([, definition]) => {
+    const mode = definition.lifecycle ?? "lazy";
+    return mode === "keep-alive" || mode === "eager";
+  });
 
   if (ui && startupServers.length > 0) {
     const status = formatMcpStatus(state.config, `connecting to ${startupServers.length} servers...`);
@@ -350,7 +346,7 @@ export async function initializeMcp(
 
     if (missingCacheServers.length > 0) {
       const bootstrapResults = await parallelLimit(
-        missingCacheServers.filter(name => !results.some(r => r.name === name && r.connection)),
+        missingCacheServers.filter(name => !results.some(r => r.name === name)),
         10,
         async (name) => {
           try {
@@ -489,16 +485,19 @@ export function updateMetadataCache(
     resources = existingEntry.resources;
   }
 
+  connection.catalogAcquiredAt ??= Date.now();
   const entry: ServerCacheEntry = {
     configHash,
     tools,
     resources,
     ...(prompts !== undefined ? { prompts } : {}),
     ...(connection.instructions !== undefined ? { instructions: connection.instructions } : {}),
-    cachedAt: Date.now(),
+    cachedAt: connection.catalogAcquiredAt,
+    ...connection.toolListHints,
   };
 
-  saveMetadataCache({ version: 1, servers: { [serverName]: entry } });
+  try { saveMetadataCache({ version: 1, servers: { [serverName]: entry } }); }
+  catch (error) { logger.debug(`MCP catalog remains live; cache persistence failed for ${serverName}: ${formatTerminalError(error)}`); }
 }
 
 export function notifyToolMetadataUpdated(state: McpExtensionState, serverName: string, reason: string): void {
@@ -561,15 +560,10 @@ export function updateStatusBar(state: McpExtensionState): void {
 }
 
 export function getFailureAgeSeconds(state: McpExtensionState, serverName: string): number | null {
-  const failedAt = state.failureTracker.get(serverName);
-  if (!failedAt) return null;
-  const ageMs = Date.now() - failedAt;
-  if (ageMs > FAILURE_BACKOFF_MS) return null;
-  return Math.round(ageMs / 1000);
+  return failureAgeSeconds(state, serverName);
 }
 
 export function getFailureMessage(state: McpExtensionState, serverName: string): string | null {
-  if (getFailureAgeSeconds(state, serverName) === null) return null;
   return state.failureMessages?.get(serverName) ?? null;
 }
 

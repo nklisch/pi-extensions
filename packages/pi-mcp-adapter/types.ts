@@ -29,6 +29,7 @@ export interface McpServerStatusSnapshot {
   readonly name: string;
   readonly status: McpServerRuntimeStatus;
   readonly toolCount: number;
+  readonly knownToolCount?: number;
   readonly resourceCount?: number;
   readonly failedAgoSeconds?: number;
   readonly disabled: boolean;
@@ -64,6 +65,7 @@ export interface McpTool {
   name: SdkTool["name"];
   title?: SdkTool["title"];
   description?: SdkTool["description"];
+  outputSchema?: SdkTool["outputSchema"];
   inputSchema?: SdkTool["inputSchema"]; // JSON Schema
   _meta?: SdkTool["_meta"];
 }
@@ -134,7 +136,8 @@ export interface UiToolInfo {
   tool: {
     name: string;
     description?: string;
-    inputSchema?: unknown;
+    outputSchema?: unknown;
+  inputSchema?: unknown;
   };
 }
 
@@ -538,6 +541,7 @@ export interface ToolMetadata {
   resourceUri?: string;   // For resource tools: the URI to read
   uiResourceUri?: string; // For app-enabled tools: the UI resource URI
   uiVisibility?: UiToolVisibility[];
+  outputSchema?: unknown;
   inputSchema?: unknown;  // JSON Schema for parameters (stored for describe/errors)
   uiStreamMode?: UiStreamMode;
 }
@@ -556,6 +560,7 @@ export interface DirectToolSpec {
   originalName: string;
   prefixedName: string;
   description: string;
+  outputSchema?: unknown;
   inputSchema?: unknown;
   resourceUri?: string;
   uiResourceUri?: string;
@@ -576,6 +581,7 @@ export interface McpAuthResult {
 export interface CachedTool {
   name: string;
   description?: string;
+  outputSchema?: unknown;
   inputSchema?: unknown;
   uiResourceUri?: string;
   uiVisibility?: UiToolVisibility[];
@@ -602,6 +608,8 @@ export interface ServerCacheEntry {
   prompts?: CachedPrompt[];
   instructions?: string;
   cachedAt: number;
+  ttlMs?: number;
+  cacheScope?: string;
 }
 
 export interface MetadataCache {

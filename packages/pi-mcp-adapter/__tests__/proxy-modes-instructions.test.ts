@@ -65,7 +65,7 @@ describe("proxy instructions", () => {
     expect(connected.content[0].text).toContain('Server "demo" has no tools');
     expect(connected.content[0].text).toContain(`Server instructions:\n${SHORT_INSTRUCTIONS}`);
     expect(connected.details).toMatchObject({ mode: "list", count: 0, hasInstructions: true });
-    expect(cached.content[0].text).toContain('Server "demo" has no cached tools');
+    expect(cached.content[0].text).toContain('Server "demo" has no tools in its cached catalog');
     expect(cached.content[0].text).toContain(`Server instructions:\n${SHORT_INSTRUCTIONS}`);
     expect(cached.details).toMatchObject({ mode: "list", count: 0, hasInstructions: true });
   });

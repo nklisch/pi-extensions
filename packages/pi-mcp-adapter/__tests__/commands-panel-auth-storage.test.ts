@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openMcpAuthPanel, openMcpPanel } from "../commands.ts";
 
+vi.mock("../mcp-auth-flow.ts", async importOriginal => ({
+  ...await importOriginal<typeof import("../mcp-auth-flow.ts")>(),
+  authenticate: vi.fn(async () => "failed"),
+}));
+
 const previousAuthStore = process.env.PI_MCP_ADAPTER_TEST_AUTH_STORE;
 
 afterEach(() => {
@@ -58,4 +63,24 @@ describe("MCP panels with unavailable OAuth credential storage", () => {
     expect(getRendered()).not.toContain("needs auth");
     expect(getRendered()).toContain("OAuth credential store unavailable");
   });
+});
+
+
+it("hides and restores the picker around nested authentication input", async () => {
+  process.env.PI_MCP_ADAPTER_TEST_AUTH_STORE = "memory";
+  let panel: any;
+  const hidden = vi.fn();
+  const ui = {
+    notify: vi.fn(), setStatus: vi.fn(),
+    custom: vi.fn((factory, options) => {
+      options.onHandle({ setHidden: hidden });
+      panel = factory({ requestRender() {} }, undefined, undefined, () => {});
+    }),
+  };
+  const opening = openMcpAuthPanel(createState(), { getFlag: () => undefined } as any, { hasUI: true, cwd: "/tmp", ui } as any);
+  await vi.waitFor(() => expect(panel).toBeDefined());
+  panel.handleInput("\x01");
+  await vi.waitFor(() => expect(hidden.mock.calls).toEqual([[true], [false]]));
+  panel.handleInput("\x03");
+  await opening;
 });

@@ -273,10 +273,11 @@ export async function authenticateServer(
       onAuthorizationUrl: (authorizationUrl) => {
         ui.notify(
           `Open this URL to authenticate ${serverName}:\n\n${authorizationUrl}\n\n` +
-          "After approving, return to Pi; the local callback will complete automatically.",
+          "After approving, return to Pi. The local callback can complete automatically, or paste the full redirect URL.",
           "info"
         );
       },
+      onAuthorizationInput: (_url, inputSignal) => ui.input(`OAuth callback for ${serverName}`, "Paste full redirect URL (or wait for the local callback)", { signal: inputSignal }),
       ...(signal ? { signal } : {}),
       ...(runtime ? { runtime } : {}),
     });
@@ -447,6 +448,7 @@ function buildMcpPanelCallbacks(
   state: McpExtensionState,
   config: McpConfig,
   ctx: ExtensionContext,
+  setPickerHidden?: (hidden: boolean) => void,
 ): McpPanelCallbacks {
   // Panel-only diagnostics keep status inspection from mutating connection
   // failure state while allowing the existing panel failure UI to show why the
@@ -459,7 +461,11 @@ function buildMcpPanelCallbacks(
       const definition = config.mcpServers[serverName];
       return definition ? !isServerDisabled(definition) && supportsOAuth(definition) : false;
     },
-    authenticate: (serverName: string) => authenticateServer(serverName, config, ctx, state.owner?.signal, state.oauthRuntime),
+    authenticate: async (serverName: string) => {
+      setPickerHidden?.(true);
+      try { return await authenticateServer(serverName, config, ctx, state.owner?.signal, state.oauthRuntime); }
+      finally { if (state.owner?.isActive() !== false) setPickerHidden?.(false); }
+    },
     getConnectionStatus: (serverName: string) => {
       authStatusFailures.delete(serverName);
       const definition = config.mcpServers[serverName];
@@ -488,7 +494,7 @@ function buildMcpPanelCallbacks(
       }
       if (connection?.status === "needs-auth") return "needs-auth";
       if (connection?.status === "connected") return "connected";
-      if (getFailureAgeSeconds(state, serverName) !== null) return "failed";
+      if (state.failureTracker.has(serverName)) return "failed";
       return "idle";
     },
     getFailureMessage: (serverName: string) => authStatusFailures.get(serverName) ?? getFailureMessage(state, serverName),
@@ -523,7 +529,8 @@ export async function openMcpPanel(
   const provenanceMap = getServerProvenance(configPath, ctx.cwd);
   const { lines: noticeLines, fingerprint } = buildSharedConfigNoticeLines(configPath, ctx.cwd);
 
-  const callbacks = buildMcpPanelCallbacks(state, config, ctx);
+  let overlayHandle: { setHidden(hidden: boolean): void } | undefined;
+  const callbacks = buildMcpPanelCallbacks(state, config, ctx, hidden => overlayHandle?.setHidden(hidden));
 
   const { createMcpPanel } = await import("./mcp-panel.ts");
   let configChanged = false;
@@ -549,7 +556,7 @@ export async function openMcpPanel(
           });
         }, { noticeLines, keybindings });
       },
-      { overlay: true, overlayOptions: { anchor: "center", width: 82 } },
+      { overlay: true, overlayOptions: { anchor: "center", width: 82 }, onHandle: handle => { overlayHandle = handle; } },
     );
   });
 
@@ -584,7 +591,8 @@ export async function openMcpAuthPanel(
   const cache = loadMetadataCache();
   const configPath = pi.getFlag("mcp-config") as string | undefined ?? configOverridePath;
   const provenanceMap = getServerProvenance(configPath, ctx.cwd);
-  const callbacks = buildMcpPanelCallbacks(state, config, ctx);
+  let overlayHandle: { setHidden(hidden: boolean): void } | undefined;
+  const callbacks = buildMcpPanelCallbacks(state, config, ctx, hidden => overlayHandle?.setHidden(hidden));
   const { createMcpPanel } = await import("./mcp-panel.ts");
 
   await new Promise<void>((resolve) => {
@@ -599,7 +607,7 @@ export async function openMcpAuthPanel(
           noticeLines: ["Select an OAuth MCP server and press Enter or ctrl+a to authenticate."],
         });
       },
-      { overlay: true, overlayOptions: { anchor: "center", width: 82 } },
+      { overlay: true, overlayOptions: { anchor: "center", width: 82 }, onHandle: handle => { overlayHandle = handle; } },
     );
   });
 

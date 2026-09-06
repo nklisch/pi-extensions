@@ -1,6 +1,6 @@
 {
   "name": "@nklisch/pi-mcp-adapter",
-  "version": "2.21.0-nklisch.3",
+  "version": "2.21.0-nklisch.4",
   "description": "Independently maintained MCP client for Pi with a programmatic source lifecycle",
   "type": "module",
   "types": "./dist/index.d.ts",
@@ -137,7 +137,9 @@
     "README.md",
     "MAINTAINING.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "server-availability.ts",
+    "tool-descriptor.ts"
   ],
   "dependencies": {
     "@modelcontextprotocol/client": "2.0.0",

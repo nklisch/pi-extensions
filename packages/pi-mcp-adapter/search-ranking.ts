@@ -1,3 +1,4 @@
+import { isCatalogSearchable } from "./server-availability.ts";
 import type { McpExtensionState } from "./state.ts";
 import type { ToolMetadata } from "./types.ts";
 import { getServerPrefix, isServerDisabled } from "./types.ts";
@@ -98,7 +99,7 @@ export function rankToolMatches(state: McpExtensionState, query: string, server?
   const matches: RankedToolMatch[] = [];
   for (const [serverName, metadata] of state.toolMetadata.entries()) {
     if (server && serverName !== server) continue;
-    if (isServerDisabled(state.config.mcpServers[serverName])) continue;
+    if (!isCatalogSearchable(state, serverName)) continue;
     for (const tool of metadata) {
       const score = scoreToolMatch(tool, serverName, query);
       if (score !== null) matches.push({ server: serverName, tool, score });

@@ -1,3 +1,5 @@
+import { coverageText, searchCoverage } from "./server-availability.ts";
+import { resolveToolMetadata, toolDescriptor } from "./tool-descriptor.ts";
 import type { ToolInfo } from "@earendil-works/pi-coding-agent";
 import { formatWithOptions } from "node:util";
 import { Worker } from "node:worker_threads";
@@ -8,7 +10,7 @@ import { paginate, rankSuggestions, rankToolMatches } from "./search-ranking.ts"
 import type { McpExtensionState } from "./state.ts";
 import { findToolByName, formatSchema } from "./tool-metadata.ts";
 import { renderTsShape } from "./ts-shape.ts";
-import type { ContentBlock } from "./types.ts";
+import { isServerDisabled, type ContentBlock } from "./types.ts";
 import { logger } from "./logger.ts";
 import { formatTerminalError, truncateAtWord } from "./utils.ts";
 
@@ -188,15 +190,18 @@ export async function runMcpScript(
     const query = typeof input?.query === "string" ? input.query : "";
     let error: unknown;
     try {
-      if (query.trim() === "") {
-        return { items: [], total: 0, hasMore: false, nextOffset: null };
-      }
       const server = typeof input?.server === "string" ? input.server : undefined;
+      if (server !== undefined && !state.config.mcpServers[server]) throw new Error(`Server ${JSON.stringify(server)} not found. Use mcp({}) to see configured servers.`);
+      if (server !== undefined && isServerDisabled(state.config.mcpServers[server])) throw new Error(`Server ${JSON.stringify(server)} is disabled. Enable it before searching its catalog.`);
+      if (query.trim() === "") {
+        return { items: [], total: 0, hasMore: false, nextOffset: null, coverage: searchCoverage(state, server) };
+      }
       const limit = typeof input?.limit === "number" ? input.limit : 12;
       const offset = typeof input?.offset === "number" ? input.offset : 0;
       const page = paginate(rankToolMatches(state, query, server), offset, limit);
       return {
         ...page,
+        coverage: searchCoverage(state, server),
         items: page.items.map(({ server: matchServer, tool, score }) => ({
           path: tool.name,
           name: tool.originalName,
@@ -220,19 +225,11 @@ export async function runMcpScript(
     const path = typeof input?.path === "string" ? input.path : "";
     let error: unknown;
     try {
-      for (const [server, metadata] of state.toolMetadata) {
-        const tool = findToolByName(metadata, path);
-        if (!tool) continue;
-        const inputTypeScript = tool.inputSchema
-          ? renderTsShape(tool.inputSchema) ?? formatSchema(tool.inputSchema)
-          : null;
-        return {
-          path: tool.name,
-          name: tool.originalName,
-          server,
-          ...(tool.description ? { description: tool.description } : {}),
-          ...(inputTypeScript ? { inputTypeScript } : {}),
-        };
+      const matches = resolveToolMetadata(state, path);
+      if (matches.length === 1) return toolDescriptor(state, matches[0]!.server, matches[0]!.tool);
+      if (matches.length > 1) {
+        error = "ambiguous_tool";
+        return { path, error: { code: "ambiguous_tool", message: "Tool name is ambiguous; use a unique prefixed path.", suggestions: matches.map(value => value.tool.name) } };
       }
       const suggestions = path ? rankSuggestions(state, path, 5) : [];
       error = "tool_not_found";
@@ -240,7 +237,7 @@ export async function runMcpScript(
         path,
         error: {
           code: "tool_not_found",
-          message: `Tool not found: ${path}`,
+          message: `Tool not found: ${path}${coverageText(state)}`,
           suggestions,
         },
       };
@@ -307,7 +304,7 @@ export async function runMcpScript(
             envelope = describeTool(message.input as DescribeInput | undefined);
           }
           const response: WorkerResultMessage = { type: "result", id: message.id, envelope };
-          activeWorker.postMessage(response);
+          if (!completed && !callSignal?.aborted) activeWorker.postMessage(response);
         })().catch(reject);
       });
       activeWorker.once("error", reject);

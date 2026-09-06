@@ -110,14 +110,16 @@ describe("runMcpScript", () => {
       'return { first: await tools.search({ query: "fixture", limit: 1 }), second: await tools.search({ query: "fixture", limit: 1, offset: 1, server: "fixture" }), empty: await tools.search({ query: "" }) };',
     );
 
-    expect(JSON.parse(textBlocks(result).at(-1)!)).toEqual({
+    expect(JSON.parse(textBlocks(result).at(-1)!)).toMatchObject({
       first: {
+        coverage: { complete: true, omittedServers: [] },
         items: [{ path: "fixture_echo", name: "echo", server: "fixture", description: "Echo a value", score: expect.any(Number) }],
         total: 3,
         hasMore: true,
         nextOffset: 1,
       },
       second: {
+        coverage: { complete: true, omittedServers: [] },
         items: [{ path: "fixture_fail", name: "fail", server: "fixture", description: "Return an MCP tool error", score: expect.any(Number) }],
         total: 3,
         hasMore: true,
@@ -133,8 +135,10 @@ describe("runMcpScript", () => {
       'return { supported: await tools.describe({ path: "fixture_echo" }), unsupported: await tools.describe({ path: "fixture_fail" }), missing: await tools.describe({ path: "fixture_ech" }) };',
     );
 
-    expect(JSON.parse(textBlocks(result).at(-1)!)).toEqual({
+    expect(JSON.parse(textBlocks(result).at(-1)!)).toMatchObject({
       supported: {
+        inputSchema: expect.any(Object),
+        availability: { state: "connected" },
         path: "fixture_echo",
         name: "echo",
         server: "fixture",
@@ -142,11 +146,13 @@ describe("runMcpScript", () => {
         inputTypeScript: "{ value: string; }",
       },
       unsupported: {
+        inputSchema: expect.any(Object),
+        availability: { state: "connected" },
         path: "fixture_fail",
         name: "fail",
         server: "fixture",
         description: "Return an MCP tool error",
-        inputTypeScript: "  value (string)",
+        inputTypeScript: "{ value?: string; }",
       },
       missing: {
         path: "fixture_ech",
@@ -157,6 +163,15 @@ describe("runMcpScript", () => {
         },
       },
     });
+  });
+
+  it("rejects unknown and disabled search scopes before returning empty pages", async () => {
+    state.config.mcpServers.disabled = { command: "never-spawned", disabled: true };
+    const unknown = await runMcpScript(state, 'return await tools.search({query:"",server:"missing"})');
+    const disabled = await runMcpScript(state, 'return await tools.search({query:"capture",server:"disabled"})');
+    expect(JSON.stringify(unknown.content)).toContain("not found");
+    expect(JSON.stringify(disabled.content)).toContain("disabled");
+    expect(JSON.stringify(unknown.content)).not.toContain('"complete":true');
   });
 
   it("records operation metadata and timing for search, describe, and calls", async () => {

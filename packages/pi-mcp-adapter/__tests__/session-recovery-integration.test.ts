@@ -144,6 +144,7 @@ describe("session recovery — proxy path (proxy-modes.ts executeCall)", () => {
       },
     };
     const fresh = {
+      tools: [{ name: "search", inputSchema: { type: "object" } }],
       status: "connected" as const,
       transport: { sessionId: "session-2" },
       client: {
@@ -191,6 +192,7 @@ describe("session recovery — proxy path (proxy-modes.ts executeCall)", () => {
       },
     };
     const fresh = {
+      tools: [{ name: "search", inputSchema: { type: "object" } }],
       status: "connected" as const,
       transport: { sessionId: "session-2" },
       client: {
@@ -236,6 +238,7 @@ describe("session recovery — proxy path (proxy-modes.ts executeCall)", () => {
       client: { callTool: vi.fn().mockRejectedValue(new ProtocolError(-32000, "Server not initialized")) },
     };
     const fresh = {
+      tools: [{ name: "search", inputSchema: { type: "object" } }],
       status: "connected" as const,
       transport: { sessionId: "session-2" },
       client: { callTool: vi.fn().mockRejectedValue(new ProtocolError(-32000, "Server not initialized")) },
@@ -278,6 +281,7 @@ describe("session recovery — proxy path (proxy-modes.ts executeCall)", () => {
       client: { callTool: vi.fn().mockRejectedValue(httpError(404, "Session not found")) },
     };
     const fresh = {
+      tools: [{ name: "search", inputSchema: { type: "object" } }],
       status: "connected" as const,
       transport: { sessionId: "session-2" },
       client: { callTool: vi.fn().mockRejectedValue(httpError(404, "Session not found")) },
@@ -329,6 +333,7 @@ describe("session recovery — direct-tools path (direct-tools.ts createDirectTo
       },
     };
     const fresh = {
+      tools: [{ name: "search", inputSchema: { type: "object" } }],
       status: "connected" as const,
       transport: { sessionId: "session-2" },
       client: {
@@ -380,6 +385,7 @@ describe("session recovery — direct-tools path (direct-tools.ts createDirectTo
       },
     };
     const fresh = {
+      tools: [{ name: "search", inputSchema: { type: "object" } }],
       status: "connected" as const,
       transport: { sessionId: "session-2" },
       client: {
@@ -429,6 +435,7 @@ describe("session recovery — direct-tools path (direct-tools.ts createDirectTo
       client: { callTool: vi.fn().mockRejectedValue(httpError(404, "Session not found")) },
     };
     const fresh = {
+      tools: [{ name: "search", inputSchema: { type: "object" } }],
       status: "connected" as const,
       transport: { sessionId: "session-2" },
       client: { callTool: vi.fn().mockRejectedValue(httpError(404, "Session not found")) },

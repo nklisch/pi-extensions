@@ -143,8 +143,9 @@ describe("mcp-auth storage paths", () => {
     rmSync(project, { recursive: true, force: true });
   });
 
-  it("chunks large secure-store entries and reads them back", () => {
-    const accessToken = "x".repeat(5000);
+  it("chunks large secure-store entries under an independent Windows ceiling", () => {
+    process.env.PI_MCP_ADAPTER_TEST_AUTH_STORE = "memory-windows";
+    const accessToken = "🔑".repeat(2500);
     saveAuthEntry("large-entry", { tokens: { accessToken } }, "https://example.com/mcp");
 
     expect(getAuthEntry("large-entry")?.tokens?.accessToken).toBe(accessToken);
@@ -156,7 +157,7 @@ describe("mcp-auth storage paths", () => {
     const manifest = JSON.parse(manifestEntry![1]) as { __piMcpAdapterOAuthChunked?: number; chunkCount?: number };
     expect(manifest.__piMcpAdapterOAuthChunked).toBe(1);
     expect(chunkEntries).toHaveLength(manifest.chunkCount);
-    expect(chunkEntries.every(([, payload]) => payload.length <= 1800)).toBe(true);
+    expect(chunkEntries.every(([, payload]) => payload.length <= 1000)).toBe(true);
   });
 
   it("returns unavailable status when a stored chunk cannot be read", () => {

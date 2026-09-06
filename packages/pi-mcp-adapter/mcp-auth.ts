@@ -22,7 +22,9 @@ import { resolveConfiguredOAuthDir } from './config.ts';
 const require = createRequire(import.meta.url);
 const AUTH_SECRET_SERVICE = 'pi-mcp-adapter.oauth';
 const TEST_AUTH_STORE_ENV = 'PI_MCP_ADAPTER_TEST_AUTH_STORE';
-const AUTH_SECRET_CHUNK_SIZE = 1800;
+// Windows credential values have a 1280 UTF-16-code-unit ceiling. This
+// portable chunk size leaves room without changing the existing manifest.
+const AUTH_SECRET_CHUNK_SIZE = 1000;
 const KEYRING_RECOVERY_DISABLED_ENV = 'PI_MCP_ADAPTER_DISABLE_KEYRING_RECOVERY';
 const KEYRING_RECOVERY_KEYCTL_ENV = 'PI_MCP_ADAPTER_KEYRING_RECOVERY_KEYCTL';
 const KEYRING_RECOVERY_NODE_ENV = 'PI_MCP_ADAPTER_KEYRING_RECOVERY_NODE';
@@ -144,6 +146,9 @@ const memoryAuthSecretStore: AuthSecretStore = {
     return memoryAuthEntries.get(account);
   },
   write(account, payload) {
+    // Independent fixture ceiling models Windows Credential Manager, rather
+    // than testing the writer against its own chunk-size constant.
+    if (process.env[TEST_AUTH_STORE_ENV] === 'memory-windows' && payload.length > 1280) throw new Error('Windows credential value exceeds 1280 UTF-16 code units');
     memoryAuthEntries.set(account, payload);
   },
   remove(account) {
@@ -204,7 +209,7 @@ export function removeTestAuthSecretStoreEntry(account: string): void {
 }
 
 function getAuthSecretStore(): AuthSecretStore {
-  if (process.env[TEST_AUTH_STORE_ENV] === 'memory') return memoryAuthSecretStore;
+  if (['memory', 'memory-windows'].includes(process.env[TEST_AUTH_STORE_ENV] ?? '')) return memoryAuthSecretStore;
   if (process.env[TEST_AUTH_STORE_ENV] === 'unavailable') return unavailableAuthSecretStore;
   if (process.env[TEST_AUTH_STORE_ENV] === 'keyrevoked') return keyRevokedAuthSecretStore;
   return keyringAuthSecretStore;
@@ -401,7 +406,25 @@ function parseJsonPayload(serverName: string, payload: string, source: string): 
 }
 
 function parseAuthEntryPayload(serverName: string, payload: string, source: string): AuthEntry {
-  return parseJsonPayload(serverName, payload, source) as AuthEntry;
+  const value = parseJsonPayload(serverName, payload, source);
+  const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+  const invalid = () => new Error(`Malformed OAuth credentials for ${serverName} from ${source}; remove credentials and reauthorize.`);
+  if (!record(value)) throw invalid();
+  for (const key of ['codeVerifier', 'oauthState', 'serverUrl']) if (value[key] !== undefined && typeof value[key] !== 'string') throw invalid();
+  for (const [key, required, strings, numbers] of [
+    ['tokens', 'accessToken', ['accessToken', 'refreshToken', 'scope', 'issuer'], ['expiresAt']],
+    ['clientInfo', 'clientId', ['clientId', 'clientSecret', 'issuer'], ['clientIdIssuedAt', 'clientSecretExpiresAt']],
+  ] as const) {
+    const entry = value[key]; if (entry === undefined) continue;
+    if (!record(entry) || typeof entry[required] !== 'string') throw invalid();
+    for (const field of strings) if (entry[field] !== undefined && typeof entry[field] !== 'string') throw invalid();
+    for (const field of numbers) if (entry[field] !== undefined && (typeof entry[field] !== 'number' || !Number.isFinite(entry[field]))) throw invalid();
+    if (key === 'clientInfo') {
+      if (entry.redirectUris !== undefined && (!Array.isArray(entry.redirectUris) || !entry.redirectUris.every(uri => typeof uri === 'string'))) throw invalid();
+      if (entry.configPreRegistered !== undefined && typeof entry.configPreRegistered !== 'boolean') throw invalid();
+    }
+  }
+  return value as AuthEntry;
 }
 
 function isAuthEntryChunkManifest(value: unknown): value is AuthEntryChunkManifest {

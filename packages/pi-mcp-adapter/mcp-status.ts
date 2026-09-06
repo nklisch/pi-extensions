@@ -1,3 +1,4 @@
+import { isCatalogSearchable, failureAgeSeconds, serverAvailability } from "./server-availability.ts";
 import type { McpExtensionState } from "./state.ts";
 import {
   MCP_STATUS_EVENT,
@@ -6,19 +7,7 @@ import {
   type McpStatusSnapshot,
 } from "./types.ts";
 
-const FAILURE_BACKOFF_MS = 60 * 1000;
-
-export interface McpStatusEventBus {
-  emit(channel: string, data: unknown): void;
-}
-
-function getActiveFailureAgeSeconds(state: McpExtensionState, serverName: string): number | undefined {
-  const failedAt = state.failureTracker.get(serverName);
-  if (!failedAt) return undefined;
-  const ageMs = Date.now() - failedAt;
-  if (ageMs > FAILURE_BACKOFF_MS) return undefined;
-  return Math.round(ageMs / 1000);
-}
+export interface McpStatusEventBus { emit(channel: string, data: unknown): void; }
 
 /** Build a sanitized snapshot without connecting or querying any MCP server. */
 export function createMcpStatusSnapshot(state: McpExtensionState): McpStatusSnapshot {
@@ -33,11 +22,12 @@ export function createMcpStatusSnapshot(state: McpExtensionState): McpStatusSnap
     const disabled = definition?.disabled === true;
     const connection = disabled ? undefined : state.manager.getConnection(name);
     const metadata = disabled ? undefined : state.toolMetadata.get(name);
-    const toolCount = metadata?.length ?? (connection?.status === "connected" ? connection.tools.length : 0);
+    const knownToolCount = metadata?.length ?? (connection?.status === "connected" ? connection.tools.length : 0);
+    const toolCount = isCatalogSearchable(state, name) ? knownToolCount : 0;
     const resourceCount = disabled
       ? undefined
       : state.resourceCounts?.get(name) ?? (connection?.status === "connected" ? connection.resources.length : undefined);
-    const failedAgoSeconds = disabled ? undefined : getActiveFailureAgeSeconds(state, name);
+    const failedAgoSeconds = disabled ? undefined : failureAgeSeconds(state, name) ?? undefined;
 
     let status: McpServerStatusSnapshot["status"] = "not-connected";
     if (disabled) {
@@ -48,7 +38,7 @@ export function createMcpStatusSnapshot(state: McpExtensionState): McpStatusSnap
       connectedCount++;
     } else if (connection?.status === "needs-auth") {
       status = "needs-auth";
-    } else if (failedAgoSeconds !== undefined) {
+    } else if (serverAvailability(state, name).state === "failed") {
       status = "failed";
     } else if (metadata !== undefined) {
       status = "cached";
@@ -60,6 +50,7 @@ export function createMcpStatusSnapshot(state: McpExtensionState): McpStatusSnap
       name,
       status,
       toolCount,
+      knownToolCount,
       ...(resourceCount !== undefined ? { resourceCount } : {}),
       ...(status === "failed" && failedAgoSeconds !== undefined ? { failedAgoSeconds } : {}),
       disabled,

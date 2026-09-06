@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.4 — Prepared
+
+### Fixed
+
+- Bundle Plugin Host `0.8.4` and select MCP adapter `2.21.0-nklisch.4` for reliable MCP discovery, schemas, subscriptions, and OAuth recovery.
+
 ## v0.4.3 — Prepared
 
 ### Fixed

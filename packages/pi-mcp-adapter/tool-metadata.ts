@@ -50,6 +50,7 @@ export function buildToolMetadata(
       originalName: tool.name,
       description: tool.description ?? "",
       ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}),
+      ...(tool.outputSchema !== undefined ? { outputSchema: tool.outputSchema } : {}),
       ...(uiResourceUri !== undefined ? { uiResourceUri } : {}),
       ...(uiVisibility !== undefined ? { uiVisibility } : {}),
       ...(uiStreamMode !== undefined ? { uiStreamMode } : {}),
@@ -97,6 +98,8 @@ export function findToolByName(metadata: ToolMetadata[] | undefined, toolName: s
   if (!metadata) return undefined;
   const exact = metadata.find(m => m.name === toolName);
   if (exact) return exact;
+  const native = metadata.filter(m => m.originalName === toolName);
+  if (native.length === 1) return native[0];
   const normalized = toolName.replace(/-/g, "_");
   return metadata.find(m => m.name.replace(/-/g, "_") === normalized);
 }

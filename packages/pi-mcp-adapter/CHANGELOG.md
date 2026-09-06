@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.21.0-nklisch.4] - Prepared
+
+### Improved
+
+- Show configured servers before their catalogs are discovered, disclose incomplete searches, and keep real failures visible through retry cooldowns.
+- Return exact input and output schemas, including references and annotations, with bounded recovery files for large descriptions. Keep gateway descriptions stable.
+- Recover initialization, expired sessions, catalog refreshes, and modern subscriptions within runtime ownership. Do not replay ambiguous tool failures or retry tools removed after reconnect.
+- Preserve credentials replaced by another process, bound adapter-owned OAuth requests, support cancellable manual HTTPS callbacks and optional loopback `{port}`, and fit credential chunks within Windows limits.
+- Keep direct-tool publication retryable after host failures, restore temporarily unavailable frozen tools, and preserve catalog expiry across shutdown persistence.
+
 ## [2.21.0-nklisch.3] - Prepared
 
 ### Fixed

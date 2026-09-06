@@ -59,12 +59,12 @@ describe("MCP status snapshots", () => {
       disabledCount: 1,
     });
     expect(snapshot.servers).toEqual(expect.arrayContaining([
-      { name: "connected", status: "connected", toolCount: 1, resourceCount: 2, disabled: false },
-      { name: "cached", status: "cached", toolCount: 2, resourceCount: 1, disabled: false },
+      { name: "connected", status: "connected", knownToolCount: 1, toolCount: 1, resourceCount: 2, disabled: false },
+      { name: "cached", status: "cached", knownToolCount: 2, toolCount: 2, resourceCount: 1, disabled: false },
       expect.objectContaining({ name: "failed", status: "failed", toolCount: 0, disabled: false }),
-      { name: "auth", status: "needs-auth", toolCount: 0, disabled: false },
-      { name: "idle", status: "cached", toolCount: 1, disabled: false },
-      { name: "disabled", status: "disabled", toolCount: 0, disabled: true },
+      { name: "auth", status: "needs-auth", knownToolCount: 0, toolCount: 0, disabled: false },
+      { name: "idle", status: "cached", knownToolCount: 1, toolCount: 1, disabled: false },
+      { name: "disabled", status: "disabled", knownToolCount: 0, toolCount: 0, disabled: true },
     ]));
     const failed = snapshot.servers.find(server => server.name === "failed");
     expect(failed?.failedAgoSeconds).toBeGreaterThanOrEqual(4);

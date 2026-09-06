@@ -94,8 +94,8 @@ describe("proxy discovery", () => {
     });
   });
 
-  it("suggests the matching tool for a prefix-mangled describe name", () => {
-    const result = executeDescribe(createState(), "demo_sear");
+  it("suggests the matching tool for a prefix-mangled describe name", async () => {
+    const result = await executeDescribe(createState(), "demo_sear");
 
     expect(result.details).toMatchObject({ suggestions: ["demo_search"] });
     expect(result.content[0].text).toContain("Did you mean: demo_search");

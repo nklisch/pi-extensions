@@ -11,7 +11,7 @@ import {
   UnauthorizedError,
 } from "@modelcontextprotocol/client"
 import open from "open"
-import { McpOAuthProvider, type McpOAuthConfig } from "./mcp-oauth-provider.ts"
+import { McpOAuthProvider, getOAuthCallbackPort, type McpOAuthConfig } from "./mcp-oauth-provider.ts"
 import {
   ensureCallbackServer,
   waitForCallback,
@@ -24,9 +24,6 @@ import {
   isTokenExpired,
   hasStoredTokens,
   clearAllCredentials,
-  clearClientInfo,
-  clearTokens,
-  clearCodeVerifier,
   getOAuthState,
   clearOAuthState,
   getAuthBaseDir,
@@ -47,6 +44,7 @@ export interface McpOAuthRuntime {
 
 export interface AuthenticateOptions {
   onAuthorizationUrl?: (authorizationUrl: string) => void | Promise<void>
+  onAuthorizationInput?: (authorizationUrl: string, signal: AbortSignal) => Promise<string | undefined>
   authStorageOptions?: AuthStorageOptions
   signal?: AbortSignal
   runtime?: McpOAuthRuntime
@@ -68,6 +66,8 @@ type PendingAuth = {
   authorizationUrl: string
   discovery: AuthDiscovery
   authStorageOptions: AuthStorageOptions
+  manualRedirect: boolean
+  completionController: AbortController
 }
 
 type RuntimeState = {
@@ -252,39 +252,32 @@ async function probeAuthDiscovery(serverUrl: string, definition?: ServerEntry, s
   }
 }
 
-function parseOAuthRedirectUri(redirectUri: string): { port: number; callbackHost: string; callbackPath: string } {
-  let url: URL
-  try {
-    url = new URL(redirectUri)
-  } catch (error) {
-    throw new Error(`Invalid OAuth redirectUri: ${redirectUri}`, { cause: error })
-  }
+/** Bounds stalled SDK OAuth requests, including body reads. Slow providers
+ * can override the latency budget; cancellation/retry is always available. */
+export function authFetch(signal?: AbortSignal): (url: string | URL, init?: RequestInit) => Promise<Response> {
+  return (url, init) => {
+    const configured = Number(process.env.PI_MCP_OAUTH_REQUEST_TIMEOUT_MS);
+    const timeout = Number.isSafeInteger(configured) && configured > 0 && configured <= 2147483647 ? configured : 30000;
+    const combined = combineAbortSignals(signal, init?.signal ?? undefined, AbortSignal.timeout(timeout))!;
+    return abortable(fetch(url, { ...init, signal: combined }), combined);
+  };
+}
 
-  const hostname = url.hostname.toLowerCase()
-  const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1"
-  if (url.protocol !== "http:" || !isLocalhost) {
-    throw new Error("OAuth redirectUri must be an http:// localhost or loopback URI")
-  }
-
-  if (url.username || url.password) {
-    throw new Error("OAuth redirectUri must not include username or password")
-  }
-
-  if (url.hash) {
-    throw new Error("OAuth redirectUri must not include a fragment")
-  }
-
-  if (!url.port) {
-    throw new Error("OAuth redirectUri must include an explicit numeric port")
-  }
-
-  const port = Number.parseInt(url.port, 10)
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    throw new Error("OAuth redirectUri must include an explicit numeric port")
-  }
-
-  const callbackHost = hostname === "[::1]" ? "::1" : hostname
-  return { port, callbackHost, callbackPath: url.pathname }
+type RedirectTarget = { manual: true } | { manual: false; port?: number; callbackHost: string; callbackPath: string; dynamic: boolean };
+function parseOAuthRedirectUri(redirectUri: string): RedirectTarget {
+  const dynamic = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):\{port\}(?:[/?]|$)/.test(redirectUri);
+  if (redirectUri.includes("{port}") && (!dynamic || redirectUri.split("{port}").length !== 2)) throw new Error("OAuth {port} is supported only once in a loopback HTTP authority; use a fixed HTTPS URL for manual completion.");
+  let url: URL;
+  try { url = new URL(dynamic ? redirectUri.replace("{port}", "1") : redirectUri); }
+  catch { throw new Error("Invalid OAuth redirectUri"); }
+  if (url.username || url.password) throw new Error("OAuth redirectUri must not include username or password");
+  if (url.hash) throw new Error("OAuth redirectUri must not include a fragment");
+  if (url.protocol === "https:") return { manual: true };
+  // Local listeners must not expose authorization codes on public interfaces.
+  // Remote callbacks have an HTTPS/manual alternative, not a hostname gate.
+  if (url.protocol !== "http:" || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) throw new Error("OAuth redirectUri must use loopback HTTP or HTTPS manual completion");
+  if (!url.port) throw new Error("OAuth loopback redirectUri must include an explicit numeric port");
+  return { manual: false, ...(dynamic ? {} : { port: Number(url.port) }), callbackHost: url.hostname === "[::1]" ? "::1" : url.hostname, callbackPath: url.pathname, dynamic };
 }
 
 /**
@@ -308,11 +301,6 @@ export async function startAuth(
 
   if (config.grantType === "client_credentials") {
     const storedAuth = await getAuthForUrl(serverName, serverUrl, authStorageOptions)
-    if (storedAuth?.clientInfo && !storedAuth.tokens && !config.clientId) {
-      clearClientInfo(serverName, authStorageOptions)
-      clearCodeVerifier(serverName, authStorageOptions)
-      await clearOAuthState(serverName, authStorageOptions)
-    }
 
     const authProvider = new McpOAuthProvider(serverName, serverUrl, config, {
       onRedirect: async () => {
@@ -320,9 +308,14 @@ export async function startAuth(
       },
     }, authStorageOptions, runtime.signal)
     try {
+      if (storedAuth?.clientInfo && !storedAuth.tokens && !config.clientId) {
+        await authProvider.clientInformation()
+        await authProvider.invalidateCredentials("client")
+        await authProvider.invalidateCredentials("verifier")
+      }
       const discovery = applyConfiguredScope(await probeAuthDiscovery(serverUrl, definition, signal), config)
       throwIfAborted(signal)
-      const result = await abortable(runSdkAuth(authProvider, { serverUrl, ...discovery }), signal)
+      const result = await abortable(runSdkAuth(authProvider, { serverUrl, ...discovery, fetchFn: authFetch(signal) }), signal)
       throwIfAborted(signal)
       if (result !== "AUTHORIZED") {
         throw new UnauthorizedError("Failed to authorize")
@@ -339,25 +332,28 @@ export async function startAuth(
   }
 
   const redirectCallback = config.redirectUri !== undefined ? parseOAuthRedirectUri(config.redirectUri) : undefined
+  const manualRedirect = redirectCallback?.manual === true
+  if (manualRedirect && !config.clientId) throw new Error("HTTPS manual callbacks require a pre-registered OAuth clientId")
   const oauthState = generateState()
 
   try {
-    await ensureCallbackServer({
-      strictPort: Boolean(config.clientId) || config.redirectUri !== undefined,
+    if (!manualRedirect) await ensureCallbackServer({
+      strictPort: redirectCallback && !redirectCallback.manual && redirectCallback.dynamic ? false : Boolean(config.clientId) || config.redirectUri !== undefined,
       oauthState,
       reserveState: true,
-      ...(redirectCallback ? { port: redirectCallback.port, callbackHost: redirectCallback.callbackHost, callbackPath: redirectCallback.callbackPath } : {}),
+      ...(redirectCallback && !redirectCallback.manual ? { ...(redirectCallback.port !== undefined ? { port: redirectCallback.port } : {}), callbackHost: redirectCallback.callbackHost, callbackPath: redirectCallback.callbackPath } : {}),
     })
     throwIfAborted(signal)
   } catch (error) {
     releaseCallbackServer(oauthState)
     try {
-      await clearOAuthState(serverName, authStorageOptions)
     } catch (cleanupError) {
       throw new AggregateError([error, cleanupError], "OAuth startup cleanup failed")
     }
     throw error
   }
+
+  if (redirectCallback && !redirectCallback.manual && redirectCallback.dynamic) config.redirectUri = config.redirectUri!.replace("{port}", String(getOAuthCallbackPort()))
 
   let capturedUrl: URL | undefined
   const authProvider = new McpOAuthProvider(serverName, serverUrl, config, {
@@ -370,16 +366,15 @@ export async function startAuth(
     const storedAuth = await getAuthForUrl(serverName, serverUrl, authStorageOptions)
     if (storedAuth?.clientInfo && !config.clientId) {
       if (!storedAuth.tokens) {
-        clearClientInfo(serverName, authStorageOptions)
-        clearCodeVerifier(serverName, authStorageOptions)
-        await clearOAuthState(serverName, authStorageOptions)
+        await authProvider.clientInformation()
+        await authProvider.invalidateCredentials("client")
+        await authProvider.invalidateCredentials("verifier")
       } else {
         const redirectUris = storedAuth.clientInfo.redirectUris
-        if (!Array.isArray(redirectUris) || !redirectUris.includes(authProvider.redirectUrl ?? "")) {
-          clearClientInfo(serverName, authStorageOptions)
-          clearTokens(serverName, authStorageOptions)
-          clearCodeVerifier(serverName, authStorageOptions)
-          await clearOAuthState(serverName, authStorageOptions)
+        if ((!Array.isArray(redirectUris) || !redirectUris.includes(authProvider.redirectUrl ?? "")) && !storedAuth.tokens.refreshToken) {
+          await authProvider.clientInformation()
+          await authProvider.invalidateCredentials("client")
+          await authProvider.invalidateCredentials("verifier")
         }
       }
     }
@@ -388,18 +383,17 @@ export async function startAuth(
 
     const discovery = applyConfiguredScope(await probeAuthDiscovery(serverUrl, definition, signal), config)
     throwIfAborted(signal)
-    const result = await abortable(runSdkAuth(authProvider, { serverUrl, ...discovery }), signal)
+    const result = await abortable(runSdkAuth(authProvider, { serverUrl, ...discovery, fetchFn: authFetch(signal) }), signal)
     throwIfAborted(signal)
     if (result === "AUTHORIZED") {
       authProvider.deactivate()
       releaseCallbackServer(oauthState)
-      await clearOAuthState(serverName, authStorageOptions)
       return { authorizationUrl: "" }
     }
     if (!capturedUrl) {
       throw new UnauthorizedError("OAuth authorization URL was not provided")
     }
-    await setPendingAuth(runtime, serverName, { serverName, authProvider, serverUrl, authorizationUrl: capturedUrl.toString(), discovery, authStorageOptions }, oauthState, signal, generation)
+    await setPendingAuth(runtime, serverName, { serverName, authProvider, serverUrl, authorizationUrl: capturedUrl.toString(), discovery, authStorageOptions, manualRedirect, completionController: new AbortController() }, oauthState, signal, generation)
     return { authorizationUrl: capturedUrl.toString() }
   } catch (error) {
     authProvider.deactivate()
@@ -450,16 +444,15 @@ async function clearPendingAuth(runtime: McpOAuthRuntime, serverName: string, oa
     state.pendingAuthCleanupTimers.delete(key)
   }
 
+  pendingAuth?.completionController.abort(new Error("OAuth flow completed or cancelled"))
   pendingAuth?.authProvider.deactivate()
   state.pendingAuths.delete(key)
   state.pendingAuthStates.delete(key)
   const stateToRelease = pendingState ?? oauthState
   if (stateToRelease) {
     cancelPendingCallback(stateToRelease)
-    const storedState = await getOAuthState(serverName, authStorageOptions)
-    if (storedState === stateToRelease) {
-      await clearOAuthState(serverName, authStorageOptions)
-    }
+    // New flows keep state in this runtime only. Cleanup must not read or
+    // rewrite shared credentials (which may be malformed or replaced).
   }
 }
 
@@ -554,6 +547,11 @@ export async function completeAuthFromInput(
   const authStorageOptions = runtimeState.pendingAuths.get(key)?.authStorageOptions ?? fallbackAuthStorageOptions
   const oauthState = runtimeState.pendingAuthStates.get(key)
   throwIfAborted(signal)
+  const pending = runtimeState.pendingAuths.get(key)
+  if (pending?.manualRedirect) {
+    let url: URL; try { url = new URL(input.trim()) } catch { throw new Error("Paste the full HTTPS callback URL, including state") }
+    if (url.protocol !== "https:") throw new Error("Paste the full HTTPS callback URL")
+  }
   const parsed = parseAuthorizationRedirectInput(input, oauthState)
   return completeAuth(serverName, parsed, options)
 }
@@ -608,6 +606,7 @@ export async function completeAuth(
       authorizationCode: code,
       ...(iss !== undefined ? { iss } : {}),
       ...pendingAuth.discovery,
+      fetchFn: authFetch(signal),
     }), signal)
     throwIfAborted(signal)
     if (result !== "AUTHORIZED") {
@@ -682,8 +681,10 @@ export async function authenticate(
       }
 
       // Register the callback BEFORE opening the browser.
-      const callbackPromise = waitForCallback(oauthState)
-      void callbackPromise.catch(() => {})
+      const pending = runtimeState.pendingAuths.get(getPendingAuthKey(serverName, authStorageOptions))!
+      if (pending.manualRedirect && !options.onAuthorizationInput) throw new Error("HTTPS callback requires manual input; use mcp auth-start and auth-complete.")
+      const callbackPromise = pending.manualRedirect ? undefined : waitForCallback(oauthState)
+      void callbackPromise?.catch(() => {})
 
       // Open browser. Always surface the URL first so remote/headless users can copy it
       // even when the OS browser handoff is unavailable or invisible.
@@ -700,7 +701,18 @@ export async function authenticate(
       }
 
       // Wait for callback
-      const callbackResult = await abortable(callbackPromise, signal)
+      const inputController = new AbortController()
+      const inputSignal = combineAbortSignals(signal, pending.completionController.signal, inputController.signal)!
+      let callbackResult: AuthorizationCodeInput
+      try {
+        const manual = options.onAuthorizationInput?.(authorizationUrl, inputSignal).then(input => {
+          if (!input) throw new Error("OAuth manual input cancelled")
+          if (pending.manualRedirect && !/^https:\/\//.test(input.trim())) throw new Error("Paste the full HTTPS callback URL, including state")
+          return parseAuthorizationRedirectInput(input, oauthState)
+        })
+        const candidates = [callbackPromise, manual].filter((value): value is Promise<AuthorizationCodeInput> => value !== undefined)
+        callbackResult = await abortable(Promise.race(candidates), inputSignal)
+      } finally { inputController.abort(new Error("OAuth callback received or cancelled")) }
 
       // The callback server accepted only the flow-local reserved state.
       throwIfAborted(signal)
@@ -782,7 +794,7 @@ export async function getValidToken(
 
         const discovery = await probeAuthDiscovery(serverUrl, undefined, signal)
         throwIfAborted(signal)
-        const result = await abortable(runSdkAuth(authProvider, { serverUrl, ...discovery }), signal)
+        const result = await abortable(runSdkAuth(authProvider, { serverUrl, ...discovery, fetchFn: authFetch(signal) }), signal)
         throwIfAborted(signal)
         if (result !== "AUTHORIZED") {
           return null

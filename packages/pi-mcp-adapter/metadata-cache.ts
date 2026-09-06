@@ -115,6 +115,7 @@ export function isServerCacheValid(
   }
   if (!entry || entry.configHash !== configHash) return false;
   if (!entry.cachedAt || typeof entry.cachedAt !== "number") return false;
+  if (typeof entry.ttlMs === "number" && Number.isSafeInteger(entry.ttlMs) && entry.ttlMs >= 0 && (entry.ttlMs === 0 || Date.now() - entry.cachedAt >= entry.ttlMs)) return false;
   if (maxAgeMs > 0 && Date.now() - entry.cachedAt > maxAgeMs) return false;
   return true;
 }
@@ -203,6 +204,7 @@ export function reconstructToolMetadata(
       originalName: tool.name,
       description: tool.description ?? "",
       ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}),
+      ...(tool.outputSchema !== undefined ? { outputSchema: tool.outputSchema } : {}),
       ...(tool.uiResourceUri !== undefined ? { uiResourceUri: tool.uiResourceUri } : {}),
       ...(tool.uiVisibility !== undefined ? { uiVisibility: tool.uiVisibility } : {}),
       ...(tool.uiStreamMode !== undefined ? { uiStreamMode: tool.uiStreamMode } : {}),
@@ -246,6 +248,7 @@ export function serializeTools(tools: McpTool[]): CachedTool[] {
         name: t.name,
         ...(t.description !== undefined ? { description: t.description } : {}),
         ...(t.inputSchema !== undefined ? { inputSchema: t.inputSchema } : {}),
+        ...(t.outputSchema !== undefined ? { outputSchema: t.outputSchema } : {}),
         ...(uiResourceUri !== undefined ? { uiResourceUri } : {}),
         ...(uiVisibility !== undefined ? { uiVisibility } : {}),
         ...(uiStreamMode !== undefined ? { uiStreamMode } : {}),

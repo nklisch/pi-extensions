@@ -238,6 +238,7 @@ export async function ensureCallbackServer(options: EnsureCallbackServerOptions 
     throw new Error("OAuth callback server stopped")
   }
   const generation = callbackGeneration
+  if (idleClosing) await idleClosing
   while (bindingPromise) {
     await bindingPromise
     if (generation !== callbackGeneration) {
@@ -363,6 +364,7 @@ export function reserveCallbackServer(oauthState: string): void {
 
 export function releaseCallbackServer(oauthState: string): void {
   reservedAuthStates.delete(oauthState)
+  closeCallbackServerWhenIdle()
 }
 
 /**
@@ -395,6 +397,17 @@ export function cancelPendingCallback(oauthState: string): void {
     pendingAuths.delete(oauthState)
     pending.reject(new Error("Authorization cancelled"))
   }
+  closeCallbackServerWhenIdle()
+}
+
+let idleClosing: Promise<void> | undefined
+function closeCallbackServerWhenIdle(): void {
+  if (bindingPromise || pendingAuths.size || reservedAuthStates.size || !server || stoppingPromise) return
+  const closing = server
+  server = undefined
+  const operation = new Promise<void>(resolve => { closing.close(() => resolve()); closing.closeIdleConnections() })
+    .finally(() => { if (idleClosing === operation) idleClosing = undefined })
+  idleClosing = operation
 }
 
 /**
@@ -408,6 +421,7 @@ export function stopCallbackServer(): Promise<void> {
     while (bindingPromise) {
       await bindingPromise.catch(() => {})
     }
+    if (idleClosing) await idleClosing
 
     if (server) {
       await new Promise<void>((resolve) => {

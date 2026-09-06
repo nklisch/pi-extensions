@@ -142,6 +142,7 @@ describe("lazy-keep-alive lifecycle", () => {
     expect(consoleError.mock.calls[0][0]).not.toContain("clipboard-secret");
 
     fake.connectError = undefined;
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 60_001);
     await (lifecycle as never as { checkConnections: () => Promise<void> }).checkConnections();
 
     expect(onSuccess).toHaveBeenCalledWith("srv");

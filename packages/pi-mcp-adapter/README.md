@@ -79,7 +79,7 @@ Precedence is:
 
 `/mcp disable <server>` and `/mcp enable <server>` persist only the `disabled` field in the project-local `.pi/mcp.json`, which is the highest-precedence Pi layer. Enabling removes the project flag when lower layers are enabled, or writes `false` when needed to override a disabled lower source. This applies even when the effective server came from a shared global/project file, an imported host config, or `configPath`; the source file is never rewritten and credentials are never copied. Run `/reload` after changing the flag so registered tool surfaces are refreshed. The manual equivalent is to add `{ "disabled": true }` to a server in any normal MCP config. Supplied in-memory `createMcpAdapter({ config })` configurations are isolated and do not read or write this project override; the commands are unavailable in that mode.
 
-Servers are **lazy by default** — they won't connect until you actually call one of their tools. The adapter caches tool metadata so search and describe work without live connections.
+Servers are **lazy by default** — they won't connect until you actually call one of their tools. The adapter caches tool metadata so search and describe work without live connections. A newly configured lazy server may have no discovered catalog yet. Search never connects servers: it reports omitted catalogs and their explicit `mcp({ connect: "name" })` actions instead of treating incomplete results as proof that a capability is missing. Known cached tools connect automatically when called.
 
 ```
 mcp({ search: "screenshot" })
@@ -269,7 +269,7 @@ In the configuration examples below, `30000` is illustrative only. If `requestTi
 | `oauth.clientId` | Pre-registered OAuth client ID; dynamic registration is used when omitted |
 | `oauth.clientSecret` | OAuth client secret for confidential clients; a value beginning with `!` runs a command when OAuth authenticates, while `!!` escapes a literal leading `!` |
 | `oauth.scope` | Requested OAuth scopes |
-| `oauth.redirectUri` | Exact localhost redirect URI for browser OAuth, including port and path, for providers that pre-register callbacks |
+| `oauth.redirectUri` | Fixed loopback HTTP callback, opt-in loopback `{port}` callback, or pre-registered HTTPS callback completed by pasting its full URL |
 | `oauth.clientName` | Client display name advertised during dynamic registration |
 | `oauth.clientUri` | Client homepage URI advertised during dynamic registration |
 | `bearerToken` / `bearerTokenEnv` | Token or env var name; `bearerToken` supports `${VAR}` and `$env:VAR` interpolation. A leading `!` in `bearerToken` runs a command when the HTTP server connects; use `!!` for a literal leading `!`. |
@@ -296,7 +296,9 @@ Use `"2026-07-28"` to pin that revision. Pinning has no legacy or SSE fallback a
 
 The stable SDK handles era-specific request envelopes, result decoding, list-changed subscriptions, cancellation, and multi-round-trip sampling/elicitation. The adapter keeps strict OAuth issuer validation in every mode. Adapter-level roots support, standard MCP logging presentation, and configuration/UI for protocol cache hints are not yet implemented.
 
-For pre-registered browser OAuth clients, set `oauth.redirectUri` to the exact callback registered with the provider, for example `"http://localhost:3118/callback"`. Dynamic clients normally omit it and use a lazy OS-assigned localhost callback port.
+For pre-registered browser OAuth clients, set `oauth.redirectUri` to the exact callback registered with the provider, for example `"http://localhost:3118/callback"`. Dynamic clients normally omit it and use a lazy OS-assigned localhost callback port. Providers that permit variable ports can use `"http://localhost:{port}/callback"`; the assigned port is captured for that flow. A pre-registered HTTPS callback uses manual completion without starting a local listener. Paste its full callback URL, including `state`, into the prompt or `mcp` auth-complete action. Fixed registered ports are never changed silently.
+
+Adapter-owned OAuth discovery, registration, refresh, and exchange requests have a 30-second per-request deadline, including response bodies. Set `PI_MCP_OAUTH_REQUEST_TIMEOUT_MS` to a positive integer to accommodate slower providers. This does not impose a 30-second limit on MCP tools, event streams, or SDK-internal transport authentication. Failed SDK authentication suppresses the rejected credential in that provider; it does not delete credentials another process may have replaced. Explicit logout remains the persistent removal action.
 
 Secret values in `headers`, `bearerToken`, `oauth.clientSecret`, and stdio `env` may use a leading `!command` to obtain their value at connection or authentication time. The command runs with stdin and stderr suppressed, stdout is limited to 1 MiB and trimmed, and it must finish within 10 seconds with non-empty output; failures stop the connection or authentication flow. Commands are not run during OAuth discovery or while reading, merging, previewing, hashing, or rendering configuration. Use `!!` to escape a literal leading `!`; ordinary and escaped values retain environment interpolation.
 
@@ -326,7 +328,7 @@ On Linux, if credential access fails because Pi inherited a revoked session keyr
 mcp({ action: "auth-start", server: "linear-server" })
 ```
 
-Open the returned authorization URL in your local browser. After approval, your browser redirects to a localhost URL. On a remote server that local page may fail to load; copy the full URL from the browser address bar anyway and complete the flow in the same Pi session:
+Open the returned authorization URL in your local browser. After approval, your browser redirects to the configured callback URL (loopback HTTP by default, or a pre-registered HTTPS callback). On a remote server that local page may fail to load; copy the full URL from the browser address bar anyway and complete the flow in the same Pi session:
 
 ```js
 mcp({
@@ -339,6 +341,8 @@ mcp({
 You can also pass only the `code` query parameter with `args: { code: "..." }`. Treat authorization URLs and codes as sensitive; they can grant access to the MCP server until the flow expires or completes.
 
 ### Lifecycle Modes
+
+Already-active remote keep-alive servers reconcile catalogs at health and input boundaries. Slow or temporarily unavailable catalog reads retain the last usable catalog and retry with backoff; they do not declare the server dead. The background deadline defaults to five seconds and honors a configured `requestTimeoutMs`. Foreground input waiting has one five-second budget across all servers. A dropped modern catalog subscription is repaired separately from the transport. Arbitrary tool calls are never replayed after timeouts or ambiguous network errors; the existing narrow expired-session recovery retries once and checks that the tool still exists.
 
 - **`lazy`** (default) — Don't connect at startup. Connect on first tool call. Disconnect after idle timeout. Cached metadata keeps search/list working without connections.
 - **`eager`** — Connect at startup but don't auto-reconnect if the connection drops. No idle timeout by default (set `idleTimeout` explicitly to enable).
@@ -707,11 +711,11 @@ Search includes both MCP tools and Pi tools (from extensions). Pi tools appear f
 
 Tool names are fuzzy-matched on hyphens and underscores — `context7_resolve_library_id` finds `context7_resolve-library-id`. When `describe` or `tool` cannot resolve a name, the result includes top suggestions so the agent can correct a typo or missing prefix in the same turn.
 
-When `includeSchemas` is enabled, search and describe render common JSON Schema parameters as compact TypeScript shapes like `{ query: string; limit?: number; }`, with the older schema formatter retained as a fallback for unsupported schemas.
+When `includeSchemas` is enabled, search renders compact TypeScript previews such as `{ query: string; limit?: number; }`. Describe also returns exact `inputSchema` and advertised `outputSchema`, preserving references, annotations, closed objects, and unknown keywords. Output schemas describe `data.structuredContent`, not the gateway envelope. Large descriptions use the ordinary output spill files; the notice explains how to recover the complete schema.
 
-For HTTP servers, failed connects run a one-request shape probe that can turn opaque transport errors into setup hints such as `endpoint returned HTML (200) — this URL does not appear to speak MCP`. Healthy connections are not probed.
+For HTTP servers, failed connects may run a bounded, unauthenticated shape probe (modern discovery, legacy initialization, then SSE where needed) that can turn opaque transport errors into setup hints such as `endpoint returned HTML (200) — this URL does not appear to speak MCP`. Healthy connections are not probed.
 
-Servers that provide usage guidance via the MCP `instructions` field surface it at three levels: a truncated head in the `mcp` proxy tool description itself (so the model sees it without any call), a longer preview at the end of `mcp({ server: "name" })` listings, and the full text via `mcp({ instructions: "name" })`. Instructions are captured at connect time and cached alongside tool metadata, so they stay available without a live connection.
+Servers that provide usage guidance via the MCP `instructions` field surface a preview at the end of `mcp({ server: "name" })` listings and the full text via `mcp({ instructions: "name" })`. The gateway description lists configured server names but does not change with live counts or instructions. Instructions are captured at connect time and cached alongside tool metadata, so they stay available without a live connection.
 
 ## Commands
 

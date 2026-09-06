@@ -70,7 +70,12 @@ export class SessionRecoveryAuthRequiredError extends Error {
   }
 }
 
+export class ToolRemovedAfterReconnectError extends Error {
+  constructor(readonly tool: string) { super(`Tool ${tool} is no longer advertised after reconnect; describe or search the new catalog before retrying.`); this.name = "ToolRemovedAfterReconnectError"; }
+}
+
 export interface SessionRecoveryDeps {
+  nativeToolName?: string;
   manager: McpServerManager;
   config: McpConfig;
   signal?: AbortSignal;
@@ -101,6 +106,10 @@ export async function withSessionRecovery<T>(
     throw new Error(`Server "${serverName}" is not connected`);
   }
 
+  if (deps.manager.ensureListen) {
+    await deps.manager.ensureListen(serverName, connection, deps.signal);
+    throwIfAborted(deps.signal);
+  }
   const hadSessionId = hasSessionId(connection);
 
   try {
@@ -140,6 +149,9 @@ export async function withSessionRecovery<T>(
       throw err;
     }
 
+    if (deps.nativeToolName && !freshConnection.tools.some(tool => tool.name === deps.nativeToolName)) {
+      throw new ToolRemovedAfterReconnectError(deps.nativeToolName);
+    }
     return fn(freshConnection);
   }
 }

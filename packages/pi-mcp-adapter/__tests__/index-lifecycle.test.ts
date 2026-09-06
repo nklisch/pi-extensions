@@ -121,7 +121,7 @@ function createDeferred<T>() {
 
 function createState() {
   return {
-    manager: { getAllConnections: () => new Map() },
+    manager: { getAllConnections: () => new Map(), getConnection: () => ({ status: "connected" }) },
     lifecycle: { gracefulShutdown: vi.fn().mockResolvedValue(undefined) },
     toolMetadata: new Map(),
     config: { mcpServers: {} },
@@ -681,6 +681,7 @@ describe("mcpAdapter session lifecycle", () => {
       expect.objectContaining({ mcpServers: { memory: config.mcpServers.memory } }),
       null,
       "server",
+      undefined,
       undefined,
     );
     expect(api.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: "memory_search" }));
@@ -1342,7 +1343,7 @@ describe("mcpAdapter session lifecycle", () => {
       await Promise.resolve();
       await new Promise((resolve) => setImmediate(resolve));
 
-      expect(consoleError).toHaveBeenCalledWith("MCP initialization failed: status boom");
+      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("MCP initialization failed: status boom"), "");
     } finally {
       consoleError.mockRestore();
     }

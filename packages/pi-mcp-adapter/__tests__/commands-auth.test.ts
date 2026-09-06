@@ -51,7 +51,7 @@ describe("authenticateServer", () => {
         "sentry",
         "https://mcp.sentry.dev/mcp",
         definition,
-        { onAuthorizationUrl: expect.any(Function) },
+        { onAuthorizationUrl: expect.any(Function), onAuthorizationInput: expect.any(Function) },
       );
     } finally {
       if (originalUrl === undefined) delete process.env.MCP_AUTH_URL;
@@ -142,7 +142,7 @@ describe("authenticateServer", () => {
       "sentry",
       "https://mcp.sentry.dev/mcp",
       { url: "https://mcp.sentry.dev/mcp", auth: "oauth" },
-      { onAuthorizationUrl: expect.any(Function) },
+      { onAuthorizationUrl: expect.any(Function), onAuthorizationInput: expect.any(Function) },
     );
     expect(ui.notify).toHaveBeenCalledWith(
       expect.stringContaining(authorizationUrl),

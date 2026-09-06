@@ -37,3 +37,7 @@ The adapter owns generic MCP behavior. It does not own Plugin Host installation 
 The programmatic boundary does not accept process-global secret injection or durable expanded launch values. Launch values are resolved immediately before a connection and disposed immediately afterward. Capability reporting must match behavior; standalone features remain unavailable programmatically until source identity, cancellation, cleanup, and lease semantics are preserved.
 
 Published configuration paths, extension tools, commands, package exports, and programmatic contracts change deliberately and are communicated through versioned releases. Internal project-owned shapes change in place when no external consumer or durable user data requires compatibility.
+
+Discovery separates configured-but-undiscovered servers, cached catalogs, and verified failures. Search stays connection-free and discloses incomplete coverage with explicit recovery actions. Exact schema descriptions preserve server-authored JSON Schema rather than treating a compact preview as the contract.
+
+Recovery remains owned by the existing runtime and server manager. Slow catalog reads and dropped catalog subscriptions do not imply a dead transport. Shared credential replacement survives stale authentication invalidation; explicit logout remains the authority for persistent removal. These guarantees do not add namespace tools, another configuration loader, or automatic replay of ambiguous tool calls.

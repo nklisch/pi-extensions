@@ -262,8 +262,8 @@ describe("mcp-auth-flow explicit auth", () => {
     const stored = getAuthForUrl("stale-client-credentials", "https://api.example.com/mcp");
     expect(stored?.clientInfo?.clientId).toBe("fresh-service-client");
     expect(stored?.tokens?.accessToken).toBe("service-access");
-    expect(stored?.codeVerifier).toBeUndefined();
-    expect(stored?.oauthState).toBeUndefined();
+    expect(stored?.codeVerifier).toBe("stale-verifier");
+    expect(stored?.oauthState).toBe("stale-state");
     expect(mocks.ensureCallbackServer).not.toHaveBeenCalled();
     expect(mocks.open).not.toHaveBeenCalled();
   });
@@ -374,8 +374,8 @@ describe("mcp-auth-flow explicit auth", () => {
     expect(result.authorizationUrl).toBe("https://auth.example.com/authorize");
     const stored = getAuthForUrl("stale", "https://api.example.com/mcp");
     expect(stored?.clientInfo?.clientId).toBe("fresh-client");
-    expect(stored?.codeVerifier).toBeUndefined();
-    expect(getOAuthState("stale")).not.toBe("old-state");
+    expect(stored?.codeVerifier).toBe("old-verifier");
+    expect(getOAuthState("stale")).toBe("old-state");
   });
 
   it("keeps same-name pending OAuth flows isolated while sharing secure-store credentials by server name", async () => {
@@ -461,6 +461,9 @@ describe("mcp-auth-flow explicit auth", () => {
 
   it("re-registers dynamic OAuth clients when cached redirect URIs are stale", async () => {
     mocks.sdkAuth.mockImplementationOnce(async (provider) => {
+      await provider.clientInformation();
+      await provider.tokens();
+      await provider.invalidateCredentials("tokens");
       expect(await provider.clientInformation()).toBeUndefined();
       await provider.saveClientInformation({
         client_id: "fresh-client",
@@ -491,9 +494,9 @@ describe("mcp-auth-flow explicit auth", () => {
     const stored = getAuthForUrl("stale-redirect", "https://api.example.com/mcp");
     expect(stored?.clientInfo?.clientId).toBe("fresh-client");
     expect(stored?.clientInfo?.redirectUris).toEqual(["http://localhost:3118/callback"]);
-    expect(stored?.tokens).toBeUndefined();
-    expect(stored?.codeVerifier).toBeUndefined();
-    expect(stored?.oauthState).not.toBe("old-state");
+    expect(stored?.tokens?.accessToken).toBe("old-access");
+    expect(stored?.codeVerifier).toBe("old-verifier");
+    expect(stored?.oauthState).toBe("old-state");
     expect(mocks.ensureCallbackServer).toHaveBeenCalledWith(expect.objectContaining({
       strictPort: true,
       port: 3118,
@@ -506,6 +509,9 @@ describe("mcp-auth-flow explicit auth", () => {
 
   it("re-registers dynamic OAuth clients when cached redirect URI metadata is missing", async () => {
     mocks.sdkAuth.mockImplementationOnce(async (provider) => {
+      await provider.clientInformation();
+      await provider.tokens();
+      await provider.invalidateCredentials("tokens");
       expect(await provider.clientInformation()).toBeUndefined();
       await provider.saveClientInformation({
         client_id: "fresh-client",
@@ -532,10 +538,10 @@ describe("mcp-auth-flow explicit auth", () => {
     const stored = getAuthForUrl("missing-redirect-metadata", "https://api.example.com/mcp");
     expect(stored?.clientInfo?.clientId).toBe("fresh-client");
     expect(stored?.clientInfo?.redirectUris).toEqual(["http://localhost:19876/callback"]);
-    expect(stored?.tokens).toBeUndefined();
+    expect(stored?.tokens?.accessToken).toBe("old-access");
   });
 
-  it("re-registers dynamic OAuth clients when cached redirect URI metadata is malformed", async () => {
+  it("rejects malformed stored OAuth metadata with a recovery message", async () => {
     mocks.sdkAuth.mockImplementationOnce(async (provider) => {
       expect(await provider.clientInformation()).toBeUndefined();
       await provider.saveClientInformation({
@@ -557,16 +563,10 @@ describe("mcp-auth-flow explicit auth", () => {
       tokens: { accessToken: "old-access", refreshToken: "old-refresh" },
     }, "https://api.example.com/mcp");
 
-    const result = await startAuth("malformed-redirect-metadata", "https://api.example.com/mcp", {
-      url: "https://api.example.com/mcp",
-      auth: "oauth",
-    });
-
-    expect(result.authorizationUrl).toBe("https://auth.example.com/authorize");
-    const stored = getAuthForUrl("malformed-redirect-metadata", "https://api.example.com/mcp");
-    expect(stored?.clientInfo?.clientId).toBe("fresh-client");
-    expect(stored?.clientInfo?.redirectUris).toEqual(["http://localhost:19876/callback"]);
-    expect(stored?.tokens).toBeUndefined();
+    await expect(startAuth("malformed-redirect-metadata", "https://api.example.com/mcp", {
+      url: "https://api.example.com/mcp", auth: "oauth",
+    })).rejects.toThrow("Malformed OAuth credentials");
+    expect(mocks.sdkAuth).not.toHaveBeenCalled();
   });
 
   it("refreshes expired tokens even when cached dynamic redirect URIs are stale", async () => {
@@ -643,6 +643,7 @@ describe("mcp-auth-flow explicit auth", () => {
 
     expect(mocks.sdkAuth).toHaveBeenNthCalledWith(2, expect.anything(), {
       serverUrl: "https://api.example.com/mcp",
+      fetchFn: expect.any(Function),
       authorizationCode: "manual-code",
     });
     expect(mocks.cancelPendingCallback).toHaveBeenCalledWith(mocks.waitForCallback.mock.calls[0][0]);
@@ -903,11 +904,13 @@ describe("mcp-auth-flow explicit auth", () => {
     expect(JSON.parse(String(probeInit.body)).params.clientInfo.name).toBe("pi-mcp-adapter");
     expect(mocks.sdkAuth).toHaveBeenNthCalledWith(1, expect.anything(), {
       serverUrl: "https://api.example.com/mcp",
+      fetchFn: expect.any(Function),
       resourceMetadataUrl: new URL(resourceMetadataUrl),
       scope: "mcp:read",
     });
     expect(mocks.sdkAuth).toHaveBeenNthCalledWith(2, expect.anything(), {
       serverUrl: "https://api.example.com/mcp",
+      fetchFn: expect.any(Function),
       authorizationCode: "auth-code",
       resourceMetadataUrl: new URL(resourceMetadataUrl),
       scope: "mcp:read",
@@ -935,10 +938,12 @@ describe("mcp-auth-flow explicit auth", () => {
 
     expect(mocks.sdkAuth).toHaveBeenNthCalledWith(1, expect.anything(), {
       serverUrl: "https://api.example.com/mcp",
+      fetchFn: expect.any(Function),
       scope: "session:role:MCP_ROLE",
     });
     expect(mocks.sdkAuth).toHaveBeenNthCalledWith(2, expect.anything(), {
       serverUrl: "https://api.example.com/mcp",
+      fetchFn: expect.any(Function),
       authorizationCode: "auth-code",
       scope: "session:role:MCP_ROLE",
     });
@@ -1022,4 +1027,41 @@ describe("mcp-auth-flow explicit auth", () => {
     expect(mocks.reserveCallbackServer).not.toHaveBeenCalled();
     expect(mocks.open).not.toHaveBeenCalled();
   });
+  it("supports pre-registered HTTPS callbacks without a local listener", async () => {
+    mocks.sdkAuth.mockImplementationOnce(async provider => {
+      expect(provider.redirectUrl).toBe("https://example.test/oauth/callback");
+      await provider.redirectToAuthorization(new URL("https://auth.example.com/authorize"));
+      return "REDIRECT";
+    });
+    const { startAuth, completeAuthFromInput } = await import("../mcp-auth-flow.ts");
+    await startAuth("manual-https", "https://api.example.com/mcp", {
+      url: "https://api.example.com/mcp", auth: "oauth",
+      oauth: { clientId: "registered", redirectUri: "https://example.test/oauth/callback" },
+    });
+    expect(mocks.ensureCallbackServer).not.toHaveBeenCalled();
+    await expect(completeAuthFromInput("manual-https", "raw-code")).rejects.toThrow("full HTTPS callback URL");
+    const provider = mocks.sdkAuth.mock.calls[0][0];
+    const state = await provider.state();
+    mocks.sdkAuth.mockResolvedValueOnce("AUTHORIZED");
+    await completeAuthFromInput("manual-https", `https://example.test/oauth/callback?code=done&state=${state}`);
+    expect(mocks.sdkAuth).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets manual input win and revokes its prompt signal", async () => {
+    mocks.sdkAuth.mockImplementationOnce(async provider => {
+      await provider.redirectToAuthorization(new URL("https://auth.example.com/authorize"));
+      return "REDIRECT";
+    }).mockResolvedValueOnce("AUTHORIZED");
+    const { authenticate } = await import("../mcp-auth-flow.ts");
+    let promptSignal: AbortSignal | undefined;
+    const status = await authenticate("manual-prompt", "https://api.example.com/mcp", {
+      url: "https://api.example.com/mcp", auth: "oauth",
+    }, { onAuthorizationInput: async (_url, signal) => {
+      promptSignal = signal;
+      return `http://localhost:19876/callback?code=pasted&state=${await mocks.sdkAuth.mock.calls[0][0].state()}`;
+    } });
+    expect(status).toBe("authenticated");
+    expect(promptSignal?.aborted).toBe(true);
+  });
+
 });

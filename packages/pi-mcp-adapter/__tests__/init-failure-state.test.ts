@@ -9,7 +9,7 @@ describe("MCP failure state", () => {
     vi.restoreAllMocks();
   });
 
-  it("bounds messages and removes diagnostics after the backoff TTL", () => {
+  it("bounds messages and retains diagnostics after the retry cooldown", () => {
     vi.useFakeTimers();
     const state = {
       owner: { isActive: () => true },
@@ -25,8 +25,8 @@ describe("MCP failure state", () => {
 
     vi.advanceTimersByTime(60_000);
 
-    expect(state.failureTracker.has("demo")).toBe(false);
-    expect(state.failureMessages.has("demo")).toBe(false);
+    expect(state.failureTracker.has("demo")).toBe(true);
+    expect(state.failureMessages.has("demo")).toBe(true);
     expect(getFailureAgeSeconds(state, "demo")).toBeNull();
   });
 

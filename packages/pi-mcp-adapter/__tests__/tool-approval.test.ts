@@ -361,10 +361,10 @@ describe("tool approval", () => {
     await expect(pending).rejects.toBe(reason);
   });
 
-  it("marks gated tools in describe and search output without hiding them", () => {
+  it("marks gated tools in describe and search output without hiding them", async () => {
     const { state } = createState({ approveTools: true });
 
-    expect(executeDescribe(state, tool.name).content[0].text).toContain("search-records (requires approval)");
+    expect((await executeDescribe(state, tool.name)).content[0].text).toContain("search-records (requires approval)");
     expect(executeSearch(state, "search", false, undefined, false).content[0].text).toContain("(requires approval)");
   });
 });

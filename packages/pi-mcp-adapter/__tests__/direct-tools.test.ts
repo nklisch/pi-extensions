@@ -112,11 +112,11 @@ describe("buildProxyDescription", () => {
 
     const description = buildProxyDescription(config, cache, []);
 
-    expect(description).toContain("Servers: figma (1 tools)");
+    expect(description).toContain("Servers: figma");
     expect(description).not.toContain("figma (3 tools)");
   });
 
-  it("includes a truncated instructions snippet for servers that provide one", () => {
+  it("keeps the gateway description independent of cached server instructions", () => {
     const config: McpConfig = {
       mcpServers: {
         demo: { command: "npx", args: ["-y", "demo-server"] },
@@ -138,10 +138,9 @@ describe("buildProxyDescription", () => {
 
     const description = buildProxyDescription(config, cache, []);
 
-    expect(description).toContain('Server instructions (truncated - full text via mcp({ instructions: "name" })):');
-    expect(description).toContain("demo: Skills catalog. Available skills: - skill-0:");
-    expect(description).toContain("...");
-    expect(description).not.toContain("skill-29");
+    expect(description).not.toContain("Skills catalog");
+    expect(description).toBe(buildProxyDescription(config, null, []));
+    expect(description).toContain('instructions:');
   });
 
   it("omits the instructions section when no server provides instructions", () => {
