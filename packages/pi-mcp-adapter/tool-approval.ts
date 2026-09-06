@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { abortable } from "./abort.ts";
 import { combineAbortSignals } from "./runtime-owner.ts";
 import type { McpExtensionState } from "./state.ts";
@@ -87,6 +87,34 @@ async function requestBrokerApproval(
   }
 }
 
+// Canonicalize parsed JSON, not arbitrary objects: honor toJSON/omission/null
+// wire semantics first, and never assign special keys such as __proto__.
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value)!;
+}
+
+function approvalArguments(args: Record<string, unknown> | undefined): { digest?: string; preview: string } {
+  try {
+    const json = JSON.stringify(args ?? {});
+    if (json !== undefined) {
+      const wireArgs: unknown = JSON.parse(json);
+      return {
+        digest: createHash("sha256").update(canonicalJson(wireArgs)).digest("hex"),
+        preview: JSON.stringify(wireArgs, null, 2),
+      };
+    }
+  } catch {
+    // No reusable consent when arguments cannot be serialized. Leave the normal
+    // broker/dialog decision available rather than refusing the operation here.
+  }
+  return { preview: "Arguments could not be serialized; this approval will not be cached." };
+}
+
 export async function ensureToolCallApproved(
   state: McpExtensionState,
   serverName: string,
@@ -95,16 +123,20 @@ export async function ensureToolCallApproved(
   signal?: AbortSignal,
   origin: McpToolApprovalOrigin = toolMeta.resourceUri ? "resource" : "proxy",
 ): Promise<ToolCallApprovalResult> {
-  const cacheKey = `${serverName}\u0000${toolMeta.originalName}`;
+  const serialized = approvalArguments(args);
+  // Name-only consent lets a later destructive call reuse approval of benign
+  // arguments. Bind consent to the exact wire value without retaining its text.
+  const cacheKey = serialized.digest === undefined ? undefined
+    : JSON.stringify([serverName, toolMeta.originalName, serialized.digest]);
   const approvedToolCalls = state.approvedToolCalls ??= new Map<string, true>();
-  if (approvedToolCalls.has(cacheKey)) {
+  if (cacheKey !== undefined && approvedToolCalls.has(cacheKey)) {
     return { ok: true };
   }
 
   const brokerDecision = await requestBrokerApproval(state, serverName, toolMeta, args, origin, signal);
   if (brokerDecision === "allow_once") return { ok: true };
   if (brokerDecision === "allow_for_session") {
-    approvedToolCalls.set(cacheKey, true);
+    if (cacheKey !== undefined) approvedToolCalls.set(cacheKey, true);
     return { ok: true };
   }
   if (brokerDecision === "deny") return { ok: false, reason: "denied" };
@@ -117,15 +149,14 @@ export async function ensureToolCallApproved(
     return { ok: false, reason: "approval_required_headless" };
   }
 
-  const json = JSON.stringify(args ?? {}, null, 2);
-  const sanitized = sanitizeTerminalText(json);
+  const sanitized = sanitizeTerminalText(serialized.preview);
   const preview = sanitized.length > 500 ? `${sanitized.slice(0, 500)}...` : sanitized;
   const title = `MCP: ${sanitizeTerminalText(serverName)} wants to run ${sanitizeTerminalText(toolMeta.originalName)}`;
   const ownedSignal = combineAbortSignals(state.owner?.signal, signal);
   const decision = await abortable(
     state.ui.select(
       `${title}\n\nArguments:\n${preview}`,
-      ["Allow once", "Allow for session", "Deny"],
+      ["Allow once", "Allow for session (same arguments)", "Deny"],
     ),
     ownedSignal,
   );
@@ -133,8 +164,8 @@ export async function ensureToolCallApproved(
   if (decision === "Allow once") {
     return { ok: true };
   }
-  if (decision === "Allow for session") {
-    approvedToolCalls.set(cacheKey, true);
+  if (decision === "Allow for session (same arguments)") {
+    if (cacheKey !== undefined) approvedToolCalls.set(cacheKey, true);
     return { ok: true };
   }
   return { ok: false, reason: "denied" };

@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Bind session tool approvals to the same server, tool, and canonical JSON arguments, preventing benign-call consent from authorizing different destructive arguments. Serialization failures remain uncached and follow the normal approval decision.
 - Preserve distinct structured MCP facts alongside native content in successful and failed model-visible results.
 - Keep combined output bounded and recoverable, including adapter guidance. Comparison faults and deep JSON no longer silently suppress facts.
 - Keep canonical results local to each script call. Large line counts no longer turn successful dispatch into `call_failed`.

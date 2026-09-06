@@ -18,7 +18,7 @@ The adapter preserves distinct structured facts alongside native content in succ
 
 Preparation starts at `480058b` on `release/structured-result-delivery` in the isolated release worktree. Accepted implementation commits are `e63a5e7`, `89bfa5a`, and `480058b`.
 
-The adapter changes since its published `.2` source, `d9052df46e8aae1c2a0a842e0d61ed5ef3ddbcb3`, are exactly those three commits. Changes under `packages/` since Enhanced 0.4.2's published source, `7f7a0f345039204f5cbd40946c559e7d9541de6f`, are confined to that adapter fix. No additional committed package feature is selected by this release boundary. The original checkout's dirty lockfile and untracked Ollama work are excluded and were not copied.
+The initial structured-result adapter changes since its published `.2` source, `d9052df46e8aae1c2a0a842e0d61ed5ef3ddbcb3`, are exactly those three commits. Changes under `packages/` since Enhanced 0.4.2's published source, `7f7a0f345039204f5cbd40946c559e7d9541de6f`, are confined to that adapter fix. The bounded argument-scoped approval correction below is additionally selected for this release; no unrelated package feature is selected. The original checkout's dirty lockfile and untracked Ollama work are excluded and were not copied.
 
 The adapter advances to `2.21.0-nklisch.3`. Plugin Host advances to `0.8.3` for its changed exact adapter pin. Enhanced advances to `0.4.3` for the matching adapter pin and bundled host. Enhanced retains its `^0` host range. The bundle-aware packer stages the local host workspace, so registry-byte inspection must confirm bundled host `0.8.3`.
 
@@ -34,7 +34,7 @@ The current Plugin Host removed the historical sibling receipt and `test/runtime
 - Inherited implementation evidence at `480058b`: independent review, typecheck, 114 focused tests, root `npm run check` including 1,043 adapter tests, and packed-consumer qualification. This is not qualification of the new release metadata.
 - Installed Workbench guidance is `0.20.0`, while the project stamp is `0.10.1`. Setup is advisory and outside scope. Preserve the known three validator failures and the existing completed stub until the parent reconciles this release. No unrelated outcome cleanup is authorized here.
 
-## External intake: inspected evidence and remaining blocker
+## External intake: inspected evidence and dispositions
 
 Inspected the upstream GitHub release descriptions from `v2.20.1` through `v2.32.1`, current npm metadata, the immutable `v2.32.1` tag reference, and public advisory endpoints for upstream and this monorepo.
 
@@ -43,13 +43,19 @@ Inspected the upstream GitHub release descriptions from `v2.20.1` through `v2.32
 - Both public advisory endpoints returned zero entries. This does not establish the absence of private or unreported vulnerabilities.
 - The inspected release descriptions include security-relevant changes: argument-scoped session approvals in `v2.26.1`/`v2.27.0` (issue #367), stale OAuth invalidation preserving another process's replacement credentials in `v2.28.0` (PR #422), and sandbox-origin changes in `v2.32.0` (issue #480).
 
-**Before publication, the parent must disposition applicability of those security-relevant notices against maintained code.** Release metadata inspection is not source-level security qualification. This preparation does not attest uninspected upstream source, claim those fixes are integrated, or broaden the accepted adapter fix. If a notice requires code changes, return that bounded decision to the owner before publishing this candidate.
+Source-level review dispositions (bounded correction authorized; parent review and candidate gates still required):
+
+- **#367 — confirmed publication blocker, corrected locally.** `tool-approval.ts` previously returned from a server/tool-only cache before consulting the broker. Both broker and dialog session consent now bind server/tool plus a SHA-256 digest of canonical JSON wire arguments. Object key order is immaterial; nested values and array order remain significant. JSON serialization happens before canonicalization, preserving `toJSON`, omission/null semantics, and own `__proto__`/`constructor` properties without prototype assignment. Serialization failure skips cache lookup/write and still follows the normal broker/dialog decision. The dialog and current README explicitly say “same arguments.” This is an independent minimal implementation, not an upstream source import. Prior art: [immutable v2.27 implementation](https://github.com/nicobailon/pi-mcp-adapter/blob/dd380db1585c2de9b5dfc8cb5da9af8e24a464ad/tool-approval.ts#L142-L163), [issue #367](https://github.com/nicobailon/pi-mcp-adapter/issues/367).
+- **#422 — applicable nonblocking credential-loss follow-up, not integrated.** An old refresh invalidation can erase another process's replacement credentials. Maintained [`mcp-oauth-provider.ts`](../../packages/pi-mcp-adapter/mcp-oauth-provider.ts) `invalidateCredentials` calls unconditional clear functions; [`mcp-auth.ts`](../../packages/pi-mcp-adapter/mcp-auth.ts) `clearTokens` already fresh-reads the secure store but does not compare the failed refresh generation before deleting. Fresh reads alone do not protect replacement tokens. Impact is lost login/re-authentication, not credential disclosure or authorization bypass. Follow-up: condition invalidation on the credentials that actually failed, with cross-process replacement tests. No OAuth code changes in this release. [Upstream PR #422](https://github.com/nicobailon/pi-mcp-adapter/pull/422).
+- **#480 — nonblocking sandbox compatibility follow-up, not integrated.** Maintained [`host-html-template.ts`](../../packages/pi-mcp-adapter/host-html-template.ts) `APP_SANDBOX` deliberately omits `allow-same-origin`; iframe and response sandbox policy preserve an opaque origin. This prevents storage-dependent widgets from working. Merely adding `allow-same-origin` to the current host is unsafe; a separate-origin hosting design requires its own security review and is not needed for this result-delivery release. Existing sandbox assertions remain unchanged. [Upstream issue #480](https://github.com/nicobailon/pi-mcp-adapter/issues/480).
+
+Focused approval regression receipt: before the correction, `npx vitest run __tests__/tool-approval.test.ts` produced 15 passes and 5 genuine failures (changed arguments bypassed both decision paths, special-key differences shared consent, and serialization failures reused consent/threw). After the correction and added denial/headless coverage, the same command passes 22 tests. Parent owns full checks, packed qualification, publication, and local installation; no publication is claimed here.
 
 Sources: `https://github.com/nicobailon/pi-mcp-adapter/releases`, `https://api.github.com/repos/nicobailon/pi-mcp-adapter/git/ref/tags/v2.32.1`, `https://registry.npmjs.org/pi-mcp-adapter`, and each repository's `/security-advisories` API endpoint.
 
 ## Parent qualification and publication order
 
-1. Resolve the external-intake blocker. Review this preparation diff and record the exact candidate commit.
+1. Independently review the argument-scoped approval correction and external-intake dispositions above. Record the exact candidate commit and rerun candidate gates; earlier gates at `15e678b` do not qualify this correction.
 2. Run the following gates in the clean release worktree on Node 24. Build and installation commands belong to the parent.
 
    ```sh

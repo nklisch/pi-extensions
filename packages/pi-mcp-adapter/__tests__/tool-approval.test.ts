@@ -18,7 +18,7 @@ const tool: ToolMetadata = {
 
 function createState(options: {
   approveTools?: boolean | string[];
-  decision?: "Allow once" | "Allow for session" | "Deny";
+  decision?: "Allow once" | "Allow for session (same arguments)" | "Deny";
   interactive?: boolean;
   broker?: (request: McpToolApprovalRequest) => void;
 } = {}) {
@@ -124,11 +124,11 @@ describe("tool approval", () => {
   });
 
   it("caches only Allow for session decisions", async () => {
-    const session = createState({ approveTools: true, decision: "Allow for session" });
+    const session = createState({ approveTools: true, decision: "Allow for session (same arguments)" });
     await ensureToolCallApproved(session.state, "demo", tool, {}, undefined);
     await ensureToolCallApproved(session.state, "demo", tool, {}, undefined);
     expect(session.select).toHaveBeenCalledTimes(1);
-    expect(session.state.approvedToolCalls.has("demo\u0000search-records")).toBe(true);
+    expect(session.state.approvedToolCalls.size).toBe(1);
 
     const once = createState({ approveTools: true, decision: "Allow once" });
     await ensureToolCallApproved(once.state, "demo", tool, {}, undefined);
@@ -217,7 +217,86 @@ describe("tool approval", () => {
     await ensureToolCallApproved(state, "demo", tool, {}, undefined);
 
     expect(broker).toHaveBeenCalledOnce();
-    expect(state.approvedToolCalls.has("demo\u0000search-records")).toBe(true);
+    expect(state.approvedToolCalls.size).toBe(1);
+  });
+
+  it.each(["broker", "dialog"])("binds %s session consent to canonical wire arguments and exact tool identity", async (source) => {
+    const broker = vi.fn((request: McpToolApprovalRequest) => {
+      request.claim(() => "allow_for_session");
+    });
+    const { state, select } = createState({
+      approveTools: true, decision: "Allow for session (same arguments)",
+      ...(source === "broker" ? { broker } : {}),
+    });
+    const decisions = source === "broker" ? broker : select;
+    const approve = (args: Record<string, unknown> | undefined, server = "demo", meta = tool) =>
+      ensureToolCallApproved(state, server, meta, args);
+    await approve({ query: "secret-canary", nested: { b: 2, a: 1 }, list: [1, 2] });
+    await approve({ list: [1, 2], nested: { a: 1, b: 2 }, query: "secret-canary" });
+    expect(decisions).toHaveBeenCalledTimes(1);
+    await approve({ query: "delete-all", nested: { a: 1, b: 2 }, list: [1, 2] });
+    await approve({ query: "secret-canary", nested: { a: 9, b: 2 }, list: [1, 2] });
+    await approve({ query: "secret-canary", nested: { a: 1, b: 2 }, list: [2, 1] });
+    expect(decisions).toHaveBeenCalledTimes(4);
+    // Configure both servers so dialog decisions are required on each.
+    state.config.mcpServers.other = { approveTools: true };
+    await approve({}, "other");
+    await approve({}, "demo", { ...tool, originalName: "delete-records" });
+    await approve(undefined);
+    await approve({ omitted: undefined });
+    expect(decisions).toHaveBeenCalledTimes(7);
+    expect([...state.approvedToolCalls.keys()].join()).not.toContain("secret-canary");
+  });
+
+  it("re-enters a denying broker for changed arguments after session consent", async () => {
+    const broker = vi.fn((request: McpToolApprovalRequest) => {
+      request.claim(() => request.args.query === "read" ? "allow_for_session" : "deny");
+    });
+    const { state, callTool } = createState({ broker });
+    await executeCall(state, tool.name, { query: "read" });
+    for (let i = 0; i < 2; i++) {
+      await expect(executeCall(state, tool.name, { query: "delete" })).resolves.toMatchObject({
+        details: { error: "approval_denied" },
+      });
+    }
+    expect(callTool).toHaveBeenCalledOnce();
+    expect(broker).toHaveBeenCalledTimes(3);
+  });
+
+  it("requires headless approval for changed arguments after dialog session consent", async () => {
+    const { state } = createState({ approveTools: true, decision: "Allow for session (same arguments)" });
+    await ensureToolCallApproved(state, "demo", tool, { query: "read" });
+    state.ui = undefined;
+    await expect(ensureToolCallApproved(state, "demo", tool, { query: "read" })).resolves.toEqual({ ok: true });
+    await expect(ensureToolCallApproved(state, "demo", tool, { query: "delete" })).resolves.toEqual({
+      ok: false, reason: "approval_required_headless",
+    });
+  });
+
+  it("uses JSON wire semantics without losing special own property names", async () => {
+    const { state, select } = createState({ approveTools: true, decision: "Allow for session (same arguments)" });
+    const approve = (args: Record<string, unknown>) => ensureToolCallApproved(state, "demo", tool, args);
+    await approve({ value: new Date("2026-01-01T00:00:00Z"), list: [undefined, NaN] });
+    await approve({ list: [null, null], value: "2026-01-01T00:00:00.000Z" });
+    expect(select).toHaveBeenCalledTimes(1);
+    await approve(JSON.parse('{"__proto__":{"delete":false},"constructor":1}'));
+    await approve(JSON.parse('{"constructor":1,"__proto__":{"delete":true}}'));
+    await approve({ constructor: 1 });
+    expect(select).toHaveBeenCalledTimes(4);
+  });
+
+  it.each(["broker", "dialog"])("does not cache serialization failures in the %s path", async (source) => {
+    const broker = vi.fn((request: McpToolApprovalRequest) => { request.claim(() => "allow_for_session"); });
+    const { state, select } = createState({ approveTools: true, decision: "Allow for session (same arguments)",
+      ...(source === "broker" ? { broker } : {}),
+    });
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    for (const args of [cyclic, { value: 1n }, { toJSON() { throw new Error("no JSON"); } }, { toJSON() { return undefined; } }]) {
+      await expect(ensureToolCallApproved(state, "demo", tool, args)).resolves.toEqual({ ok: true });
+    }
+    expect(source === "broker" ? broker : select).toHaveBeenCalledTimes(4);
+    expect(state.approvedToolCalls.size).toBe(0);
   });
 
   it("requires brokers to claim synchronously", async () => {

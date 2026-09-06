@@ -411,7 +411,7 @@ Use `approveTools` when a tool should stay visible but not run without confirmat
 }
 ```
 
-When a matching tool is called from the proxy tool, a direct MCP tool, a resource call, or an MCP UI iframe, Pi asks: **Allow once**, **Allow for session**, or **Deny**. Session approvals are kept in memory only. In headless sessions, matching calls fail closed with an `approval_required` result instead of running. `excludeTools` still removes tools entirely; `approveTools` only gates visible tools at call time.
+When a matching tool is called from the proxy tool, a direct MCP tool, a resource call, or an MCP UI iframe, Pi asks: **Allow once**, **Allow for session (same arguments)**, or **Deny**. Session approvals are kept in memory only and bind the server, tool, and JSON arguments. Reordered object keys reuse consent; changed values or array order require another decision. Cache keys retain an argument digest, not argument text. Arguments that cannot be serialized never receive reusable consent. In headless sessions, matching calls fail closed with an `approval_required` result instead of running. `excludeTools` still removes tools entirely; `approveTools` only gates visible tools at call time.
 
 Permission extensions can broker these decisions by listening on `pi-mcp-adapter:tool-approval-request` and claiming the request synchronously:
 
